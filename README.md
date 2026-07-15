@@ -38,8 +38,8 @@ browser interface automatically when possible and otherwise prints the local
 URL. Release users do not need Python, an IDE, CAD software, or a separate
 dependency installation.
 
-Detailed guides are maintained in the separate
-[Prisma documentation repository](https://github.com/CatfoodKingdom/prisma-docs).
+Detailed guides are available on the
+[Prisma documentation site](https://catfoodkingdom.github.io/prisma-docs/).
 
 ## Data and model libraries
 
