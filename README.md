@@ -62,39 +62,86 @@ database or asset files between installations.
 
 ## Run from source
 
-Source operation requires Python 3.12 and
-[`uv`](https://docs.astral.sh/uv/). Always provide an external `--app-root` so
-runtime data cannot enter the checkout.
+"Running from source" means downloading Prisma's editable project files and
+using Python to start them instead of running a prebuilt `.exe`. It is mainly
+for developers and people helping diagnose a problem. If you simply want to
+use or test Prisma, download a package from
+[Releases](https://github.com/CatfoodKingdom/prisma-lithophane/releases) instead.
 
-Generator on Linux or macOS:
+### Before you begin
 
-```bash
-uv sync --frozen --only-group generator-runtime --no-install-project
-.venv/bin/python -m Prisma.launcher --app-root "$HOME/PrismaRuntime"
-```
+1. Download the source with **Code → Download ZIP** on this repository page,
+   then extract the ZIP. You may use `git clone` instead if you already know
+   Git.
+2. Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/), the
+   tool that obtains the correct Python version and installs Prisma's required
+   Python packages.
+3. Open a terminal in the extracted `prisma-lithophane` folder. On Windows,
+   open the folder in File Explorer, right-click its empty background, and
+   choose **Open in Terminal**.
 
-Generator on Windows PowerShell:
+The first setup can take several minutes. It downloads Python 3.12 when needed
+and creates a private `.venv` folder containing Prisma's dependencies. It does
+not install Prisma as a system-wide application.
+
+### Start Generator on Windows
+
+Paste these commands into PowerShell, one line at a time:
 
 ```powershell
 uv sync --frozen --only-group generator-runtime --no-install-project
-.\.venv\Scripts\python.exe -m Prisma.launcher `
-  --app-root (Join-Path $HOME "PrismaRuntime")
+.\.venv\Scripts\python.exe -m Prisma.launcher --app-root "$HOME\PrismaRuntime"
 ```
 
-For the full source Suite, install both runtime groups and launch both apps
-against the same external root:
+### Start Generator on Linux or macOS
+
+Paste these commands into the terminal, one line at a time:
 
 ```bash
-uv sync --frozen \
-  --only-group generator-runtime \
-  --only-group calibration-runtime \
-  --no-install-project
+uv sync --frozen --only-group generator-runtime --no-install-project
 .venv/bin/python -m Prisma.launcher --app-root "$HOME/PrismaRuntime"
+```
+
+Prisma normally opens its browser interface automatically. If it does not,
+open the local `http://127.0.0.1:...` address printed in the terminal. Keep the
+terminal open while using Prisma. Close it, or press **Ctrl+C**, to stop Prisma.
+
+`PrismaRuntime` is a separate data folder created inside your home folder. It
+holds images, exports, settings, and installed models so that personal data
+does not get mixed into the downloaded source files.
+
+On the first source launch, Generator may show **Library Recovery** because the
+source download deliberately contains no model library. Select **Manage** and
+install the
+[Prisma Standard Model Library](https://github.com/CatfoodKingdom/prisma-lithophane/releases/download/v0.1.0/Prisma-Model-Library-Prisma-Standard-Model-Library-2026.07.12-12d373ee-2837-4822-a04e-abd0913c48cc.zip),
+then follow the restart prompt.
+
+### Start the full Generator + Calibration Suite
+
+Run this setup command once:
+
+```powershell
+uv sync --frozen --only-group generator-runtime --only-group calibration-runtime --no-install-project
+```
+
+Then start Generator with the command shown above. To use Calibration at the
+same time, open a second terminal in the same source folder and run:
+
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m Prisma.calibration_launcher --app-root "$HOME\PrismaRuntime"
+```
+
+On Linux or macOS:
+
+```bash
 .venv/bin/python -m Prisma.calibration_launcher --app-root "$HOME/PrismaRuntime"
 ```
 
-Without an installed model bundle, Generator intentionally starts in Library
-Recovery mode so **Manage** remains available.
+If PowerShell says `uv` is not recognized after installation, close and reopen
+the terminal. If Prisma says its port or workspace is already in use, close any
+other Prisma terminal and try again.
 
 ## Platform status
 
