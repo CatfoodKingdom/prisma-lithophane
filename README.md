@@ -16,7 +16,7 @@ The applications do not share live working data. Generator only consumes a
 published bundle selected through its Model Library control.
 
 **Want to install or test Prisma?** [Download the latest release from the
-Releases page](https://github.com/CatfoodKingdom/prisma-lithophane/releases/latest).
+Releases page](https://github.com/CatfoodKingdom/prisma-lithophane/releases).
 
 ## Install a release
 
