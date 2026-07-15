@@ -1,15 +1,15 @@
 # Non-code assets and data
 
-The GPLv3 license in `LICENSE` covers Prisma's project-authored source code. It
-does not automatically establish redistribution terms for independently
-created model/data assets.
+The GPLv3 license in `LICENSE` covers Prisma's project-authored source code.
 
-Catfood Kingdom owns and authorizes redistribution of the unmodified Prisma
-Standard Model Library with official Prisma packages that include this notice,
-including the current beta release packages. Copyright is retained by
-Catfood Kingdom; this authorization does not grant a separate license to
-extract, modify, or redistribute the model library apart from those Prisma
-packages unless another written grant accompanies it.
+The Prisma Standard Model Library is made available under the
+[CC0 1.0 Universal public-domain dedication](https://creativecommons.org/publicdomain/zero/1.0/).
+To the extent Catfood Kingdom holds copyright, database, or similar rights in
+the library's measurements, fitted model data, filament catalog, selection, or
+arrangement, those rights are waived or dedicated to the public domain under
+CC0. Anyone may copy, use, modify, and redistribute that model data for any
+purpose without requesting permission. CC0 does not grant trademark rights,
+and the data is provided without warranty.
 
 The following independently maintained test/reference assets are not included
 in the GitHub source staging tree or release packages and remain outside that
