@@ -6,7 +6,7 @@ created model/data assets.
 
 Catfood Kingdom owns and authorizes redistribution of the unmodified Prisma
 Standard Model Library with official Prisma packages that include this notice,
-including the current private friend-test packages. Copyright is retained by
+including the current beta release packages. Copyright is retained by
 Catfood Kingdom; this authorization does not grant a separate license to
 extract, modify, or redistribute the model library apart from those Prisma
 packages unless another written grant accompanies it.
