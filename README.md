@@ -15,11 +15,15 @@ Prisma has two applications:
 The applications do not share live working data. Generator only consumes a
 published bundle selected through its Model Library control.
 
+**Want to install or test Prisma?** [Download the latest release from the
+Releases page](https://github.com/CatfoodKingdom/prisma-lithophane/releases/latest).
+
 ## Install a release
 
-Download the appropriate archive from the repository's **Releases** page and
-extract the complete folder to a writable location. Do not run from inside the
-archive.
+Download the appropriate archive from the repository's
+[**Releases** page](https://github.com/CatfoodKingdom/prisma-lithophane/releases)
+and extract the complete folder to a writable location. Do not run from inside
+the archive.
 
 On Windows:
 
