@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prisma — Color Lithophane Generator</title>
+  <link rel="stylesheet" href="style.css?v=2026-07-14-ui31">
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- ── Left rail ────────────────────────────────────────────────────────── -->
+    <aside class="left-rail">
+      <div class="rail-header">
+        <h1 class="rail-title">Prisma</h1>
+        <p class="rail-subtitle">Color Lithophane Generator</p>
+        <span class="data-source-badge rail-badge" id="dataSourceBadge">offline</span>
+      </div>
+
+      <div class="rail-image-preview" id="railImagePreview">
+        <span class="muted-line">No image selected</span>
+      </div>
+
+      <div class="rail-deck" id="railDeck">
+        <div class="rail-section-header">
+          <p class="panel-kicker">Palette Deck</p>
+          <div class="rail-section-actions">
+            <button class="ghost-button xxs" id="railLoadPaletteBtn" title="Load a saved palette">Load</button>
+            <button class="ghost-button xxs" id="railClearDeckBtn" title="Remove all palettes from the persistent deck">Clear</button>
+          </div>
+        </div>
+        <div class="rail-deck-list" id="railDeckList"></div>
+      </div>
+
+      <div class="rail-model-library" id="railModelLibrary">
+        <div class="rail-model-library-header">
+          <p class="panel-kicker">Model Library</p>
+          <button class="ghost-button xxs rail-model-library-manage" id="modelLibrariesBtn" type="button" title="Install or switch published model libraries" aria-label="Manage model libraries">
+            Manage
+            <span class="model-libraries-attention is-hidden" id="modelLibrariesAttention" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="rail-model-library-summary" id="railModelLibrarySummary">
+          <span class="rail-model-library-name" id="railModelLibraryName">Checking model library…</span>
+          <span class="rail-model-library-state is-idle" id="railModelLibraryState" aria-live="polite">Checking</span>
+        </div>
+      </div>
+
+      <div class="rail-library">
+        <div class="rail-library-header">
+          <p class="panel-kicker">Active Filaments <span class="rail-library-count" id="railLibraryCount">(0/0)</span></p>
+          <button class="ghost-button xxs rail-library-manage" id="railLibraryBtn" title="Choose which filaments appear in palette tools" aria-label="Manage active filaments">Manage</button>
+        </div>
+      </div>
+
+      <div class="rail-printer">
+        <div class="rail-printer-header">
+          <p class="panel-kicker">Printer</p>
+          <button class="ghost-button xxs" id="printerConfigBtn">Configure</button>
+        </div>
+        <div class="rail-printer-control-row">
+          <div class="rail-printer-selector" id="railPrinterSelector">
+            <!-- JS renders: dropdown if >1 printer, text name if 1 -->
+          </div>
+          <select id="railNozzleSelect" class="rail-select rail-nozzle-select" aria-label="Active nozzle" title="Active nozzle"></select>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Main content ─────────────────────────────────────────────────────── -->
+    <main class="main-content">
+
+      <!-- Topbar (minimal separator) -->
+      <header class="topbar"></header>
+
+      <!-- Tab navigation — numbered workflow steps -->
+      <section class="panel mode-panel">
+        <div class="mode-switch" id="tabSwitch">
+          <button class="mode-button is-active" data-tab="image">
+            <span class="step-number">1</span> Image
+          </button>
+          <span class="step-connector"></span>
+          <button class="mode-button" data-tab="creation">
+            <span class="step-number">2</span> Palette
+          </button>
+          <span class="step-connector"></span>
+          <button class="mode-button" data-tab="solve">
+            <span class="step-number">3</span> Preview
+          </button>
+          <span class="step-connector"></span>
+          <button class="mode-button" data-tab="export">
+            <span class="step-number">4</span> Export
+          </button>
+          <span class="mode-actions-divider" aria-hidden="true"></span>
+          <button class="primary-button bar-action" id="startSolveBtn" disabled title="Solve the active palette">Solve</button>
+          <button class="topbar-utility-button settings-gear-btn" id="settingsDrawerBtn" title="Settings" aria-label="Settings">
+            <svg class="settings-gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span class="settings-gear-label">Settings</span>
+          </button>
+          <span class="mode-utility-spacer" aria-hidden="true"></span>
+          <button class="topbar-utility-button top-temp-clear-btn" id="clearAllTempBtn"
+                  title="Delete all cached temp files (solve runs + LUTs). Keeps your exported files and saved runs.">
+            <span>Clear Temp Files</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════════════════════════════════════════ -->
+      <!-- Content area with drawer support                                   -->
+      <!-- ═══════════════════════════════════════════════════════════════════ -->
+      <div class="content-with-drawer">
+        <div class="tab-content-area">
+
+      <!-- ── Tab: Image ───────────────────────────────────────────────────── -->
+      <section class="tab-content" id="tabImage">
+        <div class="image-tab-layout">
+          <!-- Left pane: Image Library + Preview stacked -->
+          <div class="image-left-pane">
+            <!-- Image Library (2 states: contracted / expanded) -->
+            <div class="panel inset-panel image-library" id="imageLibraryPanel" data-state="contracted">
+              <div class="library-title-bar" id="libraryTitleBar">
+                <span class="pane-title">Library</span>
+                <div class="library-title-actions">
+                  <label class="ghost-button xxs upload-btn" title="Add a source image from your computer">
+                    Add Image
+                    <input type="file" id="imageUploadInput" accept="image/*" hidden>
+                  </label>
+                  <button class="ghost-button xxs" id="imageLibraryOpenFolderBtn" type="button" title="Open the Images folder">Open Folder</button>
+                  <button class="library-refresh-btn" id="imageLibraryRefreshBtn" type="button" title="Refresh image library" aria-label="Refresh image library">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                      <path d="M13.2 5.1A5.6 5.6 0 0 0 3.5 3.7L2.2 5.1"></path>
+                      <path d="M2.2 2.1v3h3"></path>
+                      <path d="M2.8 10.9a5.6 5.6 0 0 0 9.7 1.4l1.3-1.4"></path>
+                      <path d="M13.8 13.9v-3h-3"></path>
+                    </svg>
+                  </button>
+                  <span class="library-window-divider" aria-hidden="true"></span>
+                  <button class="library-resize-btn" id="libraryResizeBtn" type="button" title="Expand image library" aria-label="Expand image library"></button>
+                </div>
+              </div>
+              <div class="library-thumbs" id="imageGrid">
+              </div>
+            </div>
+
+            <!-- Image Preview -->
+            <div class="panel inset-panel image-preview-pane" id="imagePreviewPane">
+              <div class="pane-title-bar" id="previewTitleBar">
+                <span class="pane-title">Preview</span>
+              </div>
+              <div class="preview-viewport" id="previewViewport">
+                <span class="muted-line" id="previewPlaceholder">Select an image</span>
+                <div class="preview-mat" id="previewMat">
+                  <img id="previewImg" alt="" style="display:none">
+                  <div class="preview-border" id="previewBorder"></div>
+                </div>
+                <svg class="preview-dimensions" id="previewDimensions"></svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Framing editor: canvas + controls (right sidebar) -->
+          <div class="panel inset-panel framing-editor">
+            <div class="pane-title-bar">
+              <span class="pane-title">Adjustments</span>
+            </div>
+            <div class="framing-editor-body">
+
+            <!-- Sub-tab bar -->
+            <div class="frame-editor-tab-row">
+              <div class="frame-editor-tabs" id="frameEditorTabs">
+                <button class="frame-tab is-active" data-ftab="size">Size</button>
+                <button class="frame-tab" data-ftab="image">Image</button>
+              </div>
+              <button id="frameResetBtn" class="ghost-button xs" title="Reset all framing and adjustment settings">Reset</button>
+            </div>
+
+            <!-- Canvas -->
+            <div class="frame-canvas-wrap" id="frameCanvasWrap">
+              <div class="frame-canvas" id="frameCanvas">
+                <img id="frameImage" style="display:none" alt="">
+                <div class="frame-mask" id="frameMask"></div>
+                <div class="frame-window" id="frameWindow"></div>
+                <svg class="frame-dimensions" id="frameDimensions"></svg>
+                <!-- Edge handles for Specified mode -->
+                <div class="frame-edge frame-edge-n" data-edge="n"></div>
+                <div class="frame-edge frame-edge-s" data-edge="s"></div>
+                <div class="frame-edge frame-edge-e" data-edge="e"></div>
+                <div class="frame-edge frame-edge-w" data-edge="w"></div>
+                <div class="frame-edge frame-edge-nw" data-edge="nw"></div>
+                <div class="frame-edge frame-edge-ne" data-edge="ne"></div>
+                <div class="frame-edge frame-edge-sw" data-edge="sw"></div>
+                <div class="frame-edge frame-edge-se" data-edge="se"></div>
+              </div>
+              <span class="muted-line frame-placeholder" id="framePlaceholder">Select an image from the library</span>
+            </div>
+
+            <!-- Size tab controls -->
+            <div class="frame-controls frame-controls-size" id="frameControlsSize">
+
+              <!-- Section 1: Direction + AR (2×2 table) -->
+              <div class="ctrl-section ctrl-section-grid2">
+                <label class="ctrl-lbl">Direction</label>
+                <div class="ctrl-val ctrl-val-center">
+                  <div class="toggle-group" id="directionToggle">
+                    <button class="toggle-btn is-active" data-dir="landscape">Landscape</button>
+                    <button class="toggle-btn" data-dir="portrait">Portrait</button>
+                  </div>
+                </div>
+                <label class="ctrl-lbl">Aspect Ratio</label>
+                <div class="ctrl-val ctrl-val-center">
+                  <div class="ar-button-group" id="arButtonGroup">
+                    <button class="ar-button is-active" data-ar="specified">W&times;H</button>
+                    <button class="ar-button" data-ar="ratio">Ratio</button>
+                    <button class="ar-button" data-ar="image">Image</button>
+                    <button class="ar-button" data-ar="3:2">3:2</button>
+                    <button class="ar-button" data-ar="4:3">4:3</button>
+                    <button class="ar-button" data-ar="5:4">5:4</button>
+                    <button class="ar-button" data-ar="1:1">1:1</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Sections 2-4: unified 3-column grid (label | input | slider) -->
+              <div class="ctrl-section ctrl-section-grid3">
+                <!-- Crop Fit -->
+                <label class="ctrl-lbl">Crop Fit</label>
+                <span></span>
+                <div class="ctrl-val-right">
+                  <div class="icon-button-group" style="gap:4px;">
+                    <button class="icon-btn icon-btn-sm" id="fitImageBtn" title="Fit full image and center crop">
+                      <svg viewBox="0 0 24 24" width="16" height="16"><path d="M5 9V5h4M19 9V5h-4M5 15v4h4M19 15v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                    </button>
+                    <button class="icon-btn icon-btn-sm" id="fillWidthBtn" title="Fit full image width">
+                      <svg viewBox="0 0 24 24" width="16" height="16"><line x1="2" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="1.6"/><polyline points="4,9 2,12 4,15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><polyline points="20,9 22,12 20,15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button class="icon-btn icon-btn-sm" id="fillHeightBtn" title="Fit full image height">
+                      <svg viewBox="0 0 24 24" width="16" height="16"><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" stroke-width="1.6"/><polyline points="9,4 12,2 15,4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><polyline points="9,20 12,22 15,20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Scale -->
+                <label class="ctrl-lbl">Scale</label>
+                <div class="input-with-unit">
+                  <input type="text" id="scaleInput" class="unit-input" value="100">
+                  <span class="unit-suffix">%</span>
+                </div>
+                <input type="range" id="scaleSlider" class="control-slider slider-with-center" min="100" max="1000" step="0.5" value="100" data-center="100">
+
+                <!-- Rotate -->
+                <label class="ctrl-lbl">Rotate</label>
+                <div class="input-with-unit">
+                  <input type="text" id="rotationInput" class="unit-input" value="0.0">
+                  <span class="unit-suffix">&deg;</span>
+                </div>
+                <input type="range" id="rotationSlider" class="control-slider slider-with-center" min="-180" max="180" step="0.1" value="0" data-center="0">
+
+                <!-- Buttons (centered in slider column) -->
+                <span></span>
+                <span></span>
+                <div style="justify-self: center;">
+                  <div class="icon-button-group">
+                    <div class="icon-button-item">
+                      <button class="icon-btn" id="rotate90LBtn" title="Rotate 90° counter-clockwise">
+                        <svg viewBox="0 0 24 24"><path d="M22.5 5 A3.5 3.5 0 0 0 19 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M19 1.5 L21 0.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><rect x="5" y="5" width="14" height="14" rx="3" fill="white" stroke="currentColor" stroke-width="1.6"/></svg>
+                      </button>
+                      <span class="icon-button-label">90&deg;L</span>
+                    </div>
+                    <div class="icon-button-item">
+                      <button class="icon-btn" id="rotate90RBtn" title="Rotate 90° clockwise">
+                        <svg viewBox="0 0 24 24"><path d="M1.5 5 A3.5 3.5 0 0 1 5 1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M5 1.5 L3 0.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><rect x="5" y="5" width="14" height="14" rx="3" fill="white" stroke="currentColor" stroke-width="1.6"/></svg>
+                      </button>
+                      <span class="icon-button-label">90&deg;R</span>
+                    </div>
+                    <div class="icon-button-item">
+                      <button class="icon-btn" id="flipHBtn" title="Flip horizontally">
+                        <svg viewBox="0 0 24 24"><path d="M11 5 L8 5 Q5 5 5 8 L5 16 Q5 19 8 19 L11 19" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" stroke-width="1.6"/><path d="M13 5 L16 5 Q19 5 19 8 L19 16 Q19 19 16 19 L13 19" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.4"/></svg>
+                      </button>
+                      <span class="icon-button-label">H&#8209;Flip</span>
+                    </div>
+                    <div class="icon-button-item">
+                      <button class="icon-btn" id="flipVBtn" title="Flip vertically">
+                        <svg viewBox="0 0 24 24"><path d="M5 11 L5 8 Q5 5 8 5 L16 5 Q19 5 19 8 L19 11" fill="none" stroke="currentColor" stroke-width="1.6"/><line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.6"/><path d="M5 13 L5 16 Q5 19 8 19 L16 19 Q19 19 19 16 L19 13" fill="none" stroke="currentColor" stroke-width="1.2" opacity="0.4"/></svg>
+                      </button>
+                      <span class="icon-button-label">V&#8209;Flip</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Divider -->
+                <hr class="ctrl-divider">
+
+                <!-- Width -->
+                <label class="ctrl-lbl dim-lbl-with-lock" title="Physical width (mm)">
+                  <button class="dim-lock-btn" id="widthLockBtn" title="Lock width">
+                    <svg class="lock-icon lock-open" viewBox="0 0 16 16" width="10" height="10"><rect x="3" y="8" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8V5a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                    <svg class="lock-icon lock-closed" viewBox="0 0 16 16" width="10" height="10"><rect x="3" y="8" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8V5a3 3 0 0 1 6 0V8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                  </button>
+                  &harr; Width
+                </label>
+                <div class="input-with-unit">
+                  <input type="text" id="outputWidthMm" class="unit-input" value="100.0">
+                  <span class="unit-suffix">mm</span>
+                </div>
+                <input type="range" id="widthSlider" class="control-slider" min="10" max="300" step="0.5" value="100">
+
+                <!-- Height -->
+                <label class="ctrl-lbl dim-lbl-with-lock" title="Physical height (mm)">
+                  <button class="dim-lock-btn" id="heightLockBtn" title="Lock height">
+                    <svg class="lock-icon lock-open" viewBox="0 0 16 16" width="10" height="10"><rect x="3" y="8" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8V5a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                    <svg class="lock-icon lock-closed" viewBox="0 0 16 16" width="10" height="10"><rect x="3" y="8" width="10" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 8V5a3 3 0 0 1 6 0V8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+                  </button>
+                  &varr; Height
+                </label>
+                <div class="input-with-unit">
+                  <input type="text" id="outputHeightMm" class="unit-input" value="100.0">
+                  <span class="unit-suffix">mm</span>
+                </div>
+                <input type="range" id="heightSlider" class="control-slider" min="10" max="300" step="0.5" value="100">
+
+                <!-- Divider -->
+                <hr class="ctrl-divider">
+
+                <!-- Border toggle -->
+                <label class="ctrl-lbl">Border</label>
+                <span></span>
+                <div class="ctrl-val-right">
+                  <div class="toggle-switch" id="borderToggle" title="Add a raised border frame around the lithophane">
+                    <div class="toggle-switch-track"><div class="toggle-switch-thumb"></div></div>
+                  </div>
+                </div>
+
+                <!-- Border Width -->
+                <label class="ctrl-lbl border-field">Width</label>
+                <div class="input-with-unit border-field">
+                  <input type="text" id="cfgBorderWidth" class="unit-input" value="3.0">
+                  <span class="unit-suffix">mm</span>
+                </div>
+                <span class="ctrl-note border-note" style="grid-row: span 2;">Border is printed in the same color as the cap.</span>
+
+                <!-- Border Height -->
+                <label class="ctrl-lbl border-field">Border Height</label>
+                <div class="input-with-unit border-field">
+                  <input type="text" id="cfgBorderHeight" class="unit-input" value="3.0">
+                  <span class="unit-suffix">mm</span>
+                </div>
+
+                <input type="checkbox" id="cfgBorder" style="display:none">
+              </div>
+            </div>
+
+            <!-- Image tab controls (hidden by default) -->
+            <div class="frame-controls frame-controls-image is-hidden" id="frameControlsImage">
+              <div class="control-row">
+                <label class="control-label">Mode
+                  <div class="toggle-group" id="bwColorToggle">
+                    <button class="toggle-btn" data-val="bw">B/W</button>
+                    <button class="toggle-btn is-active" data-val="color">Color</button>
+                  </div>
+                </label>
+              </div>
+
+              <div class="control-row">
+                <label class="control-label">Exposure</label>
+                <input type="number" id="adjustExposure" class="control-input control-input-narrow" value="0" min="-1" max="1" step="0.01">
+                <input type="range" id="adjustExposureSlider" class="control-slider slider-with-center" min="-1" max="1" step="0.01" value="0" data-center="0">
+              </div>
+
+              <div class="control-row">
+                <label class="control-label">Contrast</label>
+                <input type="number" id="adjustContrast" class="control-input control-input-narrow" value="0" min="-1" max="1" step="0.01">
+                <input type="range" id="adjustContrastSlider" class="control-slider slider-with-center" min="-1" max="1" step="0.01" value="0" data-center="0">
+              </div>
+
+              <div class="control-row">
+                <label class="control-label">Highlight</label>
+                <input type="number" id="adjustHighlight" class="control-input control-input-narrow" value="0" min="-1" max="1" step="0.01">
+                <input type="range" id="adjustHighlightSlider" class="control-slider slider-with-center" min="-1" max="1" step="0.01" value="0" data-center="0">
+              </div>
+
+              <div class="control-row">
+                <label class="control-label">Shadow</label>
+                <input type="number" id="adjustShadow" class="control-input control-input-narrow" value="0" min="-1" max="1" step="0.01">
+                <input type="range" id="adjustShadowSlider" class="control-slider slider-with-center" min="-1" max="1" step="0.01" value="0" data-center="0">
+              </div>
+
+              <hr class="controls-divider">
+
+              <div class="color-controls" id="colorControls">
+                <div class="control-row">
+                  <label class="control-label">Tint</label>
+                  <input type="number" id="adjustTintHue" class="control-input control-input-narrow" value="0" min="0" max="360" step="1">
+                  <input type="range" id="adjustTintHueSlider" class="control-slider slider-hue" min="0" max="360" step="1" value="0">
+                </div>
+
+                <div class="control-row">
+                  <label class="control-label">Tint Strength</label>
+                  <input type="number" id="adjustTintStrength" class="control-input control-input-narrow" value="0" min="0" max="1" step="0.01">
+                  <input type="range" id="adjustTintStrengthSlider" class="control-slider" min="0" max="1" step="0.01" value="0">
+                </div>
+
+                <div class="control-row">
+                  <label class="control-label">Saturation</label>
+                  <input type="number" id="adjustSaturation" class="control-input control-input-narrow" value="0" min="-1" max="1" step="0.01">
+                  <input type="range" id="adjustSaturationSlider" class="control-slider slider-with-center" min="-1" max="1" step="0.01" value="0" data-center="0">
+                </div>
+
+                <div class="control-row">
+                  <label class="control-label">Temp</label>
+                  <input type="number" id="adjustTemp" class="control-input control-input-narrow" value="0" min="-100" max="100" step="1">
+                  <input type="range" id="adjustTempSlider" class="control-slider slider-with-center" min="-100" max="100" step="1" value="0" data-center="0">
+                </div>
+              </div>
+            </div>
+
+            <!-- Info grid -->
+            <div class="image-summary-bar" id="imageInfoGrid">
+              <span class="summary-item">Image Size <strong id="infoOrigDims">&mdash;</strong></span>
+              <span class="summary-item">Print Size <strong id="infoPrintSize">&mdash;</strong></span>
+              <span class="summary-item">Rendered Size <strong id="infoSolvePx">&mdash;</strong></span>
+            </div>
+            </div>
+          </div>
+
+          <!-- (Image library is now inside left pane) -->
+        </div>
+
+        <!-- Ratio dialog (hidden, shown on demand) -->
+        <div class="modal-overlay surface-overlay" id="ratioDialog" aria-hidden="true">
+          <div class="modal-dialog modal-dialog-window surface-window ratio-dialog-window">
+            <div class="modal-dialog-header window-header surface-header">
+              <div class="window-header__title-slot">
+                <h3 class="window-header__title surface-title">Custom Ratio</h3>
+              </div>
+              <div class="window-header__actions surface-header-actions">
+                <div class="surface-window-controls">
+                  <button class="close-button window-header__button surface-header-button surface-close" id="ratioDialogClose" aria-label="Close custom ratio" title="Close custom ratio">
+                    <svg viewBox="0 0 12 12" aria-hidden="true">
+                      <path d="M2 2l8 8M10 2L2 10"></path>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="modal-dialog-body surface-body ratio-dialog-body">
+              <div class="control-row">
+                <label class="control-label">Width</label>
+                <input type="number" id="ratioDialogX" class="control-input" value="16" min="1" max="100" step="1">
+              </div>
+              <div class="control-row">
+                <label class="control-label">Height</label>
+                <input type="number" id="ratioDialogY" class="control-input" value="9" min="1" max="100" step="1">
+              </div>
+            </div>
+            <div class="modal-dialog-footer surface-footer ratio-dialog-footer">
+              <button class="ghost-button small" id="ratioDialogCancel">Cancel</button>
+              <button class="primary-button small" id="ratioDialogConfirm">Apply</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Tab: Palette Creation ────────────────────────────────────────── -->
+      <section class="tab-content is-hidden" id="tabCreation">
+
+        <div class="creation-shell">
+          <div class="creation-mode-tabs segmented-control" role="tablist" aria-label="Palette creation mode">
+            <button type="button" class="segmented-btn is-active" id="paletteModeAuto" data-panel="auto" role="tab" aria-selected="true" aria-controls="panelAutoSuggest">Auto-Suggest</button>
+            <button type="button" class="segmented-btn" id="paletteModeManual" data-panel="manual" role="tab" aria-selected="false" aria-controls="panelManualBuilder">Manual</button>
+          </div>
+          <p class="creation-mode-note" id="creationModeNote">Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the target that matches the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.</p>
+
+          <div class="creation-layout">
+
+            <!-- ── Left column: Mode panels ──────────────────────────────── -->
+            <div class="creation-modes">
+
+            <!-- Auto-Suggest -->
+            <div class="creation-panel creation-mode-panel is-expanded" id="panelAutoSuggest" role="tabpanel" aria-labeledby="paletteModeAuto">
+              <div class="creation-panel-header auto-suggest-header">
+                <span class="panel-kicker">Select Filaments for Auto-Suggest</span>
+                <span class="toolbar-chip muted auto-suggest-count" id="candidateCountChip">0 / 0 candidates</span>
+                <div class="creation-header-actions">
+                  <button class="ghost-button xxs" id="candidateSelectNone">None</button>
+                  <button class="ghost-button xxs" id="candidateSelectAll">All</button>
+                </div>
+              </div>
+              <div class="creation-panel-body">
+                <div class="creation-panel-split">
+                  <!-- Candidate library (toggle-select) -->
+                  <div class="creation-library-pane">
+                    <div class="creation-card-grid" id="candidateGrid"></div>
+                  </div>
+                  <!-- Controls + AMS preview -->
+                  <div class="creation-controls-pane">
+                    <div class="suggest-field" title="Maximum colored filaments per AMS load. Extra color-load tiers can add more total colors across additional AMS loads.">
+                      <label>Max colors</label>
+                      <input type="number" id="targetFilamentCount" class="control-input" value="" min="2" max="16" step="1" autocomplete="off">
+                    </div>
+                    <div class="suggest-field" title="Additional AMS loading groups the suggestion search may consider beyond the first load.">
+                      <label>Extra color loads</label>
+                      <input type="number" id="targetSwapCount" class="control-input" value="0" min="0" max="4" step="1">
+                    </div>
+                    <div class="suggest-field">
+                      <label>Suggestions</label>
+                      <input type="number" id="targetSuggestCount" class="control-input" value="6" min="1" max="10" step="1">
+                    </div>
+                    <div class="suggest-field">
+                      <label>Target</label>
+                      <select id="paletteSuggestMode" class="control-input">
+                        <option value="standard">Source color</option>
+                        <option value="luminance_detail">Luminance detail</option>
+                      </select>
+                    </div>
+                    <div class="ams-preview" id="amsPreview"></div>
+                    <button class="primary-button small" id="suggestPalettesBtn" style="width:100%">Suggest Palettes</button>
+                    <p class="small-copy" id="suggestSlotHint"></p>
+                  </div>
+                </div>
+                <details class="creation-settings-shell" id="creationSettingsShell">
+                  <summary class="creation-settings-summary">
+                    <span class="creation-settings-summary-title">Palette Suggestion Settings</span>
+                  </summary>
+                  <div class="creation-settings-card" id="creationDeckSettings">
+                    <div class="creation-settings-grid">
+                      <label class="creation-setting-row" title="Minimum coverage gain per added color required before recommending a larger palette or computing another color-load tier.">
+                        <span>Min added-color gain</span>
+                        <div class="input-with-unit creation-setting-unit">
+                          <input type="text" id="paletteSwapThreshold" class="unit-input" value="2.0" inputmode="decimal" autocomplete="off">
+                          <span class="unit-suffix">%</span>
+                        </div>
+                      </label>
+                      <div class="creation-setting-row creation-setting-row-check" title="Compute all color-load tiers even if the improvement falls below the threshold.">
+                        <span>Compute all load tiers</span>
+                        <label class="stg-check">
+                          <input type="checkbox" id="paletteForceAllTiers"> Enabled
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            <!-- Manual Builder -->
+            <div class="creation-panel creation-mode-panel" id="panelManualBuilder" role="tabpanel" aria-labeledby="paletteModeManual" hidden>
+              <div class="creation-panel-header manual-palette-header">
+                <span class="panel-kicker">Select Filaments for Palette</span>
+                <span class="toolbar-chip muted manual-palette-count" id="manualLibraryCountChip">0</span>
+              </div>
+              <div class="creation-panel-body">
+                <div class="creation-panel-single">
+                  <!-- Library (transfer on click) -->
+                  <div class="creation-library-pane">
+                    <div class="creation-card-grid" id="manualLibraryGrid"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+            <!-- ── Right column: Palette Deck ────────────────────────────── -->
+            <div class="creation-deck" id="creationDeckPanel">
+              <div class="creation-panel-header deck-header">
+                <span class="panel-kicker">Suggested Palettes</span>
+                <button class="ghost-button xxs" id="clearDeckBtn" title="Clear the staging pad">Clear</button>
+              </div>
+              <p class="small-copy" id="suggestCapacityNote" hidden></p>
+              <div class="deck-cards" id="deckCards">
+                <p class="muted-line palette-empty-msg">Suggest palettes to stage them here</p>
+              </div>
+            </div>
+
+            <!-- ── Right column: Manual Palette ──────────────────────────── -->
+            <div class="creation-deck manual-palette-panel" id="manualPalettePanel" hidden>
+              <div class="creation-panel-header deck-header">
+                <span class="panel-kicker">Manual Palette</span>
+              </div>
+              <div class="creation-ams-pane" id="manualAmsPane">
+                <div class="ams-slots" id="manualAmsSlots"></div>
+                <div class="ams-status" id="manualAmsStatus"></div>
+                <button class="primary-button small manual-palette-action" id="mintPaletteBtn" disabled>Add to Deck</button>
+                <button class="ghost-button small manual-palette-action" id="clearComposerBtn">Clear</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Tab: Settings ────────────────────────────────────────────────── -->
+      <section class="tab-content is-hidden" id="tabSettings">
+        <!-- #settingsTabNav removed in Task 6 S3 (Settings destination retired; #tabSettings is now a hidden grid host only) -->
+        <div class="settings-grid">
+          <!-- ── Bucket: Static ─────────────────────────────────────────── -->
+          <div class="preset-bar settings-profile-bar" data-bucket="static">
+            <div class="settings-profile-section-header">
+              <span class="settings-profile-section-title">Settings Profile</span>
+            </div>
+            <div class="settings-profile-section-body">
+              <div class="settings-profile-summary">
+                <div class="settings-profile-current">
+                <div class="settings-profile-title-row">
+                  <span class="settings-profile-name" id="settingsProfileName">Basic</span>
+                  <span class="settings-profile-status" id="settingsProfileStatus"></span>
+                </div>
+                <span class="settings-profile-source" id="settingsProfileSource"></span>
+                </div>
+              </div>
+              <div class="settings-profile-actions">
+                <button class="ghost-button xs" id="settingsProfileBrowseBtn">Profiles...</button>
+                <button class="ghost-button xs" id="settingsProfileSaveBtn">Save</button>
+                <button class="ghost-button xs" id="settingsProfileSaveAsBtn">Save As...</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-derived" data-bucket="static" id="derivedParams"></div>
+          <!-- ── Bucket: Essentials ─────────────────────────────────────── -->
+          <div class="settings-group" data-bucket="geometry" data-settings-group="geometry">
+            <h4 class="settings-section-head">Essentials</h4>
+
+            <!-- Stack cross-section diagram -->
+            <div class="stack-diagram">
+              <svg viewBox="20 96 270 130" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+                <!-- White base -->
+                <rect x="80" y="170" width="140" height="30" fill="#e8e8e8" stroke="#999" stroke-width="1"/>
+                <text x="150" y="189" text-anchor="middle" font-size="9" fill="#666">white base</text>
+
+                <!-- Color layers (3 example layers) -->
+                <rect x="80" y="146" width="140" height="24" fill="#d4e8f0" stroke="#999" stroke-width="1"/>
+                <line x1="80" y1="154" x2="220" y2="154" stroke="#999" stroke-width="0.5" stroke-dasharray="2,2"/>
+                <line x1="80" y1="162" x2="220" y2="162" stroke="#999" stroke-width="0.5" stroke-dasharray="2,2"/>
+                <rect x="80" y="146" width="140" height="8" fill="#7ecbea" stroke="none" opacity="0.5"/>
+                <rect x="80" y="154" width="140" height="8" fill="#e87e9a" stroke="none" opacity="0.5"/>
+                <rect x="80" y="162" width="140" height="8" fill="#f0c95e" stroke="none" opacity="0.5"/>
+                <rect x="80" y="146" width="140" height="24" fill="none" stroke="#999" stroke-width="1"/>
+                <text x="150" y="160" text-anchor="middle" font-size="8" fill="#555">color layers</text>
+
+                <!-- White cap -->
+                <rect x="80" y="130" width="140" height="16" fill="#f0f0f0" stroke="#999" stroke-width="1"/>
+                <text x="150" y="141" text-anchor="middle" font-size="8" fill="#666">white cap</text>
+
+                <!-- Bracket: base [ -->
+                <line x1="72" y1="170" x2="72" y2="200" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="170" x2="77" y2="170" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="200" x2="77" y2="200" stroke="#444" stroke-width="0.8"/>
+                <text x="66" y="188" text-anchor="end" font-size="8" fill="#333">base</text>
+
+                <!-- Bracket: min cap [ -->
+                <line x1="72" y1="130" x2="72" y2="146" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="130" x2="77" y2="130" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="146" x2="77" y2="146" stroke="#444" stroke-width="0.8"/>
+                <text x="66" y="141" text-anchor="end" font-size="8" fill="#333">min cap</text>
+
+                <!-- Bracket: max total ] -->
+                <line x1="228" y1="130" x2="228" y2="200" stroke="#444" stroke-width="0.8"/>
+                <line x1="222" y1="130" x2="228" y2="130" stroke="#444" stroke-width="0.8"/>
+                <line x1="222" y1="200" x2="228" y2="200" stroke="#444" stroke-width="0.8"/>
+                <text x="236" y="168" font-size="8" fill="#333">max total</text>
+
+                <!-- Bracket: layer ht [ -->
+                <line x1="72" y1="154" x2="72" y2="162" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="154" x2="77" y2="154" stroke="#444" stroke-width="0.8"/>
+                <line x1="72" y1="162" x2="77" y2="162" stroke="#444" stroke-width="0.8"/>
+                <text x="66" y="161" text-anchor="end" font-size="8" fill="#333">layer ht</text>
+
+                <!-- Bracket: pixel size |___| -->
+                <line x1="80" y1="208" x2="98" y2="208" stroke="#444" stroke-width="0.8"/>
+                <line x1="80" y1="202" x2="80" y2="208" stroke="#444" stroke-width="0.8"/>
+                <line x1="98" y1="202" x2="98" y2="208" stroke="#444" stroke-width="0.8"/>
+                <text x="89" y="218" text-anchor="middle" font-size="8" fill="#333">pixel size</text>
+
+                <!-- Viewing side label + arrow -->
+                <text x="150" y="108" text-anchor="middle" font-size="9" font-weight="600" fill="#333">viewing side</text>
+                <line x1="150" y1="112" x2="150" y2="122" stroke="#444" stroke-width="0.8"/>
+                <polygon points="150,125 147,119 153,119" fill="#444"/>
+              </svg>
+            </div>
+
+            <table class="settings-table">
+              <tr><td title="Choose whether the solve prioritizes direct color-stack matching or uses the white cap as a luminance/detail carrier.">Solve Mode</td><td>
+                <div class="segmented-control solve-mode-control" id="cfgLuminanceMode" role="radiogroup" aria-label="Solve mode">
+                  <button type="button" class="segmented-btn is-active" data-value="standard" role="radio" aria-checked="true" title="Color mode prioritizes direct color-stack matching.">Color</button>
+                  <button type="button" class="segmented-btn" data-value="luminance_detail" role="radio" aria-checked="false" title="Luminance mode uses the white cap as a major luminance/detail carrier.">Luminance</button>
+                </div>
+              </td></tr>
+              <tr><td title="Spacing of the color solver grid. It cannot be smaller than the active nozzle diameter; larger values reduce solve and export cost but also reduce detail.">Solve Pitch <span class="stg-range" id="cfgSolvePitchHint">minimum 0.20 mm</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgSolvePitch" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr><td title="Maximum total print thickness including base, color layers, and cap.">Max Total Thickness <span class="stg-range">1.0–5.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgTMax" class="unit-input" value="2.5"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr><td title="Height of each printed layer. Must match your slicer layer height exactly.">Layer Height <span class="stg-range">0.04–0.20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgLayerHeight" class="unit-input" value="0.08"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr><td title="White filament used for both the solid base plate and the viewing-side cap.">White Base/Cap Filament</td><td><select id="cfgBaseFilament" class="stg-select stg-filament-select"></select></td></tr>
+              <tr><td title="Thickness of the solid base plate.">Base Thickness <span class="stg-range">0.08–1.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDWb" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
+            </table>
+            <div class="stg-footnote" id="stackDerived"></div>
+          </div>
+
+          <!-- ── Bucket: Preprocessing Modules ──────────────────────────── -->
+          <div class="settings-group" data-bucket="preprocessing" data-settings-group="preprocessing">
+            <h4 class="settings-section-head">Preprocessing Modules</h4>
+            <table class="settings-table advanced-setting">
+              <tr><td title="How the source image is resampled onto the solve grid. Lanczos preserves detail; Area is more anti-aliased for print-scale solves.">Resample kernel</td><td>
+                <select id="cfgSourceResampleKernel" class="stg-select">
+                  <option value="lanczos">Lanczos</option>
+                  <option value="area">Area</option>
+                </select>
+              </td></tr>
+            </table>
+            <div class="module-toggles" id="moduleToggles">
+              <!-- Populated dynamically -->
+            </div>
+            <div class="module-settings-slot" id="preprocessingSettingsContainer">
+              <!-- Dynamic pre-processing module settings -->
+            </div>
+          </div>
+
+          <!-- ── Bucket: Solver ─────────────────────────────────────────── -->
+          <div class="settings-group" data-bucket="solver" data-settings-group="solver">
+            <h4 class="settings-section-head">Color Solver</h4>
+            <table class="settings-table">
+              <tr><td title="Forward color model used for recipe lookup, previews, diagnostics, and luminance cap response.">Appearance Model</td><td>
+                <select id="cfgAppearanceModelProvider" class="stg-select">
+                  <option value="historical_spline">Color Model v1</option>
+                  <option value="photo_stack_bundle" selected>Color Model v2</option>
+                </select>
+              </td></tr>
+            </table>
+            <h5 class="settings-subsection-head">Recipe Search</h5>
+            <table class="settings-table">
+              <tr class="advanced-setting"><td title="How target colors outside the palette's reachable range are moved before recipe lookup. Nearest reachable color finds the closest printable color and may shift hue; Preserve hue reduces saturation (and brightness only when needed) without ever shifting hue. Both use the same out-of-gamut test: distance to the nearest printable color.">Out-of-gamut handling</td><td>
+                <select id="cfgGamutMode" class="stg-select">
+                  <option value="hull">Nearest reachable color</option>
+                  <option value="hue_preserving">Preserve hue</option>
+                </select>
+              </td></tr>
+              <tr class="advanced-setting"><td title="Scale image targets so source white maps to the print's paper white (thinnest white stack). Keeps pale tints in gamut instead of clipping them to white. Predicted previews are print-relative and will read slightly darker/warmer when enabled.">White-point rescale</td><td><label class="stg-check"><input type="checkbox" id="cfgGamutWhiteRescale"> Enabled</label></td></tr>
+              <tr><td title="Apply calibrated correction data during solve LUT construction. Color Model v1 uses legacy pair corrections; Color Model v2 uses its correction layer.">Color corrections</td><td><label class="stg-check"><input type="checkbox" id="cfgUseCorrections" checked> Enabled</label></td></tr>
+              <tr><td title="Maximum number of distinct colored filaments used to build a planned color region's recipe. Higher values can match colors better but increase recipe search cost.">Max colors per region <span class="stg-range">1–7</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgKMax" class="unit-input" value="3"></div></td></tr>
+              <tr class="advanced-setting"><td title="How far (OKLab dE) a color may be from the nearest printable color before it is treated as out of gamut and remapped. Applies the same way in every out-of-gamut handling mode. Lower values are stricter.">Color mismatch tolerance <span class="stg-range">0.01–0.20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDeThreshold" class="unit-input" value="0.01"><span class="unit-suffix">dE</span></div></td></tr>
+              <tr class="advanced-setting"><td title="Trade-off between color accuracy and brightness accuracy when matching printable recipes. Center = balanced. Each step right makes color errors count less against brightness (one step ≈ accepting double the brightness error to fix the same color error); steps left favor tone instead. The number shown is the raw weight used by the solver.">Chroma weight <span class="stg-range">0.125–8.0</span></td><td><div class="chroma-weight-control"><div class="chroma-weight-track"><div class="chroma-weight-labels"><span>Tone</span><span>Color</span></div><input type="range" id="cfgChromaWeight" class="control-slider slider-with-center" min="-3" max="3" step="0.25" value="0" data-center="0"></div><span class="range-value" id="cfgChromaWeightReadout">1.00</span></div></td></tr>
+            </table>
+            <h5 class="settings-subsection-head">Region Construction</h5>
+            <table class="settings-table">
+              <tr class="advanced-setting"><td title="How Prisma divides the image into initial color regions before recipe solving. Image-aware modes follow source structure; Grid uses fixed square planning cells.">Region method</td><td>
+                <select id="cfgCellMode" class="stg-select">
+                  <option value="felzenszwalb">Image regions</option>
+                  <option value="slic">Superpixels</option>
+                  <option value="grid">Fixed grid</option>
+                </select>
+              </td></tr>
+              <tr class="advanced-setting"><td title="Resolution used to plan the initial color regions. 1x uses the full solve grid; higher values plan on a coarser grid, making broader, simpler regions that can solve faster but may follow fine edges less closely.">Region planning scale <span class="stg-range">1–4</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage1Coarsening" class="unit-input" value="1"><span class="unit-suffix">×</span></div></td></tr>
+              <tr><td title="Target physical width for initial color regions before recipe corrections. Smaller values follow image structure more closely; larger values make broader, simpler regions.">Color region target</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgColorRegionTarget" class="unit-input" value="0.60"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr class="advanced-setting"><td title="Allow localized solve-grid pixels inside a broader color region to use a better-matching recipe when the color improvement is strong enough. This can preserve fine image detail, but may create more small recipe patches.">Local recipe corrections</td><td><label class="stg-check"><input type="checkbox" id="cfgStage2FineOverride" checked> Enabled</label></td></tr>
+              <tr class="advanced-setting"><td title="Refine recipe boundaries after region solving: boundary pixels adopt a neighboring recipe where that clearly lowers color error. Can run multiple passes when Mutation passes is above 1.">Boundary mutation</td><td><label class="stg-check"><input type="checkbox" id="cfgStage2BoundaryMutation" checked> Enabled</label></td></tr>
+              <tr class="boundary-mutation-field advanced-setting"><td title="Maximum number of boundary refinement passes. Each pass can move a recipe boundary by one pixel; passes stop early once no further improvements are found. 1 preserves the old single-pass default.">Mutation passes <span class="stg-range">1–16</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMaxPasses" class="unit-input" placeholder="1"></div></td></tr>
+              <tr class="boundary-mutation-field advanced-setting"><td title="Only consider boundary pixels whose current color error is at or above this percentile of all boundary candidates, recomputed each pass. Empty = no filter (all boundary candidates eligible).">Mutation current-dE percentile</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationPercentile" class="unit-input" placeholder="off"><span class="unit-suffix">pctl</span></div></td></tr>
+              <tr class="boundary-mutation-field advanced-setting"><td title="Minimum average color-error improvement (dE) a connected patch must achieve to be accepted. Empty = 0.010.">Mutation min gain</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMinGain" class="unit-input" placeholder="0.010"><span class="unit-suffix">dE</span></div></td></tr>
+              <tr class="boundary-mutation-field advanced-setting"><td title="Minimum shared boundary with the donor region: an accepted patch must touch the region it borrows its recipe from along at least this length. Empty = 1 pixel of contact.">Mutation min contact</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMinComponent" class="unit-input" placeholder="off"><span class="unit-suffix">mm</span></div></td></tr>
+            </table>
+          </div>
+
+          <!-- ── Bucket: White Cap ──────────────────────────────────────── -->
+          <div class="settings-group" data-bucket="white-cap" data-settings-group="white-cap">
+            <h4 class="settings-section-head">White Cap</h4>
+            <table class="settings-table">
+              <tr><td title="Minimum number of white cap layers above color layers. The millimeter thickness is this layer count multiplied by the current layer height.">Min Cap Layers <span class="stg-range">1+</span></td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDWcMin" class="unit-input" value="1" min="1" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
+            </table>
+            <h5 class="settings-subsection-head">Boundary</h5>
+            <div class="settings-summary advanced-setting" id="capSummary"></div>
+            <table class="settings-table">
+              <tr class="luminance-mode-field luminance-limit-row"><td title="Controls whether broad luminance shading is carried more by the smooth boundary cap or by fine detail cap relief.">Shading balance <span class="stg-range">0-100</span></td><td><div class="luminance-limit-control"><button class="ghost-button xxs" id="cfgBaseShadingLimitSuggest" type="button" title="Suggest a shading balance from the selected image">Suggest</button><div class="range-row luminance-limit-range"><span class="range-end-label">Detail</span><input type="range" id="cfgBaseShadingLimitSlider" min="0" max="100" step="5" value="75"><span class="range-end-label">Smooth</span></div><div class="input-with-unit stg-iwu"><input type="number" id="cfgBaseShadingLimit" class="unit-input" value="75" min="0" max="100" step="5" inputmode="numeric"><span class="unit-suffix">%</span></div></div></td></tr>
+              <tr class="cap-mode-field advanced-setting"><td title="Controls the white boundary cap that covers the color stack. Smooth prioritizes a continuous outer surface; Detail Aware preserves more final appearance while keeping the structural boundary cap minimal.">Boundary cap</td><td>
+                <select id="cfgCapMode" class="stg-select">
+                  <option value="appearance_bounded_smooth">Detail Aware</option>
+                  <option value="smooth_variable">Smooth</option>
+                </select>
+              </td></tr>
+              <tr class="cap-appearance-bound-field advanced-setting"><td title="Maximum extra model-domain color error allowed when the smoothed boundary cap moves away from the raw optical cap. Lower values preserve appearance more aggressively.">Appearance budget <span class="stg-range">0–0.05</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgBoundaryCapDeBudget" class="unit-input" value="0.008"><span class="unit-suffix">dE</span></div></td></tr>
+              <tr class="cap-smooth-field"><td title="Physical smoothing radius for the boundary cap's upper surface. Lower values preserve more tonal relief; higher values create a cleaner contiguous white cap. The underside still fits the color stack exactly.">Smoothing radius <span class="stg-range">0–20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgSmoothKernel" class="unit-input" value="1"><span class="unit-suffix">mm</span></div></td></tr>
+            </table>
+            <h5 class="settings-subsection-head detail-section-head">Detail</h5>
+            <table class="settings-table">
+              <tr class="detail-surface-field"><td title="Maximum number of whole white detail layers allowed above the boundary screen. This permits detail height; it does not force the detail cap to use every layer.">Detail depth</td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDetailCapMaxLayers" class="unit-input" value="5" min="0" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
+            </table>
+          </div>
+
+        </div>
+
+      </section>
+
+      <!-- ── Tab: Preview (results of a solve; #tabSolve/data-tab="solve" route kept) ── -->
+      <section class="tab-content is-hidden" id="tabSolve">
+        <div class="solve-layout">
+          <!-- ── Left: main content ──────────────────────────────── -->
+          <div class="solve-main">
+            <!-- View mode toggle -->
+            <div class="comparison-view-bar" id="solveViewBar" style="display:none">
+              <!-- Everyday views (always visible) -->
+              <div class="comparison-view-toggle" id="solveViewToggle">
+                <button class="view-toggle-btn is-active" data-view="predicted" type="button" title="Show the final predicted lit-print appearance">Predicted</button>
+                <button class="view-toggle-btn" data-view="white_cap" type="button" title="Show white cap height maps">White Cap</button>
+                <button class="view-toggle-btn" data-view="color_ceiling" title="Color ceiling height map plus the color-only recipe viewer">Color Regions</button>
+                <button class="view-toggle-btn" data-view="total_surface" type="button" title="Show the final printable top surface height">Top Surface</button>
+                <button class="view-toggle-btn" data-view="surface_explorer" type="button" title="Inspect material identity at a selected surface height">Explorer</button>
+              </div>
+              <div class="view-option-group is-hidden" id="solveSourceControls">
+                <button class="view-option-toggle is-active" id="solveSourceImageToggle" type="button" aria-pressed="true" title="Show or hide the source-image column">Source Image: On</button>
+              </div>
+              <!-- Advanced (diagnostic) views — revealed inline on the same row -->
+              <button class="view-advanced-toggle" id="solveAdvancedToggle" type="button" aria-expanded="false" aria-controls="solveAdvancedViews" title="Show advanced diagnostic preview views">Advanced <span class="view-advanced-caret" aria-hidden="true">▾</span></button>
+              <div class="comparison-view-toggle view-advanced-group" id="solveAdvancedViews" hidden>
+                <button class="view-toggle-btn" data-view="thickness_maps" type="button" title="Show per-filament thickness maps">Thickness Maps</button>
+                <button class="view-toggle-btn" data-view="surface_highpass" type="button" title="Show only surface heights above the threshold">Highpass</button>
+              </div>
+              <!-- Parked debug views (Cap Diff / Color Diff) — revealed only with ?dev=1 -->
+              <span class="view-parked-label" id="solveParkedLabel" aria-hidden="true" hidden>dev</span>
+              <div class="comparison-view-toggle view-parked-group" id="solveParkedViews" hidden>
+                <button class="view-toggle-btn" data-view="cap_diff" type="button" title="Compare white cap thickness between two selected runs">Cap Diff</button>
+                <button class="view-toggle-btn" data-view="filament_diff" type="button" title="Compare one colored filament thickness map between two selected runs">Color Diff</button>
+              </div>
+            </div>
+
+            <!-- Sub-controls (contextual) -->
+            <div class="comparison-sub-controls" id="solveSubControls" style="display:none">
+              <div class="solve-view-caption is-hidden" id="solveViewCaption" aria-live="polite"></div>
+              <div class="comparison-sub-row is-hidden" id="solveColorRegionsControls">
+                <span class="sub-label">View:</span>
+                <div class="segmented-control preview-segmented-control" role="radiogroup" aria-label="Color regions view">
+                  <button class="segmented-btn is-active" data-solve-color-regions-view="color_ceiling" type="button" role="radio" aria-checked="true" title="Color-ceiling height map">Color Ceiling</button>
+                  <button class="segmented-btn" data-solve-color-regions-view="recipe_regions" type="button" role="radio" aria-checked="false" title="Recipe viewer: color-only render + recipe cookbook">Recipe Viewer</button>
+                </div>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveWhiteCapControls">
+                <span class="sub-label">View:</span>
+                <div class="segmented-control preview-segmented-control" role="radiogroup" aria-label="White cap map">
+                  <button class="segmented-btn is-active" data-solve-white-cap-view="cap_map" type="button" role="radio" aria-checked="true" title="Show total white cap surface height">Total</button>
+                  <button class="segmented-btn" data-solve-white-cap-view="boundary_cap_map" type="button" role="radio" aria-checked="false" title="Show only boundary cap coverage">Boundary</button>
+                  <button class="segmented-btn" data-solve-white-cap-view="detail_cap_map" type="button" role="radio" aria-checked="false" title="Show only detail cap relief">Detail</button>
+                </div>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveThicknessMapControls">
+                <span class="sub-label">White cap:</span>
+                <div class="segmented-control preview-segmented-control" role="radiogroup" aria-label="White cap thickness map">
+                  <button class="segmented-btn is-active" data-solve-thickness-map-kind="total" type="button" role="radio" aria-checked="true" title="Use total white cap thickness maps">Total</button>
+                  <button class="segmented-btn" data-solve-thickness-map-kind="boundary" type="button" role="radio" aria-checked="false" title="Use boundary cap thickness maps">Boundary</button>
+                  <button class="segmented-btn" data-solve-thickness-map-kind="detail" type="button" role="radio" aria-checked="false" title="Use detail cap thickness maps">Detail</button>
+                </div>
+              </div>
+              <div class="comparison-sub-row view-option-group is-hidden" id="solveContourControls">
+                <button class="view-option-toggle is-active" id="solveContoursToggle" type="button" aria-pressed="true" title="Show or hide boundaries for the current view">Contours: On</button>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveHighpassControls">
+                <span class="sub-label">Threshold:</span>
+                <input type="range" id="highpassThresholdSlider" min="0" max="100" value="100" style="width:140px" title="Highpass threshold">
+                <span id="highpassThresholdValue" class="sub-value">3.00 mm</span>
+                <span id="highpassLayerCount" class="sub-value"></span>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveExplorerControls">
+                <span class="sub-label">Height:</span>
+                <input type="range" id="explorerHeightSlider" min="0" max="100" value="100" style="width:140px" title="Explorer center height">
+                <span id="explorerHeightValue" class="sub-value">3.00 mm</span>
+                <span id="explorerHeightLayers" class="sub-value"></span>
+                <span class="sub-label explorer-band-control" style="margin-left:12px">Band ±</span>
+                <input type="range" id="explorerBandSlider" class="explorer-band-control" min="1" max="20" value="3" style="width:120px" title="Explorer band half-width">
+                <span id="explorerBandValue" class="sub-value explorer-band-control">0.24 mm</span>
+                <span id="explorerBandLayers" class="sub-value explorer-band-control"></span>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveCapDiffControls">
+                <span class="sub-label">Mode:</span>
+                <div class="segmented-control preview-segmented-control" role="radiogroup" aria-label="Diff mode">
+                  <button class="segmented-btn is-active" data-cap-diff-mode="changed" type="button" role="radio" aria-checked="true" title="Show all changed pixels">Changed</button>
+                  <button class="segmented-btn" data-cap-diff-mode="added" type="button" role="radio" aria-checked="false" title="Show pixels that became thicker">Added</button>
+                  <button class="segmented-btn" data-cap-diff-mode="removed" type="button" role="radio" aria-checked="false" title="Show pixels that became thinner">Removed</button>
+                  <button class="segmented-btn" data-cap-diff-mode="signed" type="button" role="radio" aria-checked="false" title="Show thicker and thinner pixels with signed colors">Signed</button>
+                </div>
+              </div>
+              <div class="comparison-sub-row is-hidden" id="solveFilamentDiffControls">
+                <span class="sub-label">Filament:</span>
+                <select id="solveFilamentDiffSelect" class="stg-select" title="Choose the filament thickness map to compare"></select>
+              </div>
+            </div>
+
+            <!-- Comparison grid: source + run columns -->
+            <div class="solve-comparison-grid" id="solveComparisonGrid">
+              <p class="muted-line" id="solveGridEmpty">Solve a palette to see results here.</p>
+            </div>
+
+            <!-- Scale bar legend for the active preview view -->
+            <div class="solve-legend-row is-hidden" id="solveLegend">
+              <div class="solve-legend-content" id="solveLegendContent"></div>
+            </div>
+
+            <!-- Thickness maps (shown when thickness_maps view active) -->
+            <div class="panel inset-panel solve-view-card solve-thickness-card" id="solveThicknessCard" style="display:none">
+              <div class="filament-maps-grid" id="filamentMapsGrid"></div>
+            </div>
+
+            <div class="panel inset-panel solve-view-card solve-inspector-card" id="solveInspectorCard" style="display:none">
+              <div class="solve-inspector-grid" id="solveInspectorGrid"></div>
+            </div>
+          </div>
+
+          <!-- ── Right: solve run sidebar ─────────────────────────── -->
+          <div class="solve-deck-sidebar">
+            <div class="creation-panel-header deck-header">
+              <span class="panel-kicker">Solve History</span>
+              <button class="ghost-button xxs" id="savedRunsBtn"
+                      title="Browse, load, download, or delete saved runs">Load</button>
+              <button class="ghost-button xxs" id="clearSolveHistoryBtn" title="Clear all solve runs">Clear</button>
+            </div>
+            <div class="solve-run-cards" id="solveRunCards">
+              <p class="muted-line" id="solveRunEmpty">No solves yet</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Tab: Export ──────────────────────────────────────────────────── -->
+      <section class="tab-content is-hidden" id="tabExport">
+        <div class="export-layout">
+          <div class="solve-deck-sidebar export-run-sidebar">
+            <div class="creation-panel-header deck-header">
+              <div class="export-panel-heading">
+                <span class="export-step-badge">1</span>
+                <h3>Select Run</h3>
+              </div>
+              <button class="ghost-button xxs" id="exportSavedRunsBtn"
+                      title="Browse, load, download, or delete saved runs">Load</button>
+              <button class="ghost-button xxs" id="exportClearSolveHistoryBtn" title="Clear all solve runs">Clear</button>
+            </div>
+            <div class="solve-run-cards" id="exportRunCards">
+              <p class="muted-line" id="exportRunEmpty">No completed solves yet</p>
+            </div>
+          </div>
+
+          <div class="export-main-panels">
+            <!-- Pending export controls -->
+            <div class="panel inset-panel export-panel export-controls-panel">
+              <div class="export-panel-titlebar export-command-titlebar">
+                <div class="export-panel-heading">
+                  <span class="export-step-badge">2</span>
+                  <h3>Print Files</h3>
+                </div>
+                <div class="toolbar-inline export-actions">
+                  <button class="primary-button" id="exportFilesBtn" disabled title="Build the print files (STL/3MF + manifest) for the selected run.">Generate Print Files</button>
+                </div>
+              </div>
+              <div class="export-panel-body export-controls-body">
+                <div class="export-command-grid">
+                  <div class="export-options">
+                    <div class="control-row">
+                      <label class="control-label" title="Export either individual STL files or one bundled 3MF file.">Output format</label>
+                      <select id="exportOutputFormat" class="control-input">
+                        <option value="3mf" selected>Single 3MF file</option>
+                        <option value="stls">Individual STL files</option>
+                      </select>
+                    </div>
+                    <div class="control-row">
+                      <label class="control-label" title="Geometry source for exported files.">Mesh method</label>
+                      <select id="exportGeometrySource" class="control-input">
+                        <option value="field_derived" selected>Field-derived white cap</option>
+                        <option value="exact_raster">Exact solved raster</option>
+                      </select>
+                    </div>
+                    <div class="control-row">
+                      <label class="control-label" title="Field reconstruction scale for field-derived white cap export. Ignored for exact solved raster export.">Mesh detail</label>
+                      <select id="exportFieldScale" class="control-input">
+                        <option value="2">2x large/fast</option>
+                        <option value="4" selected>4x balanced</option>
+                        <option value="8">8x high detail</option>
+                        <option value="16">16x maximum detail</option>
+                      </select>
+                    </div>
+                  </div>
+                  <figure class="export-solve-preview" id="exportSolvePreview">
+                    <div class="export-solve-preview-media">
+                      <img id="exportSolvePreviewImg" alt="Selected solve preview" hidden>
+                      <div class="export-solve-preview-empty" id="exportSolvePreviewEmpty">Select a solved run to preview it</div>
+                    </div>
+                    <figcaption id="exportSolvePreviewCaption">Selected solve</figcaption>
+                    <div class="export-solve-preview-dimensions" id="exportSolvePreviewDimensions">Image dimensions unavailable</div>
+                  </figure>
+                </div>
+                <div class="muted-line export-target-line" id="exportTargetLine">Select one completed solve run to export.</div>
+              </div>
+            </div>
+
+            <!-- Immutable outputs owned by the selected solve -->
+            <div class="panel inset-panel export-panel export-results-panel">
+              <div class="export-panel-titlebar">
+                <div class="export-panel-heading">
+                  <span class="export-step-badge">3</span>
+                  <h3>Generated Exports</h3>
+                </div>
+                <div class="toolbar-inline">
+                  <button class="ghost-button small" id="downloadAllBtn" disabled title="Download the generated files as a .zip">Download .zip</button>
+                </div>
+              </div>
+              <div class="export-panel-body export-results-body">
+                <div class="export-record-region">
+                  <div class="export-output-heading">
+                    <div>
+                      <h4>Exports from this solve</h4>
+                      <p class="muted-line">Select an export to inspect its files and instructions.</p>
+                    </div>
+                  </div>
+                  <div class="export-record-list" id="exportRecordList">
+                    <div class="export-record-empty">No exports generated for this solve yet</div>
+                  </div>
+                </div>
+
+                <section class="export-output-section export-files-section">
+                  <div class="export-output-heading">
+                    <h4>Generated Files</h4>
+                  </div>
+                  <div id="exportFileList">
+                    <span class="muted-line">No export selected</span>
+                  </div>
+                </section>
+
+                <section class="export-output-section export-swap-section">
+                  <div class="export-output-heading">
+                    <div>
+                      <h4>Swap Instructions</h4>
+                      <p class="muted-line">Filament loading order and swap groups for this exact export.</p>
+                    </div>
+                    <button class="ghost-button small" id="copySwapBtn" title="Copy the swap instruction sequence to your clipboard">Copy to Clipboard</button>
+                  </div>
+                  <pre class="swap-instructions" id="swapInstructions">Select an export to view swap instructions</pre>
+                </section>
+
+                <section class="export-output-section export-quality-section">
+                  <div class="export-output-heading">
+                    <h4>Mesh Report</h4>
+                  </div>
+                  <div id="exportQualityTable">
+                    <span class="muted-line">Select an export to view its mesh report</span>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+        </div><!-- end .tab-content-area -->
+
+        <!-- ── Detail Drawer (slide-in from right) ─────────────────────────── -->
+        <aside class="detail-drawer surface-drawer" id="detailDrawer" aria-hidden="true">
+          <div class="drawer-header surface-header">
+            <div class="window-header__title-slot">
+              <h3 class="surface-title" id="drawerTitle">Details</h3>
+            </div>
+            <div class="window-header__actions surface-header-actions">
+              <div class="surface-window-controls">
+                <button class="close-button window-header__button surface-header-button surface-close" id="closeDetailDrawer" aria-label="Close details" title="Close details">
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2 2l8 8M10 2L2 10"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="drawer-body surface-body" id="drawerBody">
+            <p class="muted-line">Select an item to view details.</p>
+          </div>
+        </aside>
+
+        <!-- ── Settings Drawer (slide-in from right; overlays the content area) ── -->
+        <aside class="settings-drawer surface-drawer" id="settingsDrawer" aria-hidden="true">
+          <div class="settings-drawer-header surface-header">
+            <div class="window-header__title-slot settings-drawer-headings">
+              <h3 class="drawer-header-title surface-title">Settings</h3>
+              <p class="drawer-header-subtitle" id="settingsDrawerSubtitle"></p>
+            </div>
+            <div class="window-header__actions surface-header-actions settings-drawer-actions">
+              <button class="view-option-toggle settings-advanced-header-toggle" id="settingsAdvancedToggle" type="button" aria-pressed="false" title="Show or hide less frequently adjusted settings">Advanced: Off</button>
+              <div class="surface-window-controls">
+                <button class="close-button window-header__button surface-header-button surface-close" id="closeSettingsDrawer" aria-label="Close settings" title="Close settings">
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2 2l8 8M10 2L2 10"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-drawer-body surface-body" id="settingsDrawerBody">
+            <!-- .settings-grid gets reparented here when drawer opens -->
+          </div>
+        </aside>
+
+      </div><!-- end .content-with-drawer -->
+
+      <!-- ── Printer Configuration Page (hidden by default) ────────────────── -->
+      <section class="printer-config-page is-hidden" id="printerConfigPage">
+        <div class="pc-card surface-window">
+          <div class="pc-toolbar window-header surface-header">
+            <div class="window-header__title-slot">
+              <h3 class="window-header__title surface-title pc-toolbar-title">Printer Configuration</h3>
+            </div>
+            <div class="window-header__actions surface-header-actions">
+              <div class="surface-window-controls">
+                <button class="close-button window-header__button surface-header-button surface-close" id="printerConfigClose" aria-label="Close printer configuration" title="Close printer configuration">
+                  <svg viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2 2l8 8M10 2L2 10"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="pc-body">
+            <!-- Printer selector -->
+            <div class="pc-selector-row">
+              <select id="pcPrinterSelect" class="control-input pc-printer-select"></select>
+              <button class="ghost-button xs" id="pcNewPrinterBtn">+ New</button>
+              <button class="ghost-button xs danger" id="pcDeletePrinterBtn">Delete</button>
+            </div>
+
+            <!-- Printer fields -->
+            <div class="pc-section">
+              <div class="settings-section-head">General</div>
+              <div class="pc-fields">
+                <label class="ctrl-lbl">Name</label>
+                <input type="text" id="pcName" class="control-input">
+                <label class="ctrl-lbl">Print Area X</label>
+                <input type="number" id="pcAreaX" class="control-input" min="50" max="500" step="1">
+                <label class="ctrl-lbl">Print Area Y</label>
+                <input type="number" id="pcAreaY" class="control-input" min="50" max="500" step="1">
+                <label class="ctrl-lbl">AMS Units</label>
+                <input type="number" id="pcAmsUnits" class="control-input" min="1" max="4" step="1">
+                <label class="ctrl-lbl">Slots per AMS</label>
+                <input type="number" id="pcSlotsPerAms" class="control-input" min="1" max="16" step="1">
+              </div>
+            </div>
+
+            <!-- Nozzle profiles -->
+            <div class="pc-section">
+              <div class="settings-section-head" style="display:flex; align-items:center; justify-content:space-between;">
+                Nozzle Profiles
+                <button class="ghost-button xxs" id="pcAddNozzleBtn">+ Add</button>
+              </div>
+              <table class="pc-nozzle-table" id="pcNozzleTable">
+                <thead>
+                  <tr>
+                    <th>Nozzle</th>
+                    <th>Min LH</th>
+                    <th>Max LH</th>
+                    <th>Min W</th>
+                    <th>Min Len</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="pcNozzleBody">
+                  <!-- JS fills rows -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="pc-footer">
+            <span class="small-copy">Changes saved automatically</span>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── Overlay for drawers ──────────────────────────────────────────────── -->
+  <div class="drawer-overlay" id="drawerOverlay" aria-hidden="true"></div>
+
+  <!-- Library management modal removed — replaced by inline filter in Palette tab -->
+
+  <!-- Active Filaments modal overlay -->
+  <div class="modal-overlay surface-overlay library-modal-backdrop is-hidden" id="libraryModalBackdrop" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window library-modal">
+      <div class="modal-dialog-header window-header surface-header library-modal-header">
+        <div class="window-header__title-slot library-modal-title-slot">
+          <span class="window-header__title surface-title library-modal-title">Active Filaments</span>
+          <span class="toolbar-chip" id="libraryFilterStatus">0 / 0 enabled</span>
+        </div>
+        <div class="window-header__actions surface-header-actions library-modal-actions">
+          <button class="ghost-button xxs surface-header-action-button" id="libraryFilterSelectAll">All</button>
+          <button class="ghost-button xxs surface-header-action-button" id="libraryFilterDeselectAll">None</button>
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close library-modal-close" id="libraryModalClose" aria-label="Close active filaments" title="Close active filaments">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="surface-body library-modal-body">
+        <div class="library-filter-grid" id="libraryFilterGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Published Model Libraries manager -->
+  <div class="modal-overlay surface-overlay is-hidden" id="modelLibrariesModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window model-libraries-modal" role="dialog" aria-modal="true" aria-labelledby="modelLibrariesModalTitle">
+      <div class="modal-dialog-header window-header surface-header model-libraries-modal-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="modelLibrariesModalTitle">Model Libraries</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions model-libraries-header-actions">
+          <label class="ghost-button window-header__button surface-header-button model-library-install-button" for="modelLibraryPackageInput">Install Library…</label>
+          <input class="is-hidden" id="modelLibraryPackageInput" type="file" accept=".zip,application/zip">
+          <button class="ghost-button window-header__button surface-header-button" id="modelLibrariesOpenFolderBtn" type="button">Open Folder</button>
+          <span class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close" id="modelLibrariesCloseBtn" aria-label="Close model libraries" title="Close model libraries">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10"></path></svg>
+            </button>
+          </span>
+        </div>
+      </div>
+      <div class="model-libraries-notice is-hidden" id="modelLibrariesNotice" role="status" aria-live="polite"></div>
+      <div class="modal-dialog-body surface-body model-libraries-body">
+        <section class="model-libraries-list-panel" aria-label="Installed model libraries">
+          <div class="model-libraries-section-head">
+            <span>Installed Libraries</span>
+            <button class="ghost-button xxs" id="modelLibrariesRefreshBtn" type="button">Refresh</button>
+          </div>
+          <div class="model-libraries-list" id="modelLibrariesList"></div>
+        </section>
+        <section class="model-library-details-panel" id="modelLibraryDetails" aria-label="Selected model library details"></section>
+      </div>
+      <div class="modal-dialog-footer surface-footer model-libraries-footer">
+        <span class="model-libraries-footer-status" id="modelLibrariesFooterStatus" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-browser confirm/prompt dialog -->
+  <div class="modal-overlay surface-overlay" id="appDialog" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window app-dialog">
+      <div class="modal-dialog-header window-header surface-header app-dialog-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="appDialogTitle">Confirm</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close" id="appDialogClose" aria-label="Close dialog" title="Close dialog">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-dialog-body surface-body app-dialog-body">
+        <p class="app-dialog-msg" id="appDialogMsg"></p>
+        <input type="text" class="control-input app-dialog-input" id="appDialogInput" style="display:none">
+        <div class="app-dialog-hint is-hidden" id="appDialogHint"></div>
+      </div>
+      <div class="modal-dialog-footer app-dialog-buttons surface-footer" id="appDialogButtons"></div>
+    </div>
+  </div>
+
+  <!-- Palette save dialog -->
+  <div class="modal-overlay surface-overlay is-hidden" id="paletteSaveModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window palette-save-modal">
+      <div class="modal-dialog-header window-header surface-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title">Save Palette</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close" id="paletteSaveModalClose" aria-label="Close save palette" title="Close save palette">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-dialog-body surface-body palette-save-body">
+        <label class="palette-save-label" for="paletteSaveNameInput">Palette name</label>
+        <input type="text" class="control-input palette-save-input" id="paletteSaveNameInput">
+      </div>
+      <div class="modal-dialog-footer surface-footer palette-save-actions">
+        <button class="ghost-button small" id="paletteSaveCancel">Cancel</button>
+        <button class="primary-button small" id="paletteSaveSubmit">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Profile picker / manager -->
+  <div class="modal-overlay surface-overlay is-hidden" id="settingsProfileModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window settings-profile-modal">
+      <div class="modal-dialog-header window-header surface-header settings-profile-modal-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="settingsProfileModalTitle">Settings Profiles</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions settings-profile-modal-header-actions">
+          <button class="ghost-button window-header__button surface-header-button settings-profile-load-run-button" id="settingsProfileModalLoadRunBtn">Load Settings from Run…</button>
+          <button class="ghost-button window-header__button surface-header-button settings-profile-restore-button" id="settingsProfileModalRestoreBtn">Restore System Defaults</button>
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close settings-profile-window-close" id="settingsProfileModalClose" aria-label="Close settings profiles" title="Close settings profiles">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-profile-modal-list-wrap">
+        <div class="settings-profile-modal-list" id="settingsProfileModalList"></div>
+      </div>
+      <div class="settings-profile-modal-selection" id="settingsProfileModalSelection"></div>
+    </div>
+  </div>
+
+  <!-- Settings Profile save-as modal -->
+  <div class="modal-overlay surface-overlay is-hidden" id="settingsProfileSaveModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window settings-profile-save-modal">
+      <div class="modal-dialog-header window-header surface-header settings-profile-modal-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="settingsProfileSaveModalTitle">Save Settings Profile As</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close settings-profile-window-close" id="settingsProfileSaveModalClose" aria-label="Close save settings profile" title="Close save settings profile">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-profile-save-list-wrap">
+        <div class="settings-profile-modal-list settings-profile-save-list" id="settingsProfileSaveList"></div>
+      </div>
+      <div class="settings-profile-save-footer">
+        <div class="settings-profile-save-entry">
+          <label class="settings-profile-save-label" for="settingsProfileSaveName">Profile name</label>
+          <input type="text" class="control-input settings-profile-save-input" id="settingsProfileSaveName">
+        </div>
+        <div class="settings-profile-save-status" id="settingsProfileSaveStatus"></div>
+        <div class="modal-actions surface-footer settings-profile-save-actions">
+          <button class="primary-button" id="settingsProfileSaveModalSubmit">Save</button>
+          <button class="ghost-button" id="settingsProfileSaveModalCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved Runs browser (Stage 9b) -->
+  <div class="modal-overlay surface-overlay is-hidden" id="savedRunsModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window saved-runs-modal">
+      <div class="modal-dialog-header window-header surface-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="savedRunsModalTitle">Saved Runs</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <label class="ghost-button window-header__button surface-header-button saved-run-upload-button" id="savedRunUploadLabel" for="savedRunUpload">Load from file…</label>
+          <input type="file" id="savedRunUpload" accept=".zip" hidden>
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close" id="savedRunsCloseBtn" aria-label="Close saved runs" title="Close saved runs">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="saved-run-rows surface-body" id="savedRunRows" role="listbox" aria-label="Saved runs"></div>
+      <div class="modal-actions surface-footer saved-runs-actions">
+        <div class="saved-runs-context-actions">
+          <button class="ghost-button small" id="savedRunSaveBtn" disabled>Save</button>
+          <button class="ghost-button small" id="savedRunRenameBtn" disabled>Rename</button>
+          <button class="ghost-button small danger saved-run-delete" id="savedRunDeleteBtn" disabled>Delete</button>
+        </div>
+        <div class="saved-runs-static-actions">
+          <button class="ghost-button small" id="savedRunDownloadBtn" disabled>Download</button>
+          <button class="ghost-button small" id="savedRunLoadSettingsBtn" disabled>Load Settings</button>
+          <button class="primary-button small" id="savedRunLoadBtn" disabled>Load</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved-run rename dialog (Stage 9b) -->
+  <div class="modal-overlay surface-overlay is-hidden" id="renameSavedRunModal" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-window surface-window rename-saved-run-modal">
+      <div class="modal-dialog-header window-header surface-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title">Rename saved run</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close" id="renameSavedRunCancel" aria-label="Close rename saved run" title="Close rename saved run">
+              <svg viewBox="0 0 12 12" aria-hidden="true">
+                <path d="M2 2l8 8M10 2L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="rename-saved-run-body surface-body">
+        <div class="rename-saved-run-field">
+          <label class="rename-saved-run-label" for="renameSavedRunDisplay">Display name</label>
+          <input type="text" class="control-input rename-saved-run-input" id="renameSavedRunDisplay">
+        </div>
+        <div class="rename-saved-run-field">
+          <label class="rename-saved-run-label" for="renameSavedRunDiskName">On-disk name</label>
+          <input type="text" class="control-input rename-saved-run-input" id="renameSavedRunDiskName" readonly>
+          <p class="rename-saved-run-hint">The zip filename won't change.</p>
+        </div>
+        <div class="modal-actions surface-footer rename-saved-run-actions">
+          <button class="primary-button" id="renameSavedRunSubmit">Rename</button>
+          <button class="ghost-button" id="renameSavedRunCancelBtn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Operation progress overlay -->
+  <div class="op-progress is-hidden" id="opProgress" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+    <span class="op-progress-label" id="opProgressLabel">Working...</span>
+    <div class="op-progress-bar"><div class="op-progress-fill indeterminate"></div></div>
+    <span class="op-progress-elapsed" id="opProgressElapsed">0s</span>
+    <button class="op-progress-cancel" id="opProgressCancel">Cancel</button>
+  </div>
+
+  <!-- Comparison lightbox -->
+  <div class="comp-lightbox surface-lightbox is-hidden" id="compLightbox">
+    <button class="comp-lightbox-close surface-lightbox-close" id="compLightboxClose" aria-label="Close lightbox" title="Close lightbox">
+      <svg viewBox="0 0 12 12" aria-hidden="true">
+        <path d="M2 2l8 8M10 2L2 10"></path>
+      </svg>
+    </button>
+    <div class="comp-lightbox-content" id="compLightboxContent"></div>
+  </div>
+
+  <script src="data.js?v=2026-04-14-ui22"></script>
+  <script src="api.js?v=2026-07-14-ui31"></script>
+  <script src="app.js?v=2026-07-14-ui31"></script>
+</body>
+</html>

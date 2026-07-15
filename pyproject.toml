@@ -1,0 +1,74 @@
+[project]
+name = "prisma-lithophane"
+version = "0.1.0"
+description = "Local color-lithophane generation and filament calibration tools"
+requires-python = ">=3.12"
+dependencies = [
+    "jupyterlab>=4.5.4",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.2",
+    "opencv-python>=4.13.0.92",
+    "opencv-python-headless>=4.13.0.92",
+    "pandas>=3.0.1",
+    "plotly>=6.5.2",
+    "rawpy>=0.26.1",
+    "scipy>=1.17.1",
+    "scipy-stubs~=1.17.1",
+    "shapely>=2.1.2",
+    "ipympl>=0.9",
+    "pillow>=10.0",
+    "build123d>=0.10.0",
+    "scikit-image>=0.26.0",
+    "trimesh>=4.11.4",
+    "mapbox-earcut>=2.0.0",
+    "fastapi>=0.135.2",
+    "uvicorn>=0.42.0",
+    "python-multipart>=0.0.22",
+    "exifread>=3.5.1",
+    "pytest>=9.0.2",
+    "playwright>=1.58.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pillow>=12.1.1",
+    "playwright>=1.58.0",
+    "pytest>=9.0.2",
+]
+generator-runtime = [
+    "fastapi>=0.135.2",
+    "mapbox-earcut>=2.0.0",
+    "numpy>=2.4.2",
+    "opencv-python-headless>=4.13.0.92",
+    "pandas>=3.0.1",
+    "packaging>=24.0",
+    "pillow>=12.1.1",
+    "python-multipart>=0.0.22",
+    "scikit-image>=0.26.0",
+    "scipy>=1.17.1",
+    "shapely>=2.1.2",
+    "trimesh>=4.11.4",
+    "uvicorn>=0.42.0",
+    "xxhash>=3.6.0",
+]
+calibration-runtime = [
+    "exifread>=3.5.1",
+    "fastapi>=0.135.2",
+    "numpy>=2.4.2",
+    "opencv-python-headless>=4.13.0.92",
+    "packaging>=24.0",
+    "pandas>=3.0.1",
+    "pillow>=12.1.1",
+    "python-multipart>=0.0.22",
+    "rawpy>=0.26.1",
+    "scikit-image>=0.26.0",
+    "scipy>=1.17.1",
+    "uvicorn>=0.42.0",
+]
+packaging = [
+    "pyinstaller>=6.21.0,<7",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -1,0 +1,7 @@
+{
+  "a1_bilateral_denoise": false,
+  "b1_printscale_bilateral": false,
+  "b3_tv_flatten": false,
+  "c1_achievable_tonemap": false,
+  "c2_soft_gamut_compress": false
+}

@@ -1,0 +1,148 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+*.swp
+
+# Virtual environment
+.venv/
+.venv-release/
+
+# Windows release build output
+.release-build/
+
+# Git worktrees
+.worktrees/
+
+# Raw photos (too large for git)
+*.CR2
+
+# Generated caches
+lithophane_generator/cache/
+Prisma/data/thumbnails/
+
+# System backups (safety snapshots, too large for git)
+Prisma/data/_backup_*/
+
+# Scratch / tmp output from one-off runs
+tmp_boundary_previews/
+tmp_orientation_checks/
+Prisma/generator/.tmp/
+
+# Local Codex/dev-server run artifacts
+.codex-work/**/*.log
+.codex-work/**/*.pid
+.codex-work/tmp_*/
+.codex-work/verify_*/
+.codex-work/migration_preflight_reports*/
+.codex-work/migration_rehearsal*/
+.codex-work/migration_final_import*/
+.codex-work/migration_materialized_images*/
+.codex-work/migration_model_payload*/
+.codex-work/migration_runtime_bridge_probe*/
+.codex-work/migration_sqlite_runtime_bridge*/
+.codex-work/migration_extraction_regeneration*/
+
+# Git worktree scaffolding (isolated working copies)
+.claude/worktrees/
+Prisma/generator/.claude/
+
+# Claude auto-memory (persistent local state, not repo content)
+.claude/projects/
+
+# Task tracking (generated dashboard)
+.status/dashboard.html
+
+# Reference codebase (not version-tracked)
+PixeSTL_Java_Codebase/
+
+# Sandbox web app data (isolated copies, not canonical)
+unified_calibration/sandbox/thumbnails/
+unified_calibration/sandbox/images/
+unified_calibration/sandbox/blanks/
+unified_generator/sandbox/
+unified_generator/output/
+spectral_calibration/
+
+# Root-level scratch images
+/de_debug.png
+/palette_suggest*.png
+/Screenshot*.png
+screenshots/
+
+# User data (not version-tracked)
+/Calibration/
+/Generator/
+Prisma/inbox/
+Prisma/photos/
+Prisma/output/
+Prisma/legacy_data/
+Prisma/generator/app/modules.local.json
+Prisma/generator/app/printers.local.json
+Prisma/generator/.data-root
+Prisma/calibration/.data-root
+Prisma/calibration/.backend
+Prisma/calibration/.sqlite-path
+Prisma/calibration/.asset-root
+
+# System-managed data (not version-tracked except pinned generator presets)
+Prisma/data/calibration_revised_backend.sqlite
+Prisma/data/*.sqlite
+Prisma/data/*.sqlite-*
+Prisma/data/*.json
+Prisma/data/_system/
+Prisma/data/extraction_results/
+Prisma/data/filaments/
+Prisma/data/samples/
+Prisma/data/strips/
+Prisma/data/images/
+Prisma/data/segmentation/
+Prisma/data/step/
+Prisma/data/previews/
+Prisma/data/blanks/
+Prisma/data/generator/
+
+# Wing C / Wing D pinned presets ARE under version control.
+# Re-include the wing-* subdirectories of settings_profiles after the
+# blanket Prisma/data/generator/ exclusion above.
+!Prisma/data/generator/
+!Prisma/data/generator/settings_profiles/
+Prisma/data/generator/settings_profiles/*
+!Prisma/data/generator/settings_profiles/wing-c/
+!Prisma/data/generator/settings_profiles/wing-c/**
+!Prisma/data/generator/settings_profiles/wing-d/
+!Prisma/data/generator/settings_profiles/wing-d/**
+!Prisma/data/generator/settings_profiles/wing-b+d/
+!Prisma/data/generator/settings_profiles/wing-b+d/**
+
+# Stage 9a: generated/clearable generator data — never tracked (regenerated on
+# demand). These sit under the re-included Prisma/data/generator/ above, so they
+# need explicit re-ignoring after the negation.
+Prisma/data/generator/cache/
+Prisma/data/generator/logs/
+Prisma/data/generator/saved_runs/
+
+# Managed STEP artifact cache — regenerated from _system/steps_registry.json
+# on demand; do not track. (The registry itself IS tracked.)
+Prisma/data/_system/step_artifacts/
+Prisma/data/_system/image_metadata.json
+
+# Camera Transform artifact — system-managed build output (CURRENT pointer +
+# gen-* dirs) published by the calibration build job; provisioned into
+# worktrees via a directory junction. Never version-controlled.
+Prisma/data/camera_transform/
+
+# Development archive (safety copy of source data)
+archive/
+
+# Local experimentation scratch space
+DevelopmentSandbox/
+
+#Retired code
+/deprecated/

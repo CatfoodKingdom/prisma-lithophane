@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unified Calibration Workbook</title>
+  <link rel="stylesheet" href="style.css?v=20260714-calibration-inbox-geometry-v8">
+</head>
+<body>
+  <div class="app-shell">
+    <main class="workspace">
+      <header class="topbar utilitarian-topbar">
+          <h2>Calibration Logbook</h2>
+           <button class="ghost-button small" id="refreshDataBtn">Refresh Data</button>
+           <button class="ghost-button small" id="maintenanceBtn">Maintenance</button>
+           <button class="ghost-button small" id="publishModelsBtn">Publish Models</button>
+           <button class="ghost-button small" id="backupRestoreBtn">Backup / Restore</button>
+      </header>
+
+      <div class="mode-tab-row" id="modeSwitch">
+        <button class="mode-button is-active" data-mode="logbook">Logbook</button>
+        <button class="mode-button" data-mode="imageProcessing">Images</button>
+        <button class="mode-button" data-mode="filaments">Filaments</button>
+        <button class="mode-button" data-mode="geometries">Geometries</button>
+        <button class="mode-button" data-mode="profiles">Modeling</button>
+      </div>
+
+      <div class="subtab-row" id="subtabContainer">
+        <div id="subtabRow"></div>
+      </div>
+
+
+      <section class="context-grid is-collapsed" id="contextGrid">
+        <section class="panel utility-panel">
+          <div class="section-head">
+            <div>
+              <p class="panel-kicker">Next Actions</p>
+              <h3>What needs attention</h3>
+            </div>
+          </div>
+          <div id="nextActions" class="utility-list"></div>
+        </section>
+
+        <section class="panel utility-panel">
+          <div class="section-head">
+            <div>
+              <p class="panel-kicker">Library Summary</p>
+              <h3>Coverage and readiness</h3>
+            </div>
+          </div>
+          <div id="librarySummary" class="utility-list"></div>
+        </section>
+
+        <section class="panel utility-panel">
+          <div class="section-head">
+            <div>
+              <p class="panel-kicker">Qualitative Notes</p>
+              <h3>How the data looks</h3>
+            </div>
+          </div>
+          <div id="qualitativeNotes" class="utility-list"></div>
+        </section>
+      </section>
+
+      <section class="content-grid" id="defaultContent">
+        <section class="panel main-logbook">
+          <div class="section-head">
+            <span class="muted-line" id="tableSummary"></span>
+            <div class="toolbar-inline" id="tableToolbar"></div>
+          </div>
+          <div id="tableContainer" class="table-container"></div>
+        </section>
+      </section>
+
+      <section class="import-view is-hidden" id="importView">
+        <section class="panel import-mode-shell" id="importModeShell">
+          <div class="import-panels import-panels-3col">
+              <div class="panel import-panel import-blanks-panel" id="importBlanksPanel">
+                <div class="section-head import-blanks-head">
+                  <h3>Registered Blanks</h3>
+                  <div class="import-blank-drop-zone" id="importBlankDropZone">
+                    <span class="small-copy import-drop-label-compact">Drop to Register</span>
+                    <span class="small-copy import-drop-label-full">Drop image to register blank</span>
+                  </div>
+                </div>
+                <div class="import-blank-list" id="importBlankList"></div>
+                <div class="import-pane-footer">
+                  <span class="sidebar-label">Selected Blank</span>
+                <strong id="importSelBlank">None</strong>
+                <button class="primary-button small" id="importAssignBlankBtn">Assign Blank to Sample →</button>
+              </div>
+            </div>
+
+            <div class="panel import-panel import-inbox-panel">
+              <div class="section-head">
+                <div class="import-inbox-head-copy">
+                  <h3>Image Inbox</h3>
+                </div>
+                <div class="import-inbox-actions">
+                  <div class="import-inbox-maintenance-actions">
+                    <button class="ghost-button xs" id="importInboxCleanupBtn">Clean Up Unused</button>
+                    <button class="ghost-button xs" id="importCsvAssignmentBtn">CSV Bulk Assignment</button>
+                  </div>
+                  <div class="import-inbox-primary-actions">
+                    <button class="primary-button small" id="importInboxImportBtn">Import from Inbox</button>
+                    <button class="ghost-button small" id="importInboxOpenFolderBtn">Open Inbox Folder</button>
+                  </div>
+                </div>
+              </div>
+              <div class="import-inbox-content">
+                <p class="small-copy import-inbox-caption">Place source and blank images in the Inbox folder, then import them into Calibration.</p>
+                <div class="import-card-grid" id="importImageGrid">
+                  <p class="small-copy">Loading images...</p>
+                </div>
+              </div>
+              <div class="import-pane-footer">
+                <span class="sidebar-label">Selected Image</span>
+                <strong id="importSelImage">None</strong>
+                <div class="import-footer-buttons">
+                  <button class="ghost-button small" id="importRegisterBlankBtn">← Register as Blank</button>
+                  <button class="primary-button small" id="importAssignBtn">Assign Image to Sample →</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel import-panel import-sample-panel">
+              <div class="section-head">
+                <div>
+                  <h3>Assign Images and Blanks</h3>
+                </div>
+                <span class="toolbar-chip" id="importSampleChip">0 samples</span>
+              </div>
+              <div class="import-sample-list" id="importSampleList">
+                <p class="small-copy">Loading samples...</p>
+              </div>
+              <div class="import-pane-footer">
+                <span class="sidebar-label">Selected Sample</span>
+                <strong id="importSelSample">None</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </section>
+    </main>
+  </div>
+
+  <aside class="step-builder-drawer" id="stepBuilderDrawer" aria-hidden="true">
+    <div class="record-drawer-header">
+      <div>
+        <h3>New Sample Geometry</h3>
+      </div>
+      <div class="toolbar-inline">
+        <div class="drawer-action-area" id="stepBuilderActionArea">
+          <button class="ghost-button small drawer-header-action" id="stepBuilderSave">Create</button>
+          <button class="save-button small drawer-header-action" id="stepBuilderCreateExport">Create + Export</button>
+        </div>
+        <div class="drawer-window-controls">
+          <button class="close-button small window-close-button" id="closeStepBuilderDrawerBtn" aria-label="Close drawer" title="Close drawer">
+            <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+              <path d="M2 2 L10 10 M10 2 L2 10"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="stepBuilderBody" class="detail-sidebar-content"></div>
+  </aside>
+
+  <aside class="bundle-mgmt-drawer" id="bundleMgmtDrawer" aria-hidden="true">
+    <div class="record-drawer-header">
+      <div>
+        <h3>Manage Bundles</h3>
+      </div>
+      <div class="toolbar-inline">
+        <div class="drawer-window-controls">
+          <button class="close-button small window-close-button" id="closeBundleMgmtDrawer" aria-label="Close drawer" title="Close drawer">
+            <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+              <path d="M2 2 L10 10 M10 2 L2 10"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="bundleMgmtBody" class="bundle-mgmt-body"></div>
+  </aside>
+
+  <aside class="record-drawer" id="recordDrawer" aria-hidden="true">
+    <div class="record-drawer-header">
+      <div>
+        <h3 id="detailHeading">Pick a row</h3>
+        <span id="drawerStatusPill"></span>
+      </div>
+      <div class="toolbar-inline">
+        <div class="drawer-action-area" id="detailActionArea"></div>
+        <div class="drawer-window-controls" id="detailWindowControls">
+          <div id="detailWindowArea"></div>
+          <button class="close-button small window-close-button" id="closeRecordDrawer" aria-label="Close drawer" title="Close drawer">
+            <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+              <path d="M2 2 L10 10 M10 2 L2 10"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="detailSidebar" class="detail-sidebar-content">
+      <p class="small-copy">
+        Selecting a row in the logbook will open this drawer with the record details.
+      </p>
+    </div>
+  </aside>
+
+  <aside class="record-drawer linked-record-drawer" id="linkedSampleDrawer" aria-hidden="true">
+    <div class="record-drawer-header">
+      <div>
+        <h3 id="linkedSampleHeading">Linked Sample</h3>
+        <span id="linkedSampleStatusPill"></span>
+      </div>
+      <div class="toolbar-inline">
+        <div class="drawer-action-area" id="linkedSampleActionArea"></div>
+        <div class="drawer-window-controls">
+          <div id="linkedSampleWindowArea"></div>
+          <button class="close-button small window-close-button" id="closeLinkedSampleDrawer" aria-label="Close linked sample drawer" title="Close linked sample drawer">
+            <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+              <path d="M2 2 L10 10 M10 2 L2 10"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="linkedSampleSidebar" class="detail-sidebar-content">
+      <p class="small-copy">
+        Select a sample from a Used By list to inspect it here.
+      </p>
+    </div>
+  </aside>
+
+  <div class="manual-proc-overlay" id="manualProcOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labeledby="manualProcTitle">
+    <div class="manual-proc-sheet">
+      <div class="info-dialog-header manual-proc-header">
+        <div class="info-dialog-title-block">
+          <h3 id="manualProcTitle">Manual Processing</h3>
+          <p class="small-copy" id="manualProcSubtitle"></p>
+          <span class="small-copy mono" id="manualProcProgress"></span>
+        </div>
+        <div class="dialog-header-toolbar">
+          <div class="drawer-window-controls dialog-window-controls">
+            <button class="close-button small window-close-button info-dialog-close" id="closeManualProc" type="button" aria-label="Close manual processing" title="Close manual processing">
+              <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+                <path d="M2 2 L10 10 M10 2 L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="manual-proc-body">
+        <div class="manual-proc-canvas-area">
+          <canvas id="manualProcCanvas"></canvas>
+          <p class="manual-proc-instructions" id="manualProcInstructions">Click corners of the strip in order: TL, TR, BR, BL.</p>
+        </div>
+          <div class="manual-proc-sidebar">
+            <div id="manualProcCornerList" class="manual-proc-corner-list"></div>
+            <div class="manual-proc-actions">
+              <button class="primary-button small" id="manualProcExtract" disabled>Extract &amp; Process</button>
+              <button class="ghost-button small" id="manualProcCancel" style="display:none">Cancel</button>
+              <button class="ghost-button small" id="manualProcReset">Reset Corners</button>
+            </div>
+            <div id="manualProcResultBlock" class="manual-proc-result-block" style="display:none">
+            <div id="manualProcResult"></div>
+            <div class="manual-proc-result-actions">
+              <button class="save-button small" id="manualProcAccept">Accept</button>
+              <button class="ghost-button small" id="manualProcRetry">Retry</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="image-lightbox-overlay" id="imageLightboxOverlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labeledby="imageLightboxTitle">
+    <div class="image-lightbox-sheet media-viewer-sheet">
+      <div class="image-lightbox-header media-viewer-header">
+        <strong class="media-viewer-title" id="imageLightboxTitle">Image Preview</strong>
+        <div class="dialog-header-toolbar">
+          <div class="drawer-window-controls dialog-window-controls image-lightbox-window-controls media-viewer-window-controls">
+            <button class="close-button small window-close-button image-lightbox-close media-viewer-close" id="closeImageLightbox" type="button" aria-label="Close image preview" title="Close image preview">
+              <svg viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+                <path d="M2 2 L10 10 M10 2 L2 10"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="image-lightbox-body">
+        <img id="imageLightboxImg" alt="Expanded image preview">
+      </div>
+    </div>
+  </div>
+
+  <datalist id="stepBundleOptions"></datalist>
+  <script src="api.js?v=20260714-calibration-inbox-geometry-v8"></script>
+  <script src="app.js?v=20260714-calibration-inbox-geometry-v8"></script>
+</body>
+</html>
