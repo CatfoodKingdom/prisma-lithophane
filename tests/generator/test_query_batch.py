@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 
-_PROFILES_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 from model import load_profile, load_profiles
 from lut import build_luts, query_luts_batch

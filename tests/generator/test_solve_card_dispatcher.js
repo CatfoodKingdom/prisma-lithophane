@@ -77,12 +77,13 @@ test('S4a: source card uses the shared result image contract', () => {
   );
 });
 
-test('S4a: source lightbox uses the shared solve lightbox pane and sizing', () => {
+test('source lightbox uses the shared solve lightbox pane and static zoom', () => {
   const start = APP_JS.indexOf('function openSolveSourceLightbox');
   assert.notEqual(start, -1, 'source lightbox opener must exist');
   const body = APP_JS.slice(start, APP_JS.indexOf('// ── Surface lightbox', start));
-  assert.match(body, /buildSolveLightboxHeader\(run, "source"\)/);
+  assert.match(body, /buildSolveLightboxHeader\(run, getSolveLightboxViewLabel\("source"\), zoomControls\)/);
   assert.match(body, /class="comp-lightbox-pane"/);
   assert.match(body, /class="comp-lightbox-img"/);
-  assert.match(body, /min-width:min\(70vh, 85vw\);/);
+  assert.match(body, /class="comp-lightbox-media static-zoom-media"/);
+  assert.match(body, /setupStaticLightboxZoom\(content, lifecycle\)/);
 });

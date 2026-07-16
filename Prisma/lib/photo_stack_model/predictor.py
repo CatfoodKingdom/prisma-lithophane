@@ -1239,7 +1239,7 @@ class PhotoStackPredictor:
         return best[1], descriptor, float(best[0])
 
     def color_pair_corrected_rgb(self, row: pd.Series | dict[str, Any], od_only: np.ndarray) -> tuple[np.ndarray, dict[str, float]] | None:
-        # See DevelopmentSandbox/model_domain_conversion/endpoint_lookup_probe/ENDPOINT_LOOKUP_REPORT.md:
+        # Historical model-domain endpoint probing established this evidence rule:
         # these pair rows are color-only evidence excluded from white-stack
         # context calibration, so calibrated matches use OD-only * C(d).
         match = self.color_pair_correction_match(row)

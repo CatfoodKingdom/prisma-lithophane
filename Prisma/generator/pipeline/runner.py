@@ -9,7 +9,6 @@ from dataclasses import replace
 import numpy as np
 import time as _time
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
 
 # Path setup — Prisma/generator/pipeline/runner.py
 _GEN_DIR = Path(__file__).resolve().parent.parent
@@ -22,16 +21,13 @@ if str(_PRISMA_DIR) not in sys.path:
 from .base import ProgressCallback
 from .state import PipelineState, PipelineConfig, ProfileSet
 
-if TYPE_CHECKING:
-    from pipeline.snapshot import SnapshotPublisher
-
 from model import predict_transmission, to_oklab, load_profile, load_profiles
 from lut import build_banded_luts as _build_banded_luts
 from lut import build_banded_luts_with_provider as _build_banded_luts_with_provider
 from lut import build_luts as _build_luts_raw
 from lut import build_luts_with_provider as _build_luts_with_provider
 from lut import query_luts_batch
-from pipeline_cli import validate_palette
+from filament_policy import validate_palette
 from thickness_maps import MapKey, ThicknessMaps
 from pipeline.target_cloud import (
     apply_gamut_white_rescale_to_targets,
@@ -329,9 +325,9 @@ def _recompute_de_diagnostics(state: PipelineState) -> None:
 
     Task 5.4: on the staged/webapp path ``state.diagnostics`` is the sole home
     for ``__de__``/``__gamut_mask__``; this writes the recomputed dE straight
-    into ``state.diagnostics``, never into ``state.thickness_maps``. The legacy
-    CLI engine (solve.py / pipeline_cli.py) keeps its own thickness_maps carrier
-    and does not call this function.
+    into ``state.diagnostics``, never into ``state.thickness_maps``. Direct and
+    test-created states may retain their compatibility carrier and do not call
+    this function.
     """
     cfg = state.config
     profiles = state.profiles
@@ -463,7 +459,7 @@ def _compute_stats(state: PipelineState) -> None:
     H, W = state.image.shape[:2]
 
     # Prefer the canonical diagnostics container. The thickness_maps fallback is
-    # only for legacy/direct-state callers (CLI-style results, hand-built test
+    # only for legacy/direct-state callers (older results and hand-built test
     # states); Task 5.4 staged finalization always provides diagnostics, so the
     # production webapp path takes the diagnostics branch. Explicit branching
     # avoids eager evaluation of the fallback expression.
@@ -695,7 +691,6 @@ def _finalize_staged_backend_state(state: PipelineState, result) -> None:
         )
         perf.counters["stage5_solved_plan_segments"] = int(state.solved_plan.n_segments)
         perf.counters["stage5_solved_plan_stacks"] = int(state.solved_plan.n_stacks)
-    state.blueprint_triage = None
     state.image_domain_width_mm = float(bundle.image_domain_width_mm)
     state.image_domain_height_mm = float(bundle.image_domain_height_mm)
     copy_start = _time.perf_counter()
@@ -739,7 +734,6 @@ def run_pipeline(
     progress=None,
     palette_index: int = None,
     palette_count: int = None,
-    snapshot_publisher: Optional["SnapshotPublisher"] = None,
 ) -> PipelineState:
     """Run the full pipeline with configured modules."""
     swap_banding_requested = _swap_banding_requested(config)
@@ -1018,7 +1012,6 @@ def run_pipeline(
             config.preprocessors,
             context=pre_context,
             progress=prepare_progress,
-            snapshot_publisher=snapshot_publisher,
         )
         state.source_image = image
         state.image = processed
@@ -1214,10 +1207,6 @@ def run_pipeline(
             stage_index=1,
             local_pct=0,
         )
-
-    # Attach the optional snapshot publisher so the solve path can emit
-    # snapshots where supported.
-    state.snapshot_publisher = snapshot_publisher
 
     from pipeline.staged_runner import run_staged_backend_path
 

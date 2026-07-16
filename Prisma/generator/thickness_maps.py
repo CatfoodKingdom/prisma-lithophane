@@ -12,11 +12,6 @@ Two kinds of key live in a thickness map:
 * Reserved webapp/facade sentinels with stable string values -> ``MapKey``.
 * Dynamic filament IDs (data values from config/palette/ordering) -> plain str.
 
-The legacy CLI-only ``__filler__`` sentinel (written by ``pipeline_cli.py`` on
-the opt-in ``--filler`` path) is intentionally NOT a ``MapKey`` member: it is
-not part of the webapp/facade payload contract. ``ThicknessMaps`` accepts it as
-an ordinary ``__``-prefixed string.
-
 ``__translucent_underfill__`` was retired by Task 2.3 and is deliberately absent
 from ``MapKey``; it must never be reintroduced as a live key.
 """
@@ -41,10 +36,9 @@ class MapKey(str, Enum):
     """Reserved webapp/facade ``thickness_maps`` sentinel keys.
 
     Members subclass ``str`` so legacy ``maps["__white_cap__"]`` and
-    ``maps[MapKey.WHITE_CAP]`` resolve to the same slot. ``__filler__`` is
-    deliberately excluded (legacy CLI-only, not part of the webapp/facade
-    contract); ``__translucent_underfill__`` was retired by Task 2.3 and must
-    not be added here.
+    ``maps[MapKey.WHITE_CAP]`` resolve to the same slot.
+    ``__translucent_underfill__`` was retired by Task 2.3 and must not be added
+    here.
     """
 
     WHITE_CAP = "__white_cap__"
@@ -77,10 +71,10 @@ def _normalize_key(key: ThicknessMapKey) -> str:
 class ThicknessMaps(MutableMapping[str, np.ndarray]):
     """Compatibility-first wrapper around ``dict[str, np.ndarray]``.
 
-    Accepts ``MapKey`` enums, reserved legacy strings, the CLI-only
-    ``__filler__`` sentinel, and dynamic filament-id strings. All keys are
-    normalized to plain ``str`` on write, so iteration and serialization yield
-    the exact legacy strings. This is a typing/ergonomics wrapper, not a
+    Accepts ``MapKey`` enums, reserved legacy strings, and dynamic filament-id
+    strings. All keys are normalized to plain ``str`` on write, so iteration
+    and serialization yield the exact legacy strings. This is a
+    typing/ergonomics wrapper, not a
     semantic rewrite: it supports every access pattern the pre-5.1 magic-string
     dict supported.
     """

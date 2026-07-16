@@ -2,7 +2,7 @@
 
 These pin the behavior-preserving contract: ``MapKey`` values equal the exact
 legacy strings, ``ThicknessMaps`` accepts enum / legacy-string / dynamic
-filament-id / CLI ``__filler__`` keys interchangeably, and every boundary that
+filament-id keys interchangeably, and every boundary that
 serializes the container emits plain string keys (never an enum repr).
 """
 from __future__ import annotations
@@ -46,12 +46,6 @@ def test_translucent_underfill_is_not_a_mapkey_member():
         MapKey("__translucent_underfill__")
 
 
-def test_filler_is_not_a_mapkey_member():
-    # __filler__ is legacy CLI-only and must not be a webapp/facade reserved key.
-    values = {m.value for m in MapKey}
-    assert "__filler__" not in values
-
-
 def test_dynamic_filament_id_set_get():
     maps = ThicknessMaps()
     maps["bambu-basic-cyan"] = _arr(1)
@@ -80,15 +74,6 @@ def test_legacy_reserved_string_get_still_works():
     maps = ThicknessMaps({"__white_boundary_cap__": _arr(5)})
     assert np.array_equal(maps["__white_boundary_cap__"], _arr(5))
     assert MapKey.WHITE_BOUNDARY_CAP in maps
-
-
-def test_filler_accepted_as_ordinary_string():
-    maps = ThicknessMaps()
-    maps["__filler__"] = _arr(6)
-    assert np.array_equal(maps["__filler__"], _arr(6))
-    assert "__filler__" in maps
-    # __filler__ is a reserved (``__``-prefixed) sentinel, not a filament id.
-    assert "__filler__" not in maps.filament_ids()
 
 
 def test_get_accepts_enum_string_and_missing():
@@ -171,8 +156,6 @@ def test_filament_helpers_exclude_reserved_sentinels():
     maps["bambu-basic-magenta"] = _arr(2)
     maps[MapKey.WHITE_CAP] = _arr(3)
     maps[MapKey.DE] = _arr(4)
-    maps["__filler__"] = _arr(5)
-
     assert set(maps.filament_ids()) == {"bambu-basic-cyan", "bambu-basic-magenta"}
     assert {k for k, _ in maps.filament_items()} == {
         "bambu-basic-cyan",
@@ -181,7 +164,6 @@ def test_filament_helpers_exclude_reserved_sentinels():
     assert {k for k, _ in maps.reserved_items()} == {
         "__white_cap__",
         "__de__",
-        "__filler__",
     }
 
 

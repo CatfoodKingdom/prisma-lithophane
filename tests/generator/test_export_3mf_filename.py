@@ -174,11 +174,12 @@ def export_env(tmp_path, monkeypatch):
 
 def test_3mf_export_names_file_after_export_folder(export_env):
     env = export_env
-    resp = env.client.post(
-        "/api/export/files", json={"output_format": "3mf", "card_id": "card"}
+    terminal = _start_export_and_wait(
+        env.client,
+        {"output_format": "3mf", "card_id": "card"},
+        {"complete"},
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = terminal["result"]
 
     export_id = body["export_id"]
     out_dir = Path(body["out_dir"])
@@ -215,11 +216,12 @@ def test_3mf_export_names_file_after_export_folder(export_env):
 
 def test_3mf_export_packages_color_quarantine_and_updates_manifest(export_env):
     env = export_env
-    resp = env.client.post(
-        "/api/export/files", json={"output_format": "3mf", "card_id": "card"}
+    terminal = _start_export_and_wait(
+        env.client,
+        {"output_format": "3mf", "card_id": "card"},
+        {"complete"},
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = terminal["result"]
 
     package_bundle = env.captured["threemf_bundle"]
     package_object_keys = [obj.object_key for obj in package_bundle.objects]
@@ -265,13 +267,14 @@ def test_export_failure_removes_partial_stage_and_preserves_unrelated_output(
         raise RuntimeError("injected mesh failure")
 
     monkeypatch.setattr(server, "export_solve_bundle", fail_after_partial_write)
-    response = export_env.client.post(
-        "/api/export/files",
-        json={"output_format": "stls", "card_id": "card"},
+    terminal = _start_export_and_wait(
+        export_env.client,
+        {"output_format": "stls", "card_id": "card"},
+        {"error"},
     )
 
-    assert response.status_code == 500
-    assert "injected mesh failure" in response.text
+    assert terminal["result"] is None
+    assert "injected mesh failure" in terminal["progress"]
     assert unrelated.read_text(encoding="utf-8") == "keep"
     assert sorted(path.name for path in output_root.iterdir()) == ["user-note.txt"]
 
@@ -337,16 +340,33 @@ def test_export_option_validation_does_not_create_a_private_stage(
     assert list((export_env.tmp_path / "output").iterdir()) == []
 
 
-def _wait_for_export_status(client, expected: set[str], timeout: float = 3.0) -> dict:
+def _wait_for_export_status(
+    client,
+    expected: set[str],
+    *,
+    job_id: str,
+    timeout: float = 3.0,
+) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
         response = client.get("/api/export/files/status")
         assert response.status_code == 200
         payload = response.json()
+        assert payload["job_id"] == job_id
         if payload["status"] in expected:
             return payload
         time.sleep(0.01)
     raise AssertionError(f"export did not reach {sorted(expected)}")
+
+
+def _start_export_and_wait(client, payload: dict, expected: set[str]) -> dict:
+    started = client.post("/api/export/files/start", json=payload)
+    assert started.status_code == 200, started.text
+    body = started.json()
+    assert body["status"] == "running"
+    job_id = body["job_id"]
+    assert job_id
+    return _wait_for_export_status(client, expected, job_id=job_id)
 
 
 def test_background_export_cancel_is_job_scoped_idempotent_and_terminal(
@@ -387,7 +407,11 @@ def test_background_export_cancel_is_job_scoped_idempotent_and_terminal(
     assert conflict.status_code == 409
 
     allow_check.set()
-    terminal = _wait_for_export_status(export_env.client, {"cancelled"})
+    terminal = _wait_for_export_status(
+        export_env.client,
+        {"cancelled"},
+        job_id=job_id,
+    )
     assert terminal["job_id"] == job_id
     assert terminal["result"] is None
     after_terminal = export_env.client.post(f"/api/export/files/cancel?job_id={job_id}")
@@ -421,7 +445,11 @@ def test_export_completed_after_publication_reports_late_cancel_truthfully(
     assert requested.json()["status"] == "cancelling"
     allow_return.set()
 
-    terminal = _wait_for_export_status(export_env.client, {"complete"})
+    terminal = _wait_for_export_status(
+        export_env.client,
+        {"complete"},
+        job_id=job_id,
+    )
     assert terminal["result"] == completed_result
     assert terminal["progress"] == "Completed before cancellation took effect"
 
@@ -455,11 +483,12 @@ def test_export_publication_collision_preserves_existing_destination(
 
 def test_stl_export_does_not_add_3mf_packaging_manifest(export_env):
     env = export_env
-    resp = env.client.post(
-        "/api/export/files", json={"output_format": "stls", "card_id": "card"}
+    terminal = _start_export_and_wait(
+        env.client,
+        {"output_format": "stls", "card_id": "card"},
+        {"complete"},
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = terminal["result"]
 
     assert "threemf_bundle" not in env.captured
     assert "format_packaging" not in body["manifest"]

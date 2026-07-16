@@ -3,7 +3,6 @@
 from copy import deepcopy
 from pathlib import Path
 import re
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -109,8 +108,10 @@ def test_boundary_cap_de_budget_survives_config_as_float(monkeypatch):
 def test_white_cap_output_settings_are_profile_owned():
     import server
 
+    assert "detail_cap_pitch_mm" not in server._SETTINGS_PROFILE_KEYS
+    assert "detail_cap_pitch_mm" not in server._DEFAULT_CONFIG
+
     for key in (
-        "detail_cap_pitch_mm",
         "detail_cap_smoothing_enabled",
         "detail_cap_smoothing_exact_speckle_max_px",
         "detail_cap_smoothing_cumulative_component_max_px",
@@ -483,108 +484,6 @@ def test_set_config_luminance_mode_updates_session_preset(monkeypatch):
     assert cfg["luminance_mode"] == "standard"
     assert cfg["luminance_handler_enabled"] is False
     assert cfg["luminance_detail_authoring_printability"] == "off"
-
-
-def test_gamut_preview_passes_modules_path(tmp_path, monkeypatch):
-    import server
-
-    cfg = deepcopy(server._DEFAULT_CONFIG)
-    cfg["image_path"] = "sample.png"
-    cfg["palette"] = ["bambu-basic-cyan"]
-
-    class FakePreviewResult:
-        def __init__(self):
-            self.stats = SimpleNamespace(
-                coverage_pct=100.0,
-                n_out_of_gamut=0,
-                total_pixels=4,
-                mean_de=0.01,
-                max_de=0.02,
-                image_w=2,
-                image_h=2,
-            )
-            self.de_map = np.zeros((2, 2), dtype=np.float32)
-            self.gamut_mask = np.zeros((2, 2), dtype=bool)
-
-        def predict_image(self):
-            return np.zeros((2, 2, 3), dtype=np.uint8)
-
-    captured = {}
-
-    monkeypatch.setattr(server, "_cfg", lambda: cfg)
-    monkeypatch.setattr(server, "_IMAGES_DIR", tmp_path)
-    monkeypatch.setattr(server, "_current_out_dir", lambda *args, **kwargs: tmp_path)
-    monkeypatch.setattr(server, "load_image", lambda *args, **kwargs: np.zeros((2, 2, 3), dtype=np.uint8))
-    monkeypatch.setattr(server, "apply_adjustments", lambda img, *_args, **_kwargs: img)
-    monkeypatch.setattr(server, "_save_de_map", lambda *args, **kwargs: None)
-    monkeypatch.setattr(server, "_make_gamut_overlay", lambda img, mask: np.zeros_like(img))
-
-    def fake_solve_preview(img, sc, progress=None, modules_path=None, module_state=None):
-        captured["modules_path"] = modules_path
-        return FakePreviewResult()
-
-    monkeypatch.setattr(server, "solve_preview", fake_solve_preview)
-    (tmp_path / "sample.png").write_bytes(b"stub")
-
-    response = server.gamut_preview(server.GamutPreviewPayload())
-
-    assert captured["modules_path"] == server._MODULES_PATH
-    assert response["total_pixels"] == 4
-
-
-def test_gamut_overlay_accepts_float_diagnostic_mask():
-    import server
-
-    source = np.full((2, 2, 3), 100, dtype=np.uint8)
-    mask = np.array([[0.0, 1.0], [0.0, 0.0]], dtype=np.float32)
-
-    overlay = server._make_gamut_overlay(source, mask)
-
-    assert np.array_equal(overlay[0, 0], source[0, 0])
-    assert not np.array_equal(overlay[0, 1], source[0, 1])
-    assert np.array_equal(overlay[1, 0], source[1, 0])
-
-
-def test_compare_endpoint_passes_modules_path(tmp_path, monkeypatch):
-    import server
-
-    original_session = deepcopy(server.session)
-    cfg = deepcopy(server._DEFAULT_CONFIG)
-    cfg["image_path"] = "sample.png"
-    cfg["palette"] = ["bambu-basic-cyan"]
-
-    class ImmediateThread:
-        def __init__(self, target, daemon=None):
-            self._target = target
-
-        def start(self):
-            self._target()
-
-    captured = {}
-
-    monkeypatch.setattr(server, "_cfg", lambda: cfg)
-    monkeypatch.setattr(server, "_IMAGES_DIR", tmp_path)
-    monkeypatch.setattr(server, "_current_out_dir", lambda *args, **kwargs: tmp_path)
-    monkeypatch.setattr(server, "load_image", lambda *args, **kwargs: np.zeros((2, 2, 3), dtype=np.uint8))
-    monkeypatch.setattr(server, "apply_adjustments", lambda img, *_args, **_kwargs: img)
-    monkeypatch.setattr(server.threading, "Thread", ImmediateThread)
-
-    def fake_solve_compare(img, palettes, sc, progress=None, modules_path=None, module_state=None):
-        captured["modules_path"] = modules_path
-        raise RuntimeError("sentinel compare")
-
-    monkeypatch.setattr(server, "solve_compare", fake_solve_compare)
-    (tmp_path / "sample.png").write_bytes(b"stub")
-
-    try:
-        response = server.compare_palettes(server.ComparisonPayload(palettes=[["bambu-basic-cyan"]]))
-        assert response["status"] == "running"
-        assert response["job_id"]
-        assert server.compare_status()["job_id"] == response["job_id"]
-        assert captured["modules_path"] == server._MODULES_PATH
-    finally:
-        server.session.clear()
-        server.session.update(original_session)
 
 
 def test_start_solve_passes_modules_path(tmp_path, monkeypatch):
@@ -1159,16 +1058,6 @@ def test_profile_without_modules_uses_default_module_state(tmp_path, monkeypatch
     assert record.modules == server._normalize_module_state({})
 
 
-def test_cli_parser_accepts_fractional_boundary_smoothing_sigma():
-    from pipeline_cli import _build_parser
-
-    parser = _build_parser()
-    args = parser.parse_args(["--smooth", "1.5"])
-
-    assert isinstance(args.smooth, float)
-    assert args.smooth == 1.5
-
-
 def test_active_printer_normalizes_line_width_bounds():
     import server
 
@@ -1272,7 +1161,7 @@ def test_luminance_base_shading_limit_folds_into_optical_authority():
     The inbound/UI field ``luminance_base_shading_limit_fraction`` must fold into
     the canonical ``luminance_handler_optical_authority_fraction`` — the field the
     pipeline actually reads — through the real session-config merge + egress path
-    (set_config inbound pop -> merge fold -> get_config egress fold). The default
+    (set_config inbound pop -> merge fold -> session egress fold). The default
     is 0.75, so this uses 0.42 to prove a broken sync after the 4B.3 rename cannot
     pass silently. The standard solve_full hash gate runs with luminance off and
     would NOT catch this.
@@ -1287,7 +1176,7 @@ def test_luminance_base_shading_limit_folds_into_optical_authority():
     )
     assert resp.status_code == 200, resp.text
 
-    cfg = client.get("/api/session/config").json()
+    cfg = client.get("/api/session").json()["config"]
     assert cfg["luminance_handler_optical_authority_fraction"] == pytest.approx(0.42)
     assert cfg["luminance_base_shading_limit_fraction"] == pytest.approx(0.42)
 

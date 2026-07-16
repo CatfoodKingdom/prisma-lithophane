@@ -145,7 +145,6 @@ test('Preview submode choices use segmented controls', () => {
   for (const id of [
     'solveColorRegionsControls',
     'solveWhiteCapControls',
-    'solveThicknessMapControls',
     'solveCapDiffControls',
   ]) {
     const start = subRegion.indexOf(`id="${id}"`);

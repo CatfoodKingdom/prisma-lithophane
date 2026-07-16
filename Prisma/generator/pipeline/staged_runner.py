@@ -138,45 +138,6 @@ _STAGE2_GEOMETRY_CLASS_NAMES = (
     "ambiguous",
 )
 
-_STAGE4_BOUNDARY_FIELD_DEBUG_KEYS = (
-    "stage4_boundary_raw_requested_cap_mm",
-    "stage4_boundary_raw_top_reference_mm",
-    "stage4_boundary_smoothed_top_pre_restore_mm",
-    "stage4_boundary_smoothed_top_post_restore_mm",
-    "stage4_boundary_unquantized_requested_cap_mm",
-    "stage4_boundary_quantized_requested_cap_mm",
-    "stage4_boundary_smooth_candidate_cap_mm",
-    "stage4_boundary_appearance_raw_de",
-    "stage4_boundary_appearance_candidate_de",
-    "stage4_boundary_appearance_accepted_de",
-    "stage4_boundary_appearance_extra_de",
-    "stage4_boundary_appearance_bounded_cap_mm",
-    "stage4_boundary_appearance_rejected_mm",
-    "stage4_boundary_appearance_accept_mask",
-    "stage4_boundary_candidate_minus_raw_mm",
-    "stage4_boundary_accepted_minus_raw_mm",
-    "stage4_boundary_minimal_floor_mm",
-    "stage4_appearance_desired_final_cap_mm",
-    "stage4_boundary_structural_cap_mm",
-    "stage4_final_target_equivalence_delta_mm",
-    "stage4_color_ceiling_mm",
-    "stage4_boundary_edge_guard_weight",
-)
-
-_STAGE4_DETAIL_FIELD_DEBUG_KEYS = (
-    "stage4_detail_optical_gain_map",
-    "stage4_detail_best_layers_pre_authoring_mm",
-    "stage4_detail_signal_map",
-    "stage4_detail_candidate_mask_pre_zone",
-    "stage4_detail_candidate_zone_labels",
-    "stage4_detail_zone_labels",
-    "stage4_detail_rejection_reasons",
-    "stage4_detail_requested_layers_post_authoring_mm",
-    "stage4_detail_residual_from_appearance_target_mm",
-    "stage4_detail_final_height_mm",
-)
-
-
 def _debug_map_sink(state):
     debug_maps = getattr(state, "debug_maps", None)
     if debug_maps is None:
@@ -227,7 +188,6 @@ _STAGE4_BOUNDARY_EDGE_CEILING_PERCENTILE = 75.0
 _STAGE4_BOUNDARY_EDGE_MAX_RADIUS_PX = 8
 _STAGE4_BOUNDARY_EDGE_MAX_RESTORE_WEIGHT = 0.65
 _STAGE4_BOUNDARY_EDGE_FULL_RESTORE_KERNEL = 15.0
-_STAGE4_BOUNDARY_EDGE_MIN_RESTORE_SCALE = 0.40
 _STAGE4_BOUNDARY_GUIDED_FILTER_EPS = 0.0025
 
 
@@ -1375,15 +1335,6 @@ def _selected_color_layer_count_map(
     return color_layers.astype(np.int32, copy=False)
 
 
-def _ensure_white_guard_stack(unique_stack_dicts: dict[int, dict[str, float]]) -> int:
-    for stack_id, stack in unique_stack_dicts.items():
-        if not stack:
-            return int(stack_id)
-    stack_id = (max((int(key) for key in unique_stack_dicts.keys()), default=-1) + 1)
-    unique_stack_dicts[int(stack_id)] = {}
-    return int(stack_id)
-
-
 def _exterior_guard_mask(shape: tuple[int, int], *, width_px: int = 1) -> np.ndarray:
     height, width = int(shape[0]), int(shape[1])
     mask = np.zeros((height, width), dtype=bool)
@@ -2502,29 +2453,6 @@ def _score_pixels_against_stack_ids(
         best_squared = np.min(squared, axis=1)
         scores[pixel_start:pixel_stop] = np.sqrt(best_squared, dtype=np.float32)
     return scores
-
-
-def _boundary_contact_mask_for_borrowed_stack(
-    *,
-    component: np.ndarray,
-    original_stack_map: np.ndarray,
-    borrowed_stack_id: int,
-) -> np.ndarray:
-    """Return component pixels that touch the borrowed recipe in the original map."""
-
-    component_bool = np.asarray(component, dtype=bool)
-    original = np.asarray(original_stack_map, dtype=np.int32)
-    contact = np.zeros(component_bool.shape, dtype=bool)
-    if component_bool.size == 0 or not np.any(component_bool):
-        return contact
-    borrowed = int(borrowed_stack_id)
-    if component_bool.shape[0] > 1:
-        contact[1:, :] |= component_bool[1:, :] & (original[:-1, :] == borrowed)
-        contact[:-1, :] |= component_bool[:-1, :] & (original[1:, :] == borrowed)
-    if component_bool.shape[1] > 1:
-        contact[:, 1:] |= component_bool[:, 1:] & (original[:, :-1] == borrowed)
-        contact[:, :-1] |= component_bool[:, :-1] & (original[:, 1:] == borrowed)
-    return contact
 
 
 def _mutation_accept_pair_components_vectorized(
@@ -4342,28 +4270,6 @@ def _stack_color_layer_labels(
         if labels:
             table[row, : len(labels)] = np.asarray(labels, dtype=np.int16)
     return stack_ids, table
-
-
-def _color_layer_hard_fail_map_from_stack_ids(
-    *,
-    fine_stack_id_map: np.ndarray,
-    unique_stack_dicts: dict[int, dict[str, float]],
-    palette_order: tuple[str, ...],
-    layer_height_mm: float,
-    settings: BlueprintPrintabilitySettings,
-) -> np.ndarray:
-    """Find hard-failing final color-layer material components for one fine map."""
-
-    hard_fail, _components = _color_layer_hard_fail_components_from_stack_ids(
-        fine_stack_id_map=fine_stack_id_map,
-        unique_stack_dicts=unique_stack_dicts,
-        palette_order=palette_order,
-        layer_height_mm=float(layer_height_mm),
-        settings=settings,
-        localize_opening_width_loss=True,
-        structural_opening_width_loss=True,
-    )
-    return hard_fail
 
 
 def _stack_row_lookup(flat_stack_ids: np.ndarray, stack_ids: np.ndarray) -> np.ndarray:
@@ -8357,25 +8263,6 @@ def _stage4_recipe_boundary_mask(recipe_label_map: np.ndarray) -> np.ndarray:
     return boundary
 
 
-def _normalize_stage4_boundary_guide(values: np.ndarray) -> np.ndarray:
-    """Normalize a Stage 4 boundary guide channel into 0..1."""
-    arr = np.asarray(values, dtype=np.float32)
-    if arr.size == 0:
-        return arr.astype(np.float32, copy=True)
-    finite = arr[np.isfinite(arr)]
-    if finite.size == 0:
-        return np.zeros(arr.shape, dtype=np.float32)
-    lo = float(np.min(finite))
-    hi = float(np.max(finite))
-    span = hi - lo
-    if span <= 1e-9:
-        return np.zeros(arr.shape, dtype=np.float32)
-    return np.clip((arr - np.float32(lo)) / np.float32(span), 0.0, 1.0).astype(
-        np.float32,
-        copy=False,
-    )
-
-
 def _build_stage4_boundary_smoothing_guide(
     *,
     visible_plan: VisibleRecipeRawGeometryPlan,
@@ -8541,39 +8428,6 @@ def _apply_stage4_edge_aware_boundary_restore(
     return restored.astype(np.float32, copy=False)
 
 
-def _select_stage4_detail_mask(
-    *,
-    visible_plan: VisibleRecipeRawGeometryPlan,
-    requested_detail_layers: np.ndarray,
-    detail_signal: np.ndarray | None = None,
-    signal_threshold: float | None = None,
-    recipe_boundary_support: np.ndarray | None = None,
-) -> np.ndarray:
-    """Keep Stage 4 detail only where disagreement aligns with true local structure."""
-    candidate_mask = np.asarray(requested_detail_layers > 1e-9, dtype=bool)
-    if not np.any(candidate_mask):
-        return candidate_mask
-
-    if detail_signal is None:
-        detail_signal = _compute_stage4_detail_signal(visible_plan)
-    if signal_threshold is None:
-        signal_threshold = _stage4_detail_signal_threshold(
-            detail_signal=detail_signal,
-            candidate_mask=candidate_mask,
-        )
-    if signal_threshold is None:
-        return np.zeros_like(candidate_mask, dtype=bool)
-
-    focused = detail_signal >= float(signal_threshold)
-    if recipe_boundary_support is not None:
-        boundary_support = np.asarray(recipe_boundary_support, dtype=bool)
-        boundary_signal_threshold = (
-            float(signal_threshold) * float(_STAGE4_DETAIL_RECIPE_BOUNDARY_SIGNAL_FRACTION)
-        )
-        focused |= boundary_support & (detail_signal >= np.float32(boundary_signal_threshold))
-    return candidate_mask & focused
-
-
 def _shape_stage4_detail_stack_layers(
     *,
     detail_mask: np.ndarray,
@@ -8613,25 +8467,6 @@ def _stage4_detail_recipe_boundary_support(
         size=3,
         mode="nearest",
     ) > 0
-
-
-def _limit_stage4_detail_layers(
-    requested_detail_layers: np.ndarray,
-    *,
-    available_detail_mm: np.ndarray,
-    layer_height: float,
-    max_layers: int | None = None,
-) -> np.ndarray:
-    """Quantize and cap detail relief to a small printable layer stack."""
-    limited = _quantize_down(requested_detail_layers, layer_height)
-    layer_cap = max(0, int(max_layers if max_layers is not None else _STAGE4_DEFAULT_DETAIL_MAX_LAYERS))
-    max_detail = np.float32(float(layer_cap) * float(layer_height))
-    limited = np.minimum(limited, np.full_like(limited, max_detail, dtype=np.float32))
-    limited = np.minimum(
-        limited,
-        np.maximum(np.asarray(available_detail_mm, dtype=np.float32), np.float32(0.0)),
-    ).astype(np.float32, copy=False)
-    return np.maximum(limited, np.float32(0.0)).astype(np.float32, copy=False)
 
 
 def _limit_stage4_independent_detail_layers(
@@ -9204,30 +9039,6 @@ def _build_stage4_optical_detail_surface(
         copy=False,
     )
     return requested, best_gain
-
-
-def _filter_stage4_detail_by_optical_gain(
-    *,
-    state,
-    visible_plan: VisibleRecipeRawGeometryPlan,
-    boundary_cap_height: np.ndarray,
-    final_cap_target: np.ndarray,
-    detail_mask: np.ndarray,
-    min_gain: float = _STAGE4_DETAIL_MIN_OPTICAL_GAIN,
-) -> np.ndarray:
-    """Keep detail only where the extra cap improves the target match."""
-    detail_mask = np.asarray(detail_mask, dtype=bool)
-    if not np.any(detail_mask):
-        return detail_mask
-
-    gain_map = _compute_stage4_detail_optical_gain_map(
-        state=state,
-        visible_plan=visible_plan,
-        boundary_cap_height=boundary_cap_height,
-        final_cap_target=final_cap_target,
-        detail_mask=detail_mask,
-    )
-    return detail_mask & (gain_map > float(min_gain))
 
 
 def _stage4_detail_zone_min_pixels(state) -> int:

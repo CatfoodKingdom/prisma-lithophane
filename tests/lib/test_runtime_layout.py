@@ -19,7 +19,6 @@ from Prisma.lib.runtime_layout import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BLANK_SCHEMA = PROJECT_ROOT / "Prisma" / "calibration" / "blank_calibration_schema.sql"
-MIGRATION_SCHEMA = PROJECT_ROOT / "tools" / "migration_preflight" / "FINAL_SQLITE_SCHEMA.sql"
 
 
 def test_defaults_are_entirely_portable_and_ignore_profile_locations(tmp_path: Path) -> None:
@@ -254,10 +253,6 @@ def test_generator_environment_removes_every_calibration_and_legacy_path(tmp_pat
 
     assert not set(inherited) & runtime_layout.GENERATOR_FORBIDDEN_INHERITED_ENV
     assert inherited["PRISMA_MODEL_LIBRARY_AVAILABLE"] == "0"
-
-
-def test_bundled_blank_schema_matches_the_final_sqlite_contract() -> None:
-    assert BLANK_SCHEMA.read_bytes() == MIGRATION_SCHEMA.read_bytes()
 
 
 def test_calibration_first_run_creates_only_its_portable_tree_and_blank_database(tmp_path: Path) -> None:

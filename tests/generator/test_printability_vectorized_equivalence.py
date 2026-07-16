@@ -55,6 +55,29 @@ def _ref_component_grade(component_indices, width_px, settings):
     return str(grade), tuple(reasons)
 
 
+def _boundary_contact_mask_for_borrowed_stack(
+    *,
+    component: np.ndarray,
+    original_stack_map: np.ndarray,
+    borrowed_stack_id: int,
+) -> np.ndarray:
+    """Scalar-oracle helper for borrowed-recipe boundary contact."""
+
+    component_bool = np.asarray(component, dtype=bool)
+    original = np.asarray(original_stack_map, dtype=np.int32)
+    contact = np.zeros(component_bool.shape, dtype=bool)
+    if component_bool.size == 0 or not np.any(component_bool):
+        return contact
+    borrowed = int(borrowed_stack_id)
+    if component_bool.shape[0] > 1:
+        contact[1:, :] |= component_bool[1:, :] & (original[:-1, :] == borrowed)
+        contact[:-1, :] |= component_bool[:-1, :] & (original[1:, :] == borrowed)
+    if component_bool.shape[1] > 1:
+        contact[:, 1:] |= component_bool[:, 1:] & (original[:, :-1] == borrowed)
+        contact[:, :-1] |= component_bool[:, :-1] & (original[:, 1:] == borrowed)
+    return contact
+
+
 def _ref_layer_component_failures(
     component_indices,
     shape,
@@ -256,7 +279,7 @@ def _ref_mutation(**kwargs):
                 size = int(np.count_nonzero(comp))
                 if size <= 0:
                     continue
-                contact = exr._boundary_contact_mask_for_borrowed_stack(
+                contact = _boundary_contact_mask_for_borrowed_stack(
                     component=comp, original_stack_map=original, borrowed_stack_id=int(b))
                 cpx = int(np.count_nonzero(contact))
                 if cpx < mcp:

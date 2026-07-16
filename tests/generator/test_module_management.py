@@ -189,7 +189,6 @@ def test_facade_threads_enabled_preprocessors(isolated_registry, monkeypatch):
             export_metadata={},
             preprocessing_metrics={},
             cap_quality={},
-            blueprint_triage=None,
             swap_grouping=None,
         )
 

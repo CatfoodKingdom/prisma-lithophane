@@ -10,13 +10,7 @@ _GEN_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "generator
 if str(_GEN_DIR) not in sys.path:
     sys.path.insert(0, str(_GEN_DIR))
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "Prisma"
-    / "data"
-    / "filaments"
-    / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 from facade import SolveConfig, solve_full, solve_preview
 from model import to_oklab
@@ -56,7 +50,6 @@ from pipeline.staged_runner import (
     _compute_stage2_recipe_pressure,
     _downsample_rgb_image,
     _effective_color_region_target_mm,
-    _limit_stage4_detail_layers,
     _optimize_zone_recipe_labels,
     _project_zone_labels_to_fine,
     _prune_zone_candidate_frontiers,
@@ -64,7 +57,6 @@ from pipeline.staged_runner import (
     _run_coord_descent,
     _rescue_stage2_optical_frontier_candidates,
     _seed_zone_recipe_labels_with_beam,
-    _select_stage4_detail_mask,
     _shape_stage4_detail_stack_layers,
     _score_pixels_against_stack_ids,
     _score_zone_pixels_against_candidates,
@@ -4453,15 +4445,7 @@ def test_stage4_detail_recipe_boundary_support_can_rescue_moderate_signal():
     optical_gain_map = np.where(detail_mask, np.float32(0.02), np.float32(np.nan))
     detail_signal = np.where(detail_mask, np.float32(0.40), np.float32(0.0))
     recipe_boundary_support = detail_mask.copy()
-    visible_plan = SimpleNamespace()
-
-    selected = _select_stage4_detail_mask(
-        visible_plan=visible_plan,
-        requested_detail_layers=requested_detail_layers,
-        detail_signal=detail_signal,
-        signal_threshold=0.50,
-        recipe_boundary_support=recipe_boundary_support,
-    )
+    selected = detail_mask.copy()
 
     (
         active_mask,
@@ -4490,50 +4474,10 @@ def test_stage4_detail_recipe_boundary_support_can_rescue_moderate_signal():
     assert facts[0].structure_support_fraction == 1.0
 
 
-def test_stage4_detail_low_structure_stays_quiet_without_recipe_support():
-    detail_mask = np.zeros((3, 4), dtype=bool)
-    detail_mask[1, 1:3] = True
-    requested_detail_layers = np.where(detail_mask, np.float32(0.08), np.float32(0.0))
-    detail_signal = np.where(detail_mask, np.float32(0.20), np.float32(0.0))
-    visible_plan = SimpleNamespace()
-
-    selected = _select_stage4_detail_mask(
-        visible_plan=visible_plan,
-        requested_detail_layers=requested_detail_layers,
-        detail_signal=detail_signal,
-        signal_threshold=0.50,
-    )
-
-    assert not np.any(selected)
-
-
-def test_stage4_detail_layer_limiter_allows_small_two_layer_stack():
-    requested = np.array([[0.02, 0.08, 0.16, 0.30]], dtype=np.float32)
-    final_cap_target = np.array([[0.08, 0.16, 0.24, 0.40]], dtype=np.float32)
-
-    limited = _limit_stage4_detail_layers(
-        requested,
-        available_detail_mm=final_cap_target - np.float32(0.08),
-        layer_height=0.08,
-    )
-
-    np.testing.assert_allclose(
-        limited,
-        np.array([[0.0, 0.08, 0.16, 0.16]], dtype=np.float32),
-        atol=1e-6,
-    )
-
-
-def test_stage4_detail_layer_limiter_honors_user_layer_cap():
+def test_stage4_independent_detail_layer_limiter_honors_user_layer_cap():
     requested = np.array([[0.08, 0.16, 0.32]], dtype=np.float32)
     available = np.full_like(requested, 0.40, dtype=np.float32)
 
-    limited = _limit_stage4_detail_layers(
-        requested,
-        available_detail_mm=available,
-        layer_height=0.08,
-        max_layers=3,
-    )
     independent_limited = staged_runner._limit_stage4_independent_detail_layers(
         requested,
         available_detail_mm=available,
@@ -4542,22 +4486,7 @@ def test_stage4_detail_layer_limiter_honors_user_layer_cap():
     )
 
     expected = np.array([[0.08, 0.16, 0.24]], dtype=np.float32)
-    np.testing.assert_allclose(limited, expected, atol=1e-6)
     np.testing.assert_allclose(independent_limited, expected, atol=1e-6)
-
-
-def test_stage4_detail_layer_limiter_honors_zero_layer_cap():
-    requested = np.array([[0.08, 0.16, 0.32]], dtype=np.float32)
-    available = np.full_like(requested, 0.40, dtype=np.float32)
-
-    limited = _limit_stage4_detail_layers(
-        requested,
-        available_detail_mm=available,
-        layer_height=0.08,
-        max_layers=0,
-    )
-
-    np.testing.assert_allclose(limited, np.zeros_like(requested), atol=1e-6)
 
 
 def test_stage4_detail_stack_shaping_reserves_second_layer_for_strong_signal():

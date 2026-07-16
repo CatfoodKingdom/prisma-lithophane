@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Local color-lithophane generation and filament calibration tools"
 requires-python = ">=3.12"
 dependencies = [
-    "jupyterlab>=4.5.4",
     "matplotlib>=3.10.8",
     "numpy>=2.4.2",
     "opencv-python>=4.13.0.92",
@@ -15,7 +14,6 @@ dependencies = [
     "scipy>=1.17.1",
     "scipy-stubs~=1.17.1",
     "shapely>=2.1.2",
-    "ipympl>=0.9",
     "pillow>=10.0",
     "build123d>=0.10.0",
     "scikit-image>=0.26.0",

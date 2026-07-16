@@ -1,13 +1,12 @@
 """
 lith_facade.py — High-level facade for the lithophane solver pipeline.
 
-Provides three entry points that handle the full load → LUT → solve → predict
+Provides two entry points that handle the full load → LUT → solve → predict
 orchestration so that callers (e.g. the web server) don't need to reach into
 pipeline internals.
 
-    solve_preview()  — fast low-res preview (gamut check)
+    solve_preview()  — fast low-res preview/evaluation for repository tooling
     solve_full()     — production solve with smoothing
-    solve_compare()  — batch preview across multiple palettes
 """
 from __future__ import annotations
 
@@ -35,8 +34,6 @@ from filament_order import canonical_palette_order, load_filament_order_registry
 from progress import coerce_progress_reporter
 
 if TYPE_CHECKING:
-    from pipeline.blueprint_triage.report import PrintabilityReport
-    from pipeline.snapshot import SnapshotPublisher
     from pipeline.solved_material_plan import SolvedMaterialPlan
 
 
@@ -81,7 +78,6 @@ class SolveConfig:
     stage2_boundary_mutation_max_passes: int | None = 1
     stage4_printability_gate_detail: bool = False
     luminance_detail_authoring_printability: str = "off"
-    detail_cap_pitch_mm: float | None = None
     detail_cap_enabled: bool = True
     detail_cap_max_layers: int = 5
     detail_cap_smoothing_enabled: bool = True
@@ -112,7 +108,6 @@ class SolveConfig:
     luminance_handler_detail_residual: bool = True
     luminance_handler_include_solver_detail: bool = True
     smooth_kernel: float = 7.5
-    smooth_iters: int = 3
     ams_slots: int = 4
     white_slots: int = 1
     use_corrections: bool = True
@@ -122,12 +117,6 @@ class SolveConfig:
     photo_stack_bundle_path: Optional[Path] = None
     nozzle_diameter: float = 0.20         # mm — physical nozzle size
     printer_min_line_width_mm: float | None = None
-    allow_print_despite_hazards: bool = False
-    # Print-aware source resample kernel (Wing B §E / B7). Threaded into
-    # `load_image()` at ingress. "lanczos" (default) is bit-exact with
-    # pre-B7 behavior; "area" selects cv2.INTER_AREA for print-aware
-    # sampling when operators downstream benefit from anti-aliased input.
-    source_resample_kernel: str = "lanczos"
     cap_mode: str = "smooth_variable"     # "smooth_variable" | "appearance_bounded_smooth"
     boundary_cap_de_budget: float = 0.008
     cap_continuity_cleanup: bool = True   # fill single-pixel cap pinholes
@@ -135,11 +124,6 @@ class SolveConfig:
     cell_mode: str = "felzenszwalb"
     smooth_boundaries: bool = False
     boundary_smooth_radius: int = 1
-    v2_cleanup_de_budget: float = 0.10
-    v2_enable_cliff_closure: bool = True
-    v2_enable_cap_topology_cleanup: bool = False
-    v2_max_cleanup_rounds: int = 1
-    v2_full_cap_quality_report: bool = False
     # F1 preprocessing slot: per-operator parameter values keyed by module name.
     # Every registered operator's params block materializes here at its default
     # per R2-F, regardless of enablement. Enablement lives in `module_state`.
@@ -175,17 +159,6 @@ class SolveConfig:
         if self.boundary_cap_authority_mm is None:
             return max(float(self.d_wc_min), cap)
         return max(float(self.d_wc_min), min(float(self.boundary_cap_authority_mm), cap))
-
-    def effective_detail_cap_pitch_mm(self) -> float:
-        if self.detail_cap_pitch_mm is not None:
-            return float(self.detail_cap_pitch_mm)
-        for value in (
-            self.solver_fine_pitch_mm,
-            self.image_sample_pitch_mm,
-        ):
-            if value is not None:
-                return float(value)
-        return 0.20
 
     def effective_detail_cap_max_layers(self) -> int:
         if not self.detail_cap_enabled:
@@ -259,7 +232,6 @@ class SolveResult:
     export_metadata: Dict[str, object] = field(default_factory=dict)
     preprocessing_metrics: Dict[str, object] = field(default_factory=dict)
     cap_quality: Dict[str, object] = field(default_factory=dict)
-    blueprint_triage: Optional["PrintabilityReport"] = None
     swap_grouping: Dict[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -497,10 +469,8 @@ def _to_pipeline_config(
     """Translate SolveConfig to PipelineConfig for the new runner.
 
     Resolution is communicated via canonical pitch fields only. The
-    `preprocessors` list is the ordered, already-resolved chain from
-    `_resolve_preprocessing_from_state`; `preprocessing_params` rides
-    along verbatim from `SolveConfig` for downstream fingerprinting
-    (R3-B).
+    `preprocessors` list is the ordered, already-resolved chain constructed
+    by `_resolve_preprocessing_from_state` from `SolveConfig.preprocessing_params`.
     """
     from pipeline.state import PipelineConfig
 
@@ -517,7 +487,6 @@ def _to_pipeline_config(
         k_max=config.k_max,
         de_threshold=config.de_threshold,
         smooth_kernel=config.smooth_kernel,
-        smooth_iters=config.smooth_iters,
         gamut_mode=config.gamut_mode,
         gamut_white_rescale=config.gamut_white_rescale,
         # Pass the configured Camera Transform ingress path through to image_to_target.
@@ -601,7 +570,6 @@ def _to_pipeline_config(
         luminance_detail_authoring_printability=(
             config.luminance_detail_authoring_printability
         ),
-        detail_cap_pitch_mm=config.detail_cap_pitch_mm,
         detail_cap_enabled=True,
         detail_cap_max_layers=config.detail_cap_max_layers,
         detail_cap_smoothing_enabled=config.detail_cap_smoothing_enabled,
@@ -618,22 +586,12 @@ def _to_pipeline_config(
         cell_mode=config.cell_mode,
         smooth_boundaries=config.smooth_boundaries,
         boundary_smooth_radius=config.boundary_smooth_radius,
-        allow_print_despite_hazards=config.allow_print_despite_hazards,
-        source_resample_kernel=config.source_resample_kernel,
         cap_mode=config.cap_mode,
         boundary_cap_de_budget=config.boundary_cap_de_budget,
         cap_continuity_cleanup=config.cap_continuity_cleanup,
         preprocessors=list(preprocessors or []),
-        preprocessing_params=dict(config.preprocessing_params),
         preset=preset,
     )
-
-
-def _replace_solve_config(config: SolveConfig, **changes) -> SolveConfig:
-    """Shallow-clone a SolveConfig using only stored canonical fields."""
-    payload = dict(config.__dict__)
-    payload.update(changes)
-    return SolveConfig(**payload)
 
 
 def _rms(values: np.ndarray) -> float | None:
@@ -793,7 +751,6 @@ def _state_to_solve_result(state, config: SolveConfig) -> SolveResult:
         export_metadata=deepcopy(getattr(state, "export_metadata", {})),
         preprocessing_metrics=dict(getattr(state, "preprocessing_metrics", {})),
         cap_quality=dict(getattr(state, "cap_quality", {})),
-        blueprint_triage=getattr(state, "blueprint_triage", None),
         swap_grouping=deepcopy(getattr(state, "swap_grouping", None)),
     )
 
@@ -808,7 +765,7 @@ def solve_preview(
     modules_path: Path | None = None,
     module_state: dict | None = None,
 ) -> SolveResult:
-    """Quick low-res solve for gamut preview. No smoothing, max_layers=15."""
+    """Quick low-res solve for preview/evaluation tooling. No smoothing, max_layers=15."""
     from pipeline.state import PREVIEW_PRESET
     from pipeline.runner import run_pipeline
 
@@ -825,49 +782,6 @@ def solve_preview(
     )
     state = run_pipeline(img, pcfg, progress=progress)
     return _state_to_solve_result(state, config)
-
-
-def solve_preview_progressive(
-    img: np.ndarray,
-    config: SolveConfig,
-    progress: ProgressCallback = None,
-    modules_path: Path | None = None,
-    module_state: dict | None = None,
-    publisher: "SnapshotPublisher | None" = None,
-) -> SolveResult:
-    """Full solve (FULL_PRESET) that threads an optional SnapshotPublisher
-    into the preprocessing pipeline for source-image preview frames.
-
-    The progressive-solve HTTP feature and its mid-solve snapshot emitter
-    (maybe_publish) were removed in the Stage 3 cleanup. This entry point is
-    retained because it is the facade-level vehicle that threads a publisher
-    to the preprocessing runner's publish_image_preview hook — currently
-    dormant in production, exercised by the preprocessing preview tests. The
-    `_progressive` name is a historical artifact and a Stage 4
-    naming-convergence rename candidate.
-    """
-    from pipeline.state import FULL_PRESET
-    from pipeline.runner import run_pipeline
-
-    _, preprocessors = _resolve_pipeline_slots(
-        config,
-        FULL_PRESET,
-        modules_path=modules_path,
-        module_state=module_state,
-    )
-    pcfg = _to_pipeline_config(
-        config,
-        FULL_PRESET,
-        preprocessors=preprocessors,
-    )
-    state = run_pipeline(
-        img,
-        pcfg,
-        progress=progress,
-        snapshot_publisher=publisher,
-    )
-    return _state_to_solve_result(state, config)
-
 
 def solve_full(
     img: np.ndarray,
@@ -891,64 +805,3 @@ def solve_full(
                                 preprocessors=preprocessors)
     state = run_pipeline(img, pcfg, progress=progress)
     return _state_to_solve_result(state, config)
-
-
-def solve_compare(
-    img: np.ndarray,
-    palettes: List[List[str]],
-    config: SolveConfig,
-    progress: ProgressCallback = None,
-    modules_path: Path | None = None,
-    module_state: dict | None = None,
-) -> List[SolveResult | dict]:
-    """Batch preview-quality solve across multiple palettes."""
-    from pipeline.state import COMPARE_PRESET
-    from pipeline.runner import run_pipeline
-
-    loaded_module_state = _load_module_state(modules_path, module_state)
-    results: List[SolveResult | dict] = []
-    batch_progress = coerce_progress_reporter(
-        progress,
-        stage_count=max(1, len(palettes)),
-        palette_count=len(palettes),
-    )
-    for idx, palette in enumerate(palettes):
-        if not palette:
-            results.append({"error": "Empty palette", "palette": palette})
-            continue
-        try:
-            compat_cfg = _replace_solve_config(
-                config,
-                palette=palette,
-            )
-            _, preprocessors = _resolve_pipeline_slots(
-                compat_cfg,
-                COMPARE_PRESET,
-                module_state=loaded_module_state,
-            )
-            pcfg = _to_pipeline_config(
-                compat_cfg, COMPARE_PRESET,
-                preprocessors=preprocessors,
-            )
-            palette_progress = (
-                batch_progress.child(
-                    100 * idx / max(1, len(palettes)),
-                    100 * (idx + 1) / max(1, len(palettes)),
-                    stage="palette",
-                    stage_index=idx + 1,
-                    label_prefix=f"Palette {idx + 1}/{len(palettes)}: ",
-                    palette_index=idx + 1,
-                    palette_count=len(palettes),
-                )
-                if batch_progress is not None
-                else None
-            )
-            state = run_pipeline(
-                img, pcfg, progress=palette_progress,
-                palette_index=idx + 1,
-                palette_count=len(palettes),
-            )
-            results.append(_state_to_solve_result(state, compat_cfg))
-        except Exception as exc:
-            results.append({"error": str(exc), "palette": palette})
-    return results

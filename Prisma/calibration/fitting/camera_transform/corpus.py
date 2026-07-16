@@ -7,8 +7,8 @@ falls back to `measurements.swatches[*].R/G/B`, thumbnails, display-artifact
 rectangles, or display-artifact visual medians.  Samples without an assigned
 CR2 in managed `images/` or `inbox/` are skipped with an explicit reason.
 
-Geometry and `order_correlation` are ported from
-`DevelopmentSandbox/model_domain_conversion/extract_appearance_corpus.py`:
+Geometry and `order_correlation` follow the accepted model-domain
+corpus-extraction workflow:
 locate the strip in the embedded-JPEG frame, split that frame-space strip into
 swatch boxes, sample median byte RGB, then compute orientation and
 `order_correlation` from stored G transmission versus JPEG luminance.  This

@@ -13,7 +13,6 @@ from pipeline.state import (
     ProfileSet,
     PREVIEW_PRESET,
     FULL_PRESET,
-    COMPARE_PRESET,
 )
 def test_profile_set():
     ps = ProfileSet(
@@ -28,7 +27,6 @@ def test_profile_set():
 def test_quality_presets_exist():
     assert PREVIEW_PRESET.name == "preview"
     assert FULL_PRESET.name == "full"
-    assert COMPARE_PRESET.name == "compare"
 
 
 def test_preview_preset_settings():

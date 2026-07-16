@@ -82,9 +82,6 @@ function loadSolveStartFunctions(updateConfigImpl, startSolveImpl) {
     getBaseFilament() {
       return 'demo-white';
     },
-    getCapFilament() {
-      return 'demo-white';
-    },
     printerConfig: { ams_slots: 4, white_slots: 1 },
     solveStatus: { status: 'idle' },
     solveStartPending: false,

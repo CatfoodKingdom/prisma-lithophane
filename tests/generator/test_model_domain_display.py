@@ -21,7 +21,7 @@ from model_domain_display import (
     load_display_transform_params,
 )
 
-_SANDBOX = _ROOT / "DevelopmentSandbox" / "model_domain_conversion"
+_SANDBOX = _ROOT / "tests" / "fixtures" / "model_domain_conversion"
 
 
 _ORACLE_CACHE: list = []
@@ -31,7 +31,7 @@ def _load_sandbox_module():
     if _ORACLE_CACHE:
         return _ORACLE_CACHE[0]
     spec = importlib.util.spec_from_file_location(
-        "fit_transform_v2_oracle", _SANDBOX / "fit_transform_v2.py"
+        "fit_transform_v2_oracle", _SANDBOX / "fit_transform_v2_oracle.py"
     )
     mod = importlib.util.module_from_spec(spec)
     # fit_transform_v2.py rebinds sys.stdout to a UTF-8 TextIOWrapper at
@@ -133,7 +133,7 @@ def test_f_of_g_roundtrip_is_near_identity(sandbox_camera_transform: Path) -> No
 
     params, _sha = load_display_transform_params(sandbox_camera_transform)
     lut = _load_model_domain_ingress_lut(
-        _ROOT / "DevelopmentSandbox" / "model_domain_conversion" / "inverse_lut_33.npz"
+        _SANDBOX / "inverse_lut_33.npz"
     )
     ax = np.linspace(0.15, 0.85, 6)
     x = np.stack(np.meshgrid(ax, ax, ax, indexing="ij"), axis=-1).reshape(-1, 3).astype(np.float32)
@@ -182,7 +182,7 @@ def test_bake_appearance_is_f_of_decoded_predicted(tmp_path: Path, sandbox_camer
         source_srgb8=src,
         model_domain_ingress=False,
         model_domain_ingress_lut_path=str(
-            _ROOT / "DevelopmentSandbox" / "model_domain_conversion" / "inverse_lut_33.npz"
+            _SANDBOX / "inverse_lut_33.npz"
         ),
         display_transform_path=sandbox_camera_transform,
     )
@@ -215,7 +215,7 @@ def test_bake_on_run_target_is_encoded_g_of_source(tmp_path: Path, sandbox_camer
     from model import _apply_model_domain_ingress_lut, _load_model_domain_ingress_lut
     from model_domain_display import bake_view_domain_images
 
-    lut_path = _ROOT / "DevelopmentSandbox" / "model_domain_conversion" / "inverse_lut_33.npz"
+    lut_path = _SANDBOX / "inverse_lut_33.npz"
     out, pred, src = _fake_run_dir(tmp_path)
     provenance = bake_view_domain_images(
         out,

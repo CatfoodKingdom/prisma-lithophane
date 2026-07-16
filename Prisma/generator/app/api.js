@@ -87,32 +87,6 @@ async function updateConfig(config) {
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 
-async function validatePalette(paletteIds) {
-  return apiPost('/palette/validate', { palette: paletteIds });
-}
-
-async function suggestPalettes(imagePath, nFilaments = 7, topK = 5) {
-  return apiPost('/palette/suggest', {
-    image_path: imagePath,
-    n_filaments: nFilaments,
-    top_k: topK,
-  });
-}
-
-async function getSuggestStatus() {
-  return apiFetch('/palette/suggest/status');
-}
-
-async function cancelSuggest() {
-  return apiPost('/palette/suggest/cancel');
-}
-
-// ── Gamut Preview ─��──────────────────────────────────────────────────────────
-
-async function runGamutPreview(palette = null) {
-  return apiPost('/gamut-preview', palette ? { palette } : {});
-}
-
 // ── Saved Palettes ──────────────────────────────────────────────────────
 
 async function fetchSavedPalettes() {
@@ -335,15 +309,4 @@ async function uploadSavedRun(file) {
   // the computed { 'Content-Type': 'application/json' } header with an empty object —
   // dropping the JSON content-type so the browser sets the multipart boundary itself.
   return apiFetch('/runs/load-upload', { method: 'POST', headers: {}, body: fd });
-}
-
-// ── Health check ─────────────────────────────────────────────────────────────
-
-async function checkApiHealth() {
-  try {
-    await apiFetch('/filaments');
-    return true;
-  } catch {
-    return false;
-  }
 }

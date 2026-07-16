@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 
-_PROFILES_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 from pipeline.state import PipelineState, PipelineConfig, ProfileSet, FULL_PRESET
 from model import load_profile, load_profiles, to_oklab, image_to_target, predict_transmission
@@ -335,8 +335,8 @@ def test_solve_result_accessors_prefer_diagnostics_for_both_keys():
 
 def test_solve_result_accessors_fall_back_to_thickness_maps():
     """Task 5.4 keeps the facade fallback: a diagnostics-less SolveResult (the
-    legacy/CLI shape, DE/GAMUT only in thickness_maps) still resolves de_map and
-    gamut_mask. This is the explicit reason the fallback remains."""
+    legacy/direct shape, DE/GAMUT only in thickness_maps) still resolves de_map
+    and gamut_mask. This is the explicit reason the fallback remains."""
     from facade import SolveResult, SolveStats, SolveConfig
 
     H, W = 4, 4

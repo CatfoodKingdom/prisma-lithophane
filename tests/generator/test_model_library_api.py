@@ -62,7 +62,7 @@ def library_api(monkeypatch: pytest.MonkeyPatch):
     server.configure_restart_callback(None)
     monkeypatch.setattr(server, "_MODEL_LIBRARY_STORE", fake)
     monkeypatch.setattr(server, "_ACTIVE_MODEL_LIBRARY_ID", "library-a")
-    for key in ("solve", "export", "compare", "suggest"):
+    for key in ("solve", "export", "suggest"):
         monkeypatch.setitem(server.session[key], "status", "idle")
     assert not server._MODEL_LIBRARY_OPERATION_LOCK.locked()
     yield fake

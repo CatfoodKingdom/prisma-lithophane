@@ -24,20 +24,16 @@ from pipeline.runner import run_pipeline
 from pipeline.state import PREVIEW_PRESET, PipelineConfig
 from preprocessing.types import PreprocessingResult
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
-def _make_config(*, preprocessors=None, preprocessing_params=None) -> PipelineConfig:
+def _make_config(*, preprocessors=None) -> PipelineConfig:
     return PipelineConfig(
         palette=["bambu-basic-cyan"],
         white_base="panchroma-matte-cotton-white",
         profiles_dir=_PROFILES_DIR,
         preset=PREVIEW_PRESET,
         preprocessors=list(preprocessors or []),
-        preprocessing_params=dict(preprocessing_params or {}),
     )
 
 

@@ -1,22 +1,17 @@
-"""Wing C integration acceptance tests.
+"""Wing C integration tests for current operator wiring.
 
-The four pinned cases from `wing-c/consensus.md § H.3`:
+The retained cases verify:
 
   1. Disabled-baseline no-op — with both C1 and C2 disabled in
      module_state, the chain must not run them, the preprocessing trace
      must be empty, and the solve output must equal a run with the
      preprocessing subsystem stubbed out entirely.
-  2. C1+C2 reduce solver-side `__gamut_mask__` nonzero coverage by ≥10%
-     relative on a pinned saturated fixture vs same-palette baseline
-     (consensus § K.3 acceptance bar).
-  3. C1 alone reduces tonal pile-up on a clipped-grayscale fixture —
+  2. C1 alone reduces tonal pile-up on a clipped-grayscale fixture —
      measurable as a strictly larger count of distinct OKLab L* levels
      in the post-preprocess raster than in the source.
-  4. Palette change invalidates the preprocessing result through the
+  3. Palette change invalidates the preprocessing result through the
      shared-context fingerprint path: two different palettes must
-     produce two different `PaletteMetadataRequest.fingerprint()`
-     values and two different snapshot preview URLs even when the
-     stage_key is identical (§ B.6 / R6 C.4).
+     produce two different `PaletteMetadataRequest.fingerprint()` values.
 
 Fixtures are synthesized inline. The consensus § H.3 footnote permits
 either binary fixtures or in-test synthesis as long as they are
@@ -24,10 +19,10 @@ deterministic — synthesizing keeps the repository binary-free.
 
 Wing C operator algorithms themselves are tested in
 `test_c1_achievable_tonemap.py` and `test_c2_soft_gamut_compress.py`.
-This file asserts CHAIN INTEGRATION — that the auto-discovered
-operators activate from preset-style module_state, that the runner
-threads palette metadata into them, and that the resulting solver-side
-diagnostics meet the wing's pinned acceptance bar.
+This file asserts chain integration: the auto-discovered operators activate
+from preset-style module state and the runner threads palette metadata into
+them. Model-specific quality acceptance belongs in reproducible evaluation
+fixtures rather than the source-safe unit suite.
 """
 from __future__ import annotations
 
@@ -51,10 +46,7 @@ from preprocessing.runner import run_preprocessing_pipeline
 from preprocessing.types import PreprocessingContext
 
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 _C1_NAME = "c1_achievable_tonemap"
 _C2_NAME = "c2_soft_gamut_compress"
@@ -212,55 +204,6 @@ class TestDisabledBaselineNoop:
         )
 
 
-# ── Case 2 — C1+C2 reduce __gamut_mask__ coverage by ≥10% relative ─────────
-
-class TestGamutMaskReduction:
-    """§ H.3 case 2 / § K.3 acceptance bar — C1+C2 with operator defaults
-    must reduce solver-side `__gamut_mask__` nonzero coverage by at
-    least 10% relative on the pinned saturated fixture, vs the
-    same-palette disabled baseline."""
-
-    def test_c1_c2_reduces_gamut_mask_by_at_least_ten_percent(self):
-        import facade
-
-        cfg = _make_solve_config()
-        img = _saturated_fixture(size=24)
-
-        baseline = facade.solve_preview(
-            img, cfg,
-            module_state={_C1_NAME: False, _C2_NAME: False},
-        )
-        treated = facade.solve_preview(
-            img, cfg,
-            module_state={_C1_NAME: True, _C2_NAME: True},
-        )
-
-        # Task 5.4: gamut mask lives in diagnostics; read via the facade accessor.
-        baseline_mask = baseline.gamut_mask
-        treated_mask = treated.gamut_mask
-
-        baseline_oog = int(np.count_nonzero(baseline_mask))
-        treated_oog = int(np.count_nonzero(treated_mask))
-
-        # Baseline must have substantial OOG coverage for the relative
-        # measurement to be meaningful — otherwise a 10% reduction
-        # could come from measurement noise alone.
-        total_pixels = int(baseline_mask.size)
-        assert baseline_oog >= max(1, int(0.20 * total_pixels)), (
-            "saturated fixture should drive the baseline far out of gamut "
-            f"(got {baseline_oog}/{total_pixels} OOG); the K.3 acceptance "
-            "bar can only be measured against a meaningful baseline"
-        )
-
-        relative_reduction = (baseline_oog - treated_oog) / float(baseline_oog)
-        assert relative_reduction >= 0.10, (
-            f"§ K.3: C1+C2 must reduce __gamut_mask__ coverage by ≥10% "
-            f"relative; got baseline_oog={baseline_oog}, "
-            f"treated_oog={treated_oog}, "
-            f"relative_reduction={relative_reduction:.3f}"
-        )
-
-
 # ── Case 3 — C1 alone increases distinct L* levels on clipped grayscale ────
 
 class TestC1ReducesTonalPileUp:
@@ -334,15 +277,9 @@ class TestC1ReducesTonalPileUp:
 # ── Case 4 — Palette change invalidates via shared-context fingerprint ─────
 
 class TestPaletteChangeInvalidation:
-    """§ H.3 case 4 / § B.6 / R6 C.4 — a palette change must invalidate
+    """§ H.3 case 4 / R6 C.4 — a palette change must invalidate
     the preprocessing result via the F1/F2-owned shared-context
-    fingerprint. We assert the two halves of that contract:
-
-      1. `PaletteMetadataRequest.fingerprint()` differs across palettes.
-      2. The snapshot publisher emits a different preview URL for the
-         same `stage_key` when the new fingerprint is threaded through
-         (`context_fingerprint=` kwarg, populated by the runner only
-         for palette-aware operators).
+    fingerprint.
     """
 
     def test_palette_change_yields_different_request_fingerprint(self):
@@ -360,43 +297,3 @@ class TestPaletteChangeInvalidation:
         )
         # Same palette twice must be stable (sanity guard).
         assert PaletteMetadataRequest.from_config(cfg_a).fingerprint() == fp_a
-
-    def test_palette_change_yields_different_preview_url(self, tmp_path):
-        from pipeline.snapshot import SnapshotPublisher
-
-        cfg_a = _make_pipeline_config_for_palette(_PALETTE_CMY)
-        cfg_b = _make_pipeline_config_for_palette(_PALETTE_RGY)
-        fp_a = PaletteMetadataRequest.from_config(cfg_a).fingerprint()
-        fp_b = PaletteMetadataRequest.from_config(cfg_b).fingerprint()
-
-        progress: dict = {}
-        pub = SnapshotPublisher(
-            out_dir=tmp_path, card_id="wing-c", progress_dict=progress,
-        )
-
-        img = np.zeros((4, 4, 3), dtype=np.uint8)
-        pub.publish_image_preview(
-            img, stage_key=f"preprocess/{_C2_NAME}",
-            context_fingerprint=fp_a,
-        )
-        url_a = progress["preview_url"]
-
-        pub.publish_image_preview(
-            img, stage_key=f"preprocess/{_C2_NAME}",
-            context_fingerprint=fp_b,
-        )
-        url_b = progress["preview_url"]
-
-        # Strip the always-changing cache-busting timestamp so we
-        # compare just the content-identifying part of the URL.
-        def _strip_ts(u: str) -> str:
-            parts = [
-                p for p in u.split("&")
-                if not p.startswith("t=") and not p.startswith("?t=")
-            ]
-            return "&".join(parts)
-
-        assert _strip_ts(url_a) != _strip_ts(url_b), (
-            "§ B.6: two emissions of the same stage_key with different "
-            "palette fingerprints must produce different preview URLs"
-        )

@@ -1,8 +1,7 @@
 """F1 cross-cutting smoke tests.
 
 End-to-end checks that prove the preprocessing slot composes across:
-  registry → module-state → facade → pipeline runner → snapshot publisher
-  → server fingerprint.
+  registry → module-state → facade → pipeline runner → server fingerprint.
 
 These do not duplicate per-component coverage (see test_runner.py,
 test_facade_threading.py, test_fingerprint_preprocessing.py); they
@@ -29,7 +28,7 @@ from pipeline.registry import (
 from preprocessing.types import PreprocessingResult
 
 
-_PROFILES_DIR = _PRISMA / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 class _SmokeOp(PreprocessingModule):
@@ -134,7 +133,7 @@ def test_fingerprint_changes_when_smoke_op_toggled(
         "image_sample_pitch_mm": 0.20, "solver_fine_pitch_mm": 0.20,
         "color_region_target_mm": 0.60,
         "image_path": "test.jpg", "image_adjust": None, "max_dim_mm": 130.0,
-        "frame": None, "smooth_kernel": 15.0, "smooth_iters": 3,
+        "frame": None, "smooth_kernel": 15.0,
         "preprocessing_params": {"_f1_smoke_op": {"strength": 0.5}},
     }
 
@@ -145,31 +144,3 @@ def test_fingerprint_changes_when_smoke_op_toggled(
     fp_on = server._solve_owned_fingerprint(cfg)
 
     assert fp_off != fp_on
-
-
-def test_preview_emitted_per_enabled_op(
-    registered_smoke_op, tmp_path, monkeypatch,
-):
-    """Per R1 A3: one `preprocess/<module_name>` preview frame fires per
-    enabled operator. Verifies the snapshot-publisher seam end-to-end via
-    the runner."""
-    import facade
-    from pipeline.snapshot import SnapshotPublisher
-
-    cfg = facade.SolveConfig(
-        palette=["bambu-basic-cyan"],
-        white_base="panchroma-matte-cotton-white",
-        profiles_dir=_PROFILES_DIR,
-    )
-    img = np.full((4, 4, 3), 100, dtype=np.uint8)
-
-    progress: dict = {}
-    publisher = SnapshotPublisher(out_dir=tmp_path, card_id="x", progress_dict=progress)
-
-    facade.solve_preview_progressive(
-        img, cfg,
-        module_state={"_f1_smoke_op": True},
-        publisher=publisher,
-    )
-    expected = tmp_path / "progressive" / "preprocess" / "_f1_smoke_op.png"
-    assert expected.exists()

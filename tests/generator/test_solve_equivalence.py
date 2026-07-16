@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from evaluation.solve_equivalence import (
+from tools.generator.evaluation.solve_equivalence import (
     assert_snapshots_equal,
     fingerprint_sections,
     snapshot_differences,

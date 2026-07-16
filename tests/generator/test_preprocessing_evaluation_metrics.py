@@ -23,12 +23,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from evaluation.preprocessing_harness import EvaluationMetrics
-from evaluation.preprocessing_metrics import (
+from tools.generator.evaluation.preprocessing_harness import EvaluationMetrics
+from tools.generator.evaluation.preprocessing_metrics import (
     cap_total_variation,
     count_small_components,
 )
-from evaluation.preprocessing_render import REPORT_FILENAME
+from tools.generator.evaluation.preprocessing_render import REPORT_FILENAME
 
 
 # ─── count_small_components ──────────────────────────────────────────────────
@@ -154,7 +154,7 @@ def test_cap_total_variation_handles_empty_input():
 
 def test_report_json_field_set_matches_dataclass(tmp_path: Path):
     """report.json field set stays in lockstep with EvaluationMetrics."""
-    from evaluation.preprocessing_render import _save_report  # private helper
+    from tools.generator.evaluation.preprocessing_render import _save_report  # private helper
 
     field_names = {f.name for f in dataclasses.fields(EvaluationMetrics)}
     metrics = EvaluationMetrics(

@@ -14,12 +14,6 @@ from __future__ import annotations
 import math
 from typing import Any, Mapping
 
-CANONICAL_RESOLUTION_FIELDS: tuple[str, ...] = (
-    "image_sample_pitch_mm",
-    "solver_fine_pitch_mm",
-    "color_region_target_mm",
-)
-
 LEGACY_RESOLUTION_REPLACEMENTS: dict[str, tuple[str, ...]] = {
     "pixel_size_mm": (
         "image_sample_pitch_mm",

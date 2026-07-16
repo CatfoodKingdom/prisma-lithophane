@@ -19,6 +19,7 @@ from pipeline.runner import (
     _swap_grouping_metadata,
 )
 from pipeline.state import FULL_PRESET, PipelineConfig
+from tests.generator.profile_fixture import PROFILES_DIR
 
 
 def _config(*, palette_size: int, preset: str = "full"):
@@ -109,9 +110,7 @@ def test_runtime_diagnostics_preserve_grouping_and_unavailable_markers() -> None
 def test_full_spline_overflow_runs_scout_then_banded_final_without_data_cache(tmp_path, monkeypatch) -> None:
     from pipeline.runner import run_pipeline
 
-    profiles_dir = (
-        Path(__file__).resolve().parents[2] / "Prisma" / "data" / "filaments" / "profiles"
-    )
+    profiles_dir = PROFILES_DIR
     monkeypatch.setattr(lut, "CACHE_DIR", tmp_path)
     cfg = PipelineConfig(
         palette=[

@@ -1,9 +1,7 @@
 """No-reintroduction guards for the thickness_maps reserved-key contract (Task 5.1).
 
 * ``MapKey`` holds exactly the 5 webapp/facade reserved sentinels — never the
-  retired ``__translucent_underfill__`` nor the legacy CLI-only ``__filler__``.
-* ``__filler__`` is written into a thickness map only by the legacy CLI filler
-  path in ``pipeline_cli.py``.
+  retired ``__translucent_underfill__``.
 * ``__translucent_underfill__`` (retired by Task 2.3) is never accessed as a
   live thickness_maps key — doc/comment mentions are fine, subscript/.get/in use
   is not.
@@ -55,19 +53,9 @@ def test_mapkey_has_exactly_the_five_reserved_sentinels():
     assert {m.name: m.value for m in MapKey} == _EXPECTED_MAPKEY
 
 
-def test_retired_and_cli_keys_are_not_mapkey_members():
+def test_retired_key_is_not_a_mapkey_member():
     values = {m.value for m in MapKey}
     assert "__translucent_underfill__" not in values  # retired by Task 2.3
-    assert "__filler__" not in values
-
-
-def test_filler_subscript_not_written_by_live_code():
-    pattern = re.compile(r"""\[\s*['"]__filler__['"]\s*\]""")
-    offenders = sorted(
-        rel for rel in _source_py_files()
-        if pattern.search((_ROOT / rel).read_text(encoding="utf-8", errors="ignore"))
-    )
-    assert offenders == []
 
 
 def test_solveresult_reserved_caps_go_through_accessors():
@@ -142,12 +130,11 @@ def test_no_webapp_thickness_maps_diagnostic_writes():
     the ``getattr`` alias). It only inspects assignment *targets*, so reads — the
     facade fallback, ``_compute_stats`` fallback, and the read-only
     ``application.py`` legacy promotion that copies an old key INTO diagnostics —
-    are not flagged. The legacy CLI carriers (solve.py / pipeline_cli.py) are out
-    of scope by construction.
+    are not flagged. Direct/test compatibility carriers are out of scope by
+    construction.
     """
     targets = [
         "Prisma/generator/pipeline/runner.py",
-        "Prisma/generator/pipeline/blueprint_triage/application.py",
     ]
     offenders: list[str] = []
     for rel in targets:

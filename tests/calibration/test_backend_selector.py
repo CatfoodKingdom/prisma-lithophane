@@ -12,22 +12,11 @@ from fastapi.testclient import TestClient
 import server
 from lib import camera_transform
 from data_access import DataStore
-from fitting.photo_stack_model.evidence import build_photo_stack_evidence
 from models import ExtractionResult
 from sqlite_data_access import SQLiteDataStore
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_FINAL_SCHEMA = _PROJECT_ROOT / "tools" / "migration_preflight" / "FINAL_SQLITE_SCHEMA.sql"
-_REAL_MIGRATED_DB = (
-    Path(server._LOCAL_SQLITE_PATH_FILE.read_text(encoding="utf-8").strip()).expanduser().resolve()
-    if server._LOCAL_SQLITE_PATH_FILE.exists()
-    else _PROJECT_ROOT / "Prisma" / "data" / "calibration.sqlite3"
-)
-_REAL_MIGRATED_ASSET_ROOT = (
-    Path(server._LOCAL_ASSET_ROOT_FILE.read_text(encoding="utf-8").strip()).expanduser().resolve()
-    if server._LOCAL_ASSET_ROOT_FILE.exists()
-    else _REAL_MIGRATED_DB.parent
-)
+_BLANK_SCHEMA = _PROJECT_ROOT / "Prisma" / "calibration" / "blank_calibration_schema.sql"
 
 
 def _sqlite_with_required_tables(path: Path) -> Path:
@@ -39,12 +28,17 @@ def _sqlite_with_required_tables(path: Path) -> Path:
     return path
 
 
-def _sqlite_with_final_schema(path: Path) -> Path:
+def _sqlite_with_blank_schema(path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as conn:
-        conn.executescript(_FINAL_SCHEMA.read_text(encoding="utf-8"))
+        conn.executescript(_BLANK_SCHEMA.read_text(encoding="utf-8"))
         conn.commit()
     return path
+
+
+# Existing current-contract fixtures import this helper by its historical
+# name; keep the alias while making the canonical Calibration schema explicit.
+_sqlite_with_final_schema = _sqlite_with_blank_schema
 
 
 def _seed_stage2a_projection_fixture(sqlite_path: Path) -> None:
@@ -457,8 +451,8 @@ def test_sqlite_backend_rejects_incomplete_schema(tmp_path: Path):
         )
 
 
-def test_sqlite_filament_projection_from_final_schema(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+def test_sqlite_filament_projection_from_blank_schema(tmp_path: Path):
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -478,7 +472,7 @@ def test_sqlite_filament_projection_from_final_schema(tmp_path: Path):
 
 
 def test_sqlite_sample_records_stay_slim_while_list_samples_hydrates_measurements(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -526,7 +520,7 @@ def test_sqlite_sample_records_stay_slim_while_list_samples_hydrates_measurement
 
 
 def test_sqlite_sample_detail_hydrates_accepted_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -561,7 +555,7 @@ def test_sqlite_sample_detail_hydrates_accepted_extraction(tmp_path: Path, monke
 
 
 def test_sqlite_sample_detail_missing_sample_returns_none(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -571,8 +565,8 @@ def test_sqlite_sample_detail_missing_sample_returns_none(tmp_path: Path):
     assert store.get_extraction_result("exp-999") is None
 
 
-def test_sqlite_image_and_blank_read_projection_from_final_schema(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+def test_sqlite_image_and_blank_read_projection_from_blank_schema(tmp_path: Path):
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -615,7 +609,7 @@ def test_sqlite_image_and_blank_read_projection_from_final_schema(tmp_path: Path
 
 
 def test_sqlite_image_path_projection_rejects_unsafe_managed_path(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     with closing(sqlite3.connect(sqlite_path)) as conn:
         conn.execute(
@@ -634,8 +628,8 @@ def test_sqlite_image_path_projection_rejects_unsafe_managed_path(tmp_path: Path
         store.get_image_path("sample.CR2")
 
 
-def test_sqlite_geometry_and_bundle_projection_from_final_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+def test_sqlite_geometry_and_bundle_projection_from_blank_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -736,7 +730,7 @@ def test_sqlite_geometry_and_bundle_projection_from_final_schema(tmp_path: Path,
 
 
 def test_sqlite_step_generation_write_path_fails_explicitly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
@@ -759,7 +753,7 @@ def test_sqlite_step_generation_write_path_fails_explicitly(tmp_path: Path, monk
 
 
 def test_sqlite_profile_reads_degrade_to_artifact_files(tmp_path: Path):
-    sqlite_path = _sqlite_with_final_schema(tmp_path / "calibration.sqlite")
+    sqlite_path = _sqlite_with_blank_schema(tmp_path / "calibration.sqlite")
     _seed_stage2a_projection_fixture(sqlite_path)
     asset_root = tmp_path / "assets"
     profiles_dir = asset_root / "filaments" / "profiles"
@@ -803,128 +797,3 @@ def test_sqlite_profile_reads_degrade_to_artifact_files(tmp_path: Path):
     }
     assert store.list_strip_filaments() == []
     assert store.get_strips("bambu-basic-white") is None
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2a_real_migrated_counts():
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    raw_samples = store.list_sample_records_raw()
-    with closing(sqlite3.connect(f"{_REAL_MIGRATED_DB.as_uri()}?mode=ro", uri=True)) as conn:
-        expected_filament_count = int(conn.execute("SELECT COUNT(*) FROM filaments").fetchone()[0])
-
-    assert len(store.list_filaments()) == expected_filament_count
-    assert expected_filament_count > 0
-    assert len(raw_samples) >= 820
-    assert sum(1 for sample in raw_samples if sample["has_measurements"]) == 733
-    assert sum(sample["n_swatches"] for sample in raw_samples) == 5864
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2b_real_migrated_sample_detail():
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    sample = store.get_sample("exp-001")
-    sidecar = store.get_extraction_result("exp-001")
-
-    assert sample is not None
-    assert sample.measurements is not None
-    assert len(sample.measurements.swatches) == 8
-    assert sidecar is not None
-    rebuilt = ExtractionResult(**sidecar)
-    assert rebuilt.review_state == "accepted"
-    assert len(rebuilt.measurements.swatches) == 8
-    assert sample.roles
-    assert {role["role_kind"] for role in sample.roles} == {"variable"}
-
-    multilayer = store.get_sample("exp-058")
-    assert multilayer is not None
-    assert [(role["role_index"], role["role_kind"]) for role in multilayer.roles] == [
-        (1, "fixed"),
-        (2, "variable"),
-    ]
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2b_real_migrated_list_samples_hydrates_fit_measurements():
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    samples = store.list_samples()
-    processed_with_measurements = [
-        sample
-        for sample in samples
-        if sample.processing_status == "processed" and sample.measurements is not None
-    ]
-    evidence = build_photo_stack_evidence(store, use_fit_exclusions=True)
-
-    assert len(samples) >= 820
-    assert len(processed_with_measurements) == 733
-    assert sum(len(sample.measurements.swatches) for sample in processed_with_measurements) == 5864
-    assert evidence["summary"]["sample_count"] > 0
-    assert evidence["summary"]["swatch_count"] > 0
-    assert evidence["summary"]["skipped_sample_count"] < len(samples)
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2c_real_migrated_image_and_blank_reads():
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    images = store.list_images()
-    blanks = store.list_blanks()
-
-    assert len(images) >= 781
-    assert len(blanks) >= 48
-    assert sum(1 for image in images if image["rotation_cw"]) >= 17
-    assert all(isinstance(image["ignored"], bool) for image in images)
-    assert all(store.get_image_path(image["filename"]) is not None for image in images[:10])
-
-    first_blank = blanks[0]
-    assert store.get_blank(first_blank.blank_id) == first_blank
-    assert store.get_blank_storage_path(first_blank.blank_id) is not None
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2d_real_migrated_geometry_and_bundle_reads(monkeypatch: pytest.MonkeyPatch):
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    records = store.list_step_records()
-    bundles = store.list_bundles()
-
-    assert len(records) >= 90
-    assert len(store.load_steps_registry()) == len(records)
-    assert sum(1 for record in records if len(record.variable_thicknesses_mm) == 8) >= 90
-    assert sum(len(bundle["step_ids"]) for bundle in bundles) >= 43
-    assert len(bundles) >= 9
-    assert all(record.file_name == f"{record.step_id}.step" for record in records)
-    assert all(record.layer_height_mm == 0.0 for record in records)
-    assert all(record.roles for record in records)
-    assert all(record.swatch_slots for record in records)
-    assert all(record.step_id.startswith("geom_") or record.step_id.startswith("geom-") for record in records)
-    assert store.get_step_record(records[0].step_id) == records[0]
-    assert store.find_step_record(step_file=records[0].file_name) == records[0]
-
-    monkeypatch.setattr(server, "_store", store)
-    step_payload = server.list_steps()
-    assert len(step_payload) == len(records)
-    assert all(step["roles"] for step in step_payload)
-    assert all(step["swatch_slots"] for step in step_payload)
-    assert len(server.list_bundles()) == len(bundles)
-
-
-@pytest.mark.skipif(not _REAL_MIGRATED_DB.exists(), reason="production migrated SQLite DB not present")
-def test_sqlite_stage2e_real_migrated_profile_and_model_reads(monkeypatch: pytest.MonkeyPatch):
-    store = SQLiteDataStore(_REAL_MIGRATED_DB, asset_root=_REAL_MIGRATED_ASSET_ROOT)
-
-    assert len(store.list_profiles()) == 29
-    assert store.get_profile("panchroma-matte-cotton-white") is not None
-    assert store.list_strip_filaments() == []
-    assert store.get_strips("panchroma-matte-cotton-white") is None
-
-    monkeypatch.setattr(server, "_store", store)
-    assert len(server.list_profiles()) == 29
-    camera_payload = server.get_camera_transform_current()
-    assert camera_payload["status"] == "present"
-    assert camera_payload["corpus_size"] > 0
-    assert camera_payload["corpus_size"] == camera_payload["manifest"]["corpus"]["usable_swatch_count"]
-    photo_payload = server.get_photo_stack_latest()
-    assert photo_payload["model_currentness"]["currentness_state"] == "current"

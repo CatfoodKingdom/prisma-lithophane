@@ -16,8 +16,8 @@ situation.
 What the fallback genuinely exercises (per the plan):
   (a) solve (synthetic) -> save -> clear cache -> load yields a COMPLETE cached
       entry under a FRESH ``loaded-*`` card_id (never clobbering the original); and
-  (b) ``get_swap_instructions(loaded_card)`` SUCCEEDS on the loaded card. Swap
-      instruction generation reads the reserved white-cap map
+  (b) the export-owned swap builder SUCCEEDS on the loaded card. Swap instruction
+      generation reads the reserved white-cap map
       (``MapKey.WHITE_CAP``), the per-filament color maps, ``d_wb`` /
       ``layer_height`` from the rehydrated config, AND requires non-None
       ``image_domain_width_mm`` / ``image_domain_height_mm`` (it raises HTTP 500
@@ -34,6 +34,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -209,6 +210,55 @@ def _assert_load_critical_archives_match(left, right):
     assert set(left.run_cache_files) == set(right.run_cache_files)
 
 
+def _build_export_swap_payload(server_module, card_id: str) -> dict:
+    """Exercise the same materialization and swap builder used by export finalization."""
+    solve, cfg, _target_card_id = server_module._resolve_export_target(card_id)
+    export_thickness_maps, ordering = server_module._prepare_export_materialization(
+        cfg,
+        solve["thickness_maps"],
+    )
+    return server_module._build_swap_instruction_payload(
+        solve=solve,
+        cfg=cfg,
+        export_thickness_maps=export_thickness_maps,
+        ordering=ordering,
+    )
+
+
+def _assert_no_phantom_settings(mapping: dict) -> None:
+    assert server._PHANTOM_CONFIG_FIELDS.isdisjoint(mapping)
+
+
+def _archive_settings_carriers(run_json: dict) -> list[dict]:
+    metadata = run_json.get("run_metadata") or {}
+    recipe = metadata.get("recipe_snapshot") or {}
+    profile = recipe.get("profile_snapshot") or {}
+    diagnostics = metadata.get("solve_start_diagnostics") or {}
+    result = run_json.get("result") or {}
+    compact_diagnostics = result.get("solve_start_diagnostics") or {}
+    return [
+        run_json.get("config") or {},
+        metadata.get("config") or {},
+        recipe.get("config") or {},
+        profile.get("settings") or {},
+        diagnostics.get("resolved_settings") or {},
+        compact_diagnostics.get("resolved_settings") or {},
+    ]
+
+
+def _stale_phantom_values() -> dict:
+    return {
+        "smooth_iters": 19,
+        "allow_print_despite_hazards": True,
+        "detail_cap_pitch_mm": 0.07,
+        "v2_cleanup_de_budget": 0.31,
+        "v2_enable_cliff_closure": False,
+        "v2_enable_cap_topology_cleanup": True,
+        "v2_max_cleanup_rounds": 9,
+        "v2_full_cap_quality_report": True,
+    }
+
+
 def test_auto_archive_matches_explicit_save_at_pre_export_completion(roundtrip_env, monkeypatch):
     env = roundtrip_env
     monkeypatch.setattr(data_paths, "AUTO_RUNS_DIR", env.tmp_path / "auto")
@@ -282,7 +332,7 @@ def test_loaded_auto_record_reexports_without_prebaked_export_bundle(roundtrip_e
 
     # Fallback proof already used by Stage 9b if export fixture setup is too heavy:
     # swap instructions must still succeed on the loaded auto record.
-    assert "gcode" in server.get_swap_instructions(loaded_card)
+    assert "gcode" in _build_export_swap_payload(server, loaded_card)
 
 
 def test_materializer_requires_fresh_canonical_export_contract(roundtrip_env):
@@ -355,9 +405,162 @@ def test_loaded_run_supports_swap_after_save_clear_load(roundtrip_env):
 
     # 3. Swap instructions succeed on the LOADED card (proves white-cap map +
     #    image_domain dims rehydrated; raises HTTP 500/409 otherwise).
-    swap = server.get_swap_instructions(loaded_card)
+    swap = _build_export_swap_payload(server, loaded_card)
     assert "instructions" in swap and "groups" in swap and "gcode" in swap
     assert isinstance(swap["groups"], list)
+
+
+def test_stale_phantom_archive_loads_reexports_and_resaves_canonically(roundtrip_env):
+    """Old no-op keys migrate at load boundaries without rewriting the source ZIP."""
+    env = roundtrip_env
+    _seed_export_valid_solve("phantom-orig")
+    env.server.session["solve_cache"]["phantom-orig"]["solve"]["export_maps"][
+        WHITE_CAP_FIELD_TARGET_UPPER_SURFACE_KEY
+    ][:] = 0.56
+    save_id = env.client.post(
+        "/api/runs/save", json={"card_id": "phantom-orig"}
+    ).json()["save_id"]
+
+    parsed = run_archive.read_run_archive(run_store.read_zip_bytes(save_id))
+    phantom = _stale_phantom_values()
+    stale_run_json = copy.deepcopy(parsed.run_json)
+    stale_run_json["config"].update(phantom)
+    stale_run_json["run_metadata"] = {
+        "config": {**stale_run_json["config"], **phantom},
+        "recipe_snapshot": {
+            "config": {**stale_run_json["config"], **phantom},
+            "profile_snapshot": {
+                "settings": {
+                    **phantom,
+                    "source_resample_kernel": "area",
+                    "preprocessing_params": {"b3_tv_flatten": {"tv_weight": 0.13}},
+                },
+                "modules": {"b3_tv_flatten": True},
+            },
+        },
+        "solve_start_diagnostics": {
+            "resolved_settings": {**stale_run_json["config"], **phantom}
+        },
+    }
+    stale_run_json.setdefault("result", {})["solve_start_diagnostics"] = {
+        "resolved_settings": {**stale_run_json["config"], **phantom}
+    }
+    stale_cache_metadata = {
+        "config": {**stale_run_json["config"], **phantom},
+        "recipe_snapshot": copy.deepcopy(
+            stale_run_json["run_metadata"]["recipe_snapshot"]
+        ),
+        "solve_start_diagnostics": copy.deepcopy(
+            stale_run_json["run_metadata"]["solve_start_diagnostics"]
+        ),
+    }
+    stale_cache_files = dict(parsed.run_cache_files)
+    stale_cache_files["run.json"] = json.dumps(stale_cache_metadata).encode("utf-8")
+    stale_bytes = run_archive.pack_run_archive(
+        run_json=stale_run_json,
+        thickness_arrays=parsed.thickness_arrays,
+        image_bytes=parsed.image_bytes,
+        image_name=parsed.image_name,
+        solve_state=parsed.solve_state,
+        run_cache_files=stale_cache_files,
+    )
+    sidecar = next(row for row in run_store.list_saves() if row["save_id"] == save_id)
+    run_store.write_save(save_id, stale_bytes, sidecar)
+    source_before = run_store.read_zip_bytes(save_id)
+
+    settings_response = env.client.post(
+        "/api/runs/settings", json={"save_id": save_id, "tier": "saved"}
+    )
+    assert settings_response.status_code == 200
+    settings = settings_response.json()
+    _assert_no_phantom_settings(settings["config"])
+    for carrier in _archive_settings_carriers(
+        {
+            "config": settings["config"],
+            "run_metadata": settings["run_metadata"],
+            "result": settings["result"],
+        }
+    ):
+        _assert_no_phantom_settings(carrier)
+    profile = settings["run_metadata"]["recipe_snapshot"]["profile_snapshot"]
+    assert profile["settings"]["source_resample_kernel"] == "area"
+    assert profile["settings"]["preprocessing_params"] == {
+        "b3_tv_flatten": {"tv_weight": 0.13}
+    }
+    assert profile["modules"] == {"b3_tv_flatten": True}
+    assert run_store.read_zip_bytes(save_id) == source_before
+
+    env.server.session["solve_cache"].clear()
+    loaded_response = env.client.post(
+        "/api/runs/load", json={"save_id": save_id, "tier": "saved"}
+    )
+    assert loaded_response.status_code == 200
+    loaded = loaded_response.json()
+    loaded_card = loaded["card_id"]
+    _assert_no_phantom_settings(loaded["config"])
+    for carrier in _archive_settings_carriers(
+        {
+            "config": loaded["config"],
+            "run_metadata": loaded["run_metadata"],
+            "result": loaded["result"],
+        }
+    ):
+        _assert_no_phantom_settings(carrier)
+    cached = env.server.session["solve_cache"][loaded_card]
+    _assert_no_phantom_settings(cached["config"])
+
+    bundle = env.server._materialize_post_solve_export_bundle_from_cached_solve(
+        card_id=loaded_card,
+        solve=cached["solve"],
+        cfg=cached["config"],
+        thickness_maps=cached["solve"]["thickness_maps"],
+        ordering=list(cached["config"].get("palette") or []),
+    )
+    assert (bundle / "arrays.npz").exists()
+    assert "gcode" in _build_export_swap_payload(env.server, loaded_card)
+
+    started = env.client.post(
+        "/api/export/files/start",
+        json={
+            "card_id": loaded_card,
+            "geometry_source": "field_derived",
+            "field_scale": 2,
+            "output_format": "stls",
+            "validate_written_meshes": False,
+        },
+    )
+    assert started.status_code == 200, started.text
+    job_id = started.json()["job_id"]
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        export_status = env.client.get("/api/export/files/status").json()
+        assert export_status["job_id"] == job_id
+        if export_status["status"] in {"complete", "error", "cancelled"}:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("background re-export did not reach a terminal state")
+    assert export_status["status"] == "complete", export_status
+    assert export_status["result"]["files"]
+
+    resaved_id = env.client.post(
+        "/api/runs/save", json={"card_id": loaded_card, "label": "Canonical"}
+    ).json()["save_id"]
+    resaved = run_archive.read_run_archive(run_store.read_zip_bytes(resaved_id))
+    for carrier in _archive_settings_carriers(resaved.run_json):
+        _assert_no_phantom_settings(carrier)
+    embedded = json.loads(resaved.run_cache_files["run.json"])
+    for carrier in (
+        embedded.get("config") or {},
+        (embedded.get("recipe_snapshot") or {}).get("config") or {},
+        ((embedded.get("recipe_snapshot") or {}).get("profile_snapshot") or {}).get(
+            "settings"
+        )
+        or {},
+        (embedded.get("solve_start_diagnostics") or {}).get("resolved_settings") or {},
+    ):
+        _assert_no_phantom_settings(carrier)
+    assert run_store.read_zip_bytes(save_id) == source_before
 
 
 def test_loaded_run_preserves_banded_swap_plan_after_save_clear_load(roundtrip_env):
@@ -382,7 +585,7 @@ def test_loaded_run_preserves_banded_swap_plan_after_save_clear_load(roundtrip_e
     loaded_cfg = cached["config"]
 
     assert env.server._swap_grouping_from_solve(loaded_solve) == grouping
-    swap = env.server.get_swap_instructions(loaded_card)
+    swap = _build_export_swap_payload(env.server, loaded_card)
     assert swap["banded"] is True
     assert swap["pause_z_mm"] == [0.36]
     assert [item["filaments"] for item in swap["groups"]] == grouping["groups"]
@@ -419,5 +622,5 @@ def test_save_clear_load_roundtrips_via_disk_archive(roundtrip_env):
     # The whole run-cache subtree was restored under the fresh card.
     assert (data_paths.RUN_CACHE_DIR / loaded_card / "predicted.png").exists()
     # Swap still works on the disk-reloaded run.
-    swap = server.get_swap_instructions(loaded_card)
+    swap = _build_export_swap_payload(server, loaded_card)
     assert swap["gcode"] is not None

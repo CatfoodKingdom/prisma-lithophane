@@ -94,40 +94,6 @@ def test_server_solve_config_materialization_canonicalizes_palette_override():
     )
 
 
-def test_facade_compare_replacement_canonicalizes_palette():
-    from facade import SolveConfig, _replace_solve_config
-    from filament_order import canonical_palette_order, load_filament_order_registry
-
-    palette = ["bambu-basic-yellow", "bambu-basic-cyan", "bambu-basic-magenta"]
-    base = SolveConfig(
-        palette=["bambu-basic-blue"],
-        white_base="panchroma-matte-cotton-white",
-        appearance_model_provider="historical_spline",
-    )
-
-    replaced = _replace_solve_config(base, palette=palette)
-
-    assert replaced.palette == canonical_palette_order(
-        palette,
-        load_filament_order_registry(),
-    )
-
-
-def test_pipeline_cli_ingress_canonicalizes_palette_with_injected_registry():
-    from pipeline_cli import canonicalize_pipeline_palette
-
-    registry = {
-        "z-light": {"hex": "#FFFFFF"},
-        "a-dark": {"hex": "#000000"},
-        "m-mid": {"hex": "#808080"},
-    }
-
-    assert canonicalize_pipeline_palette(
-        ["z-light", "m-mid", "a-dark"],
-        registry=registry,
-    ) == ["a-dark", "m-mid", "z-light"]
-
-
 def test_spline_lut_cache_key_includes_order_convention():
     from lut import _cache_key
 
@@ -177,7 +143,6 @@ def test_solve_preview_artifacts_are_invariant_to_input_palette_order():
         k_max=2,
         de_threshold=0.01,
         smooth_kernel=0,
-        smooth_iters=0,
         ams_slots=4,
         white_slots=1,
         use_corrections=False,

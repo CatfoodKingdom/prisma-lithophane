@@ -111,10 +111,6 @@ function getBaseFilament() {
   return sel ? sel.value : DEFAULT_BASE_FILAMENT;
 }
 
-function getCapFilament() {
-  return getBaseFilament();
-}
-
 /** Set of filament IDs used as the shared white base/cap support. */
 function getBaseCapIds() {
   const s = new Set();
@@ -211,7 +207,6 @@ let solveShowSourceImage = true; // show source column in Solve result grids
 let solveColorRegionsView = "color_ceiling"; // "color_ceiling" | "recipe_regions" — sub-tab within the Color Regions tab
 let solveColorRegionsViewWasExplicitlySelected = false;
 let solveWhiteCapView = "cap_map"; // selected sub-view under the White Cap solve tab (height-only)
-let solveThicknessMapKind = "total"; // "total" | "boundary" | "detail" — white-cap triad shown in Thickness Maps
 let solveContoursEnabled = true; // draw the boundary overlay appropriate to the current contour-capable view
 let solveAdvancedViewsOpen = false; // view bar: inline-reveal of the demoted (advanced) views
 let solveCapDiffMode = "changed";        // shared diff render mode (cap + filament): changed | added | removed | signed
@@ -412,7 +407,6 @@ let config = {
   // Canonical solve-resolution fields
   image_sample_pitch_mm: 0.20,
   solver_fine_pitch_mm: 0.20,
-  detail_cap_pitch_mm: 0.20,
   detail_cap_enabled: true,
   detail_cap_max_layers: 5,
   detail_cap_smoothing_enabled: true,
@@ -447,7 +441,6 @@ let config = {
   cell_mode: "felzenszwalb",
   de_threshold: 0.01,
   smooth_kernel: 5.0,
-  smooth_iters: 3,
   border: false,
   border_width_mm: 3.0,
   border_height_mm: 3.0,
@@ -516,15 +509,6 @@ function applyMandatoryProductSettings() {
   config.stage2_printability_gate_fine_override = true;
   config.stage2_printability_repair_fine_override = true;
   config.stage4_printability_gate_detail = true;
-}
-
-function formatBoundaryCapMode(mode = config.cap_mode || "appearance_bounded_smooth") {
-  switch (mode) {
-    case "appearance_bounded_smooth": return "Detail Aware";
-    case "smooth_variable":
-    default:
-      return "Smooth";
-  }
 }
 
 function formatRegionPlanningScale(value = config.stage1_coarsening_factor || 1) {
@@ -665,19 +649,6 @@ function applyLuminanceMode(mode, options = {}) {
   return normalized;
 }
 
-function formatLuminanceMode(mode = config.luminance_mode || "standard") {
-  return normalizeLuminanceMode(mode) === "luminance_detail"
-    ? "luminance"
-    : "color";
-}
-
-function formatGamutMode(mode = config.gamut_mode || "hull") {
-  const normalized = String(mode || "hull").toLowerCase();
-  if (normalized === "chroma") return "reduce saturation";
-  if (normalized === "hue_preserving") return "preserve hue";
-  return "nearest reachable color";
-}
-
 function normalizeActiveGamutMode(mode = "hull") {
   const normalized = String(mode || "hull").trim().toLowerCase();
   return normalized === "chroma" ? "hue_preserving" : normalized;
@@ -761,7 +732,6 @@ let solveView = "predicted";    // current solve tab view mode
 let _suggestPolling = null;
 let activeSuggestJobId = null;
 let suggestCancelPending = false;
-let drawerCardId = null;        // deck card id shown in detail drawer
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 
@@ -2805,24 +2775,6 @@ function renderDimensionAnnotations(frameL, frameT, frameW, frameH) {
 
 // ── Enhanced Slider Behavior ───────────────────────────────────────────────
 
-// Minimal wheel-to-step helper for sliders that don't need the full
-// enhanced-slider (center snap, update callback) treatment. Safe to call
-// multiple times — attachment is idempotent via a flag on the element.
-function attachSliderWheel(sliderEl) {
-  if (!sliderEl || sliderEl._wheelAttached) return;
-  sliderEl.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const step = parseFloat(sliderEl.step) || 1;
-    const min = parseFloat(sliderEl.min);
-    const max = parseFloat(sliderEl.max);
-    const dir = e.deltaY > 0 ? -1 : 1;
-    const next = Math.min(max, Math.max(min, parseFloat(sliderEl.value) + dir * step));
-    sliderEl.value = next;
-    sliderEl.dispatchEvent(new Event("input", { bubbles: true }));
-  }, { passive: false });
-  sliderEl._wheelAttached = true;
-}
-
 function initEnhancedSlider(sliderEl, opts = {}) {
   const { center, onUpdate, snapThreshold = 0.03 } = opts;
 
@@ -3602,7 +3554,7 @@ let _lightboxIdx = -1; // which comparison result is enlarged, -1 = closed
 function closeCompLightbox() {
   _lightboxIdx = -1;
   _solveLightboxState = null;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
+  if (_lightboxCleanup) _lightboxCleanup();
   const lb = $("#compLightbox");
   if (lb) lb.classList.add("is-hidden");
 }
@@ -3631,31 +3583,35 @@ function navigateSolveLightbox(key) {
 
     if (key === "ArrowRight") {
       if (_solveLightboxState.mapIndex < items.length - 1) {
-        openThicknessLightboxForPosition(run.id, _solveLightboxState.mapIndex + 1);
+        openThicknessLightboxForKey(run.id, items[_solveLightboxState.mapIndex + 1].key);
         return true;
       }
       return false;
     }
     if (key === "ArrowLeft") {
       if (_solveLightboxState.mapIndex > 0) {
-        openThicknessLightboxForPosition(run.id, _solveLightboxState.mapIndex - 1);
+        openThicknessLightboxForKey(run.id, items[_solveLightboxState.mapIndex - 1].key);
         return true;
       }
       return false;
     }
     if (key === "ArrowDown") {
       if (runIndex < selectedRuns.length - 1) {
-        // Preserve the current map index when moving to the adjacent run (clamped if that
-        // run has fewer maps); previously this jumped back to map index 0.
-        openThicknessLightboxForPosition(selectedRuns[runIndex + 1].id, _solveLightboxState.mapIndex);
-        return true;
+        const nextRun = selectedRuns[runIndex + 1];
+        if (getSolveThicknessItems(nextRun).some(item => item.key === _solveLightboxState.mapKey)) {
+          openThicknessLightboxForKey(nextRun.id, _solveLightboxState.mapKey);
+          return true;
+        }
       }
       return false;
     }
     if (key === "ArrowUp") {
       if (runIndex > 0) {
-        openThicknessLightboxForPosition(selectedRuns[runIndex - 1].id, _solveLightboxState.mapIndex);
-        return true;
+        const nextRun = selectedRuns[runIndex - 1];
+        if (getSolveThicknessItems(nextRun).some(item => item.key === _solveLightboxState.mapKey)) {
+          openThicknessLightboxForKey(nextRun.id, _solveLightboxState.mapKey);
+          return true;
+        }
       }
       return false;
     }
@@ -3716,30 +3672,6 @@ async function handleOpenImageLibraryFolder() {
   } catch (err) {
     showToast(`The Images folder could not be opened: ${err.message}`, "error");
   }
-}
-
-function buildFilamentCard(fil, pane, isSelected, showManufacturer = true, inlineMfg = false) {
-  const profiled = fil.has_profile;
-  const textCol = textColorForHex(fil.hex);
-  let copyHtml;
-  if (inlineMfg) {
-    copyHtml = `<div class="filament-detail">${esc(fil.manufacturer)} ${esc(fil.color_name)}</div>`;
-  } else if (showManufacturer) {
-    copyHtml = `<div class="filament-title">${esc(fil.manufacturer)}</div><div class="filament-detail">${esc(fil.color_name)}</div>`;
-  } else {
-    copyHtml = `<div class="filament-detail">${esc(fil.color_name)}</div>`;
-  }
-  return `
-    <div class="filament-card${isSelected ? " is-selected" : ""}${!profiled ? " no-profile" : ""}"
-         data-filament-id="${fil.filament_id}" data-pane="${pane}">
-      <div class="filament-swatch" style="background:${fil.hex};color:${textCol}">
-        ${!profiled ? "?" : ""}
-      </div>
-      <div class="filament-copy">
-        ${copyHtml}
-      </div>
-    </div>
-  `;
 }
 
 function normalizeSupportFromLoadedConfig(cfg = {}) {
@@ -4106,72 +4038,6 @@ function loadPaletteByIndex(idx, { forceActive = true, sync = true, silent = fal
   return card;
 }
 
-async function handleDeckGamutCheck(cardId) {
-  const card = deck.find(d => d.id === cardId);
-  if (!card || !selectedImage) return;
-
-  card.gamut = { status: "checking", progress: "Starting gamut check..." };
-  renderDeckCards();
-  let pollingOwner = null;
-
-  try {
-    const started = await apiPost("/palette/compare", { palettes: [card.filament_ids] });
-    const jobId = String(started?.job_id || "");
-    if (!jobId) throw new Error("Gamut check did not return a job id.");
-    pollingOwner = { jobId };
-    card.gamutPollingOwner = pollingOwner;
-    const st = await pollJobUntilTerminal({
-      jobId,
-      fetchStatus: () => apiFetch("/palette/compare/status"),
-      isTerminal: (status) => status.status !== "running",
-      shouldContinue: () => card.gamutPollingOwner === pollingOwner,
-      intervalMs: 500,
-      onStatus: (status) => {
-        if (status.status !== "running") return;
-        const d = status.progress_detail || {};
-        card.gamut = {
-          status: "checking",
-          progress: d.stage_label || status.progress || "Checking gamut...",
-          pct: d.stage_pct,
-          elapsed_s: d.elapsed_s ?? status.elapsed_s,
-        };
-        renderDeckCards();
-      },
-      onTransientError: () => {
-        card.gamut = { ...card.gamut, status: "checking", progress: "Connection interrupted; retrying gamut status..." };
-        renderDeckCards();
-      },
-    });
-    if (!st || card.gamutPollingOwner !== pollingOwner) return;
-    delete card.gamutPollingOwner;
-    if (st.status === "complete" && st.result) {
-      const result = st.result.results?.[0];
-      if (result && !result.error) {
-        card.gamut = {
-          status: "done",
-          coverage_pct: result.coverage_pct,
-          mean_de: result.mean_de,
-          source_rms_de: result.source_rms_de,
-          n_out_of_gamut: result.n_oog,
-          total_pixels: result.total_pixels,
-          predicted_url: result.predicted_url,
-        };
-      } else {
-        card.gamut = { status: "error", message: result?.error || "Unknown error" };
-      }
-    } else {
-      card.gamut = { status: "error", message: st.progress || "Failed" };
-    }
-    renderDeckCards();
-  } catch (err) {
-    if (err.name === "AbortError") return;
-    if (pollingOwner && card.gamutPollingOwner !== pollingOwner) return;
-    if (card.gamutPollingOwner === pollingOwner) delete card.gamutPollingOwner;
-    card.gamut = { status: "error", message: err.message };
-    renderDeckCards();
-  }
-}
-
 function renderDeckCards() {
   const container = $("#deckCards");
   if (stagingDeck.length === 0) {
@@ -4368,15 +4234,6 @@ function scheduleHideRailDeckHoverPreview(delayMs = 180) {
   railDeckHoverCloseTimer = setTimeout(() => {
     hideRailDeckHoverPreview();
   }, delayMs);
-}
-
-function buildDeckSupportSummaryHtml() {
-  const baseId = config.base_filament || DEFAULT_BASE_FILAMENT;
-  const baseFil = filamentById(baseId);
-  const baseLabel = baseFil ? `${baseFil.manufacturer} ${baseFil.color_name}` : (baseId || "Unset");
-
-  if (!baseId) return "";
-  return `<span class="rail-support-bit">White Base/Cap: ${esc(baseLabel)}</span>`;
 }
 
 function buildDeckSupportChipsHtml() {
@@ -5946,7 +5803,7 @@ const SETTINGS_PROFILE_KEYS = [
   // session-owned canonical settings
   "base_filament", "cap_filament",
   "layer_height",
-  "image_sample_pitch_mm", "solver_fine_pitch_mm", "detail_cap_pitch_mm",
+  "image_sample_pitch_mm", "solver_fine_pitch_mm",
   "detail_cap_max_layers",
   "detail_cap_smoothing_enabled",
   "detail_cap_smoothing_exact_speckle_max_px",
@@ -6154,25 +6011,6 @@ function isSettingsProfileModified() {
   return false;
 }
 
-function _settingsProfileStatusLabel(profile) {
-  if (!profile) return "working draft";
-  if (profile.kind === "temporary") return "temporary profile";
-  if (profile.id === SYSTEM_SETTINGS_PROFILE_ID) return "system default";
-  return "named profile";
-}
-
-function _settingsProfileMetaLabel(profile, modified) {
-  if (modified && loadedProfileRef) {
-    return `Draft based on ${loadedProfileRef.name}`;
-  }
-  if (!profile) return "";
-  if (profile.kind === "temporary") return profile.source?.label
-    ? `From saved run “${profile.source.label}”`
-    : "Session-only settings";
-  if (profile.id === SYSTEM_SETTINGS_PROFILE_ID) return "Built-in baseline";
-  return "Saved profile";
-}
-
 function findSettingsProfileByName(name) {
   const trimmed = String(name || "").trim().toLocaleLowerCase();
   if (!trimmed) return null;
@@ -6281,64 +6119,6 @@ function _refreshSettingsProfilesFromResponse(data) {
 
 function validateSettingsProfileNameLocal(name, currentProfileId = null) {
   return describeSettingsProfileNameInput(name, { currentProfileId }).error;
-}
-
-async function promptForSettingsProfileName({
-  title = "Settings Profile name:",
-  defaultValue = "",
-  currentProfileId = null,
-} = {}) {
-  // Surface existing profile names in the prompt so the user can avoid
-  // collisions and see what's already taken.
-  const existingNames = (settingsProfiles || [])
-    .filter(p => p && p.name && p.id !== currentProfileId)
-    .map(p => p.name);
-
-  const hint = $("#appDialogHint");
-  const renderHint = (typedValue) => {
-    if (!hint) return;
-    if (existingNames.length === 0) {
-      hint.classList.add("is-hidden");
-      hint.innerHTML = "";
-      return;
-    }
-    const typedNorm = String(typedValue || "").trim().toLowerCase();
-    const chips = existingNames.map(n => {
-      const collision = typedNorm && n.toLowerCase() === typedNorm;
-      const cls = collision ? "app-dialog-hint-chip is-collision" : "app-dialog-hint-chip";
-      return `<span class="${cls}" data-name="${esc(n)}">${esc(n)}</span>`;
-    }).join("");
-    hint.innerHTML = `<div class="app-dialog-hint-label">Already in use</div><div class="app-dialog-hint-chips">${chips}</div>`;
-    hint.classList.remove("is-hidden");
-  };
-
-  // Wire input keystrokes to highlight collisions inline.
-  const input = $("#appDialogInput");
-  let inputHandler = null;
-  if (input) {
-    inputHandler = () => renderHint(input.value);
-    input.addEventListener("input", inputHandler);
-  }
-  renderHint(defaultValue);
-
-  try {
-    let nextDefault = defaultValue;
-    while (true) {
-      const value = await appPrompt(title, nextDefault, { title: "Settings Profile" });
-      if (value == null) return null;
-      const error = validateSettingsProfileNameLocal(value, currentProfileId);
-      if (!error) return value.trim();
-      showToast(error, "error");
-      nextDefault = value.trim();
-      renderHint(nextDefault);
-    }
-  } finally {
-    if (input && inputHandler) input.removeEventListener("input", inputHandler);
-    if (hint) {
-      hint.classList.add("is-hidden");
-      hint.innerHTML = "";
-    }
-  }
 }
 
 function _captureLiveSettingsProfileState() {
@@ -7410,10 +7190,6 @@ async function handleSettingsProfileSetDefault() {
   }
 }
 
-async function handleSettingsProfileManage() {
-  return handleSettingsProfilesBrowse();
-}
-
 async function handleRestoreSystemSettingsProfile() {
   const proceed = await _guardSettingsProfileTransition("restoring the system default");
   if (!proceed) return;
@@ -7430,24 +7206,8 @@ async function handleRestoreSystemSettingsProfile() {
   }
 }
 
-function _isPresetModified() {
-  return isSettingsProfileModified();
-}
-
 function renderPresetBar() {
   renderSettingsProfileBar();
-}
-
-async function handlePresetSave() {
-  return handleSettingsProfileSave();
-}
-
-async function handlePresetSaveAs() {
-  return handleSettingsProfileSaveAs();
-}
-
-async function handlePresetSetDefault() {
-  return handleSettingsProfileSetDefault();
 }
 
 function updateBorderVisibility() {
@@ -8642,20 +8402,6 @@ function formatSolveSummaryMm(rawValue) {
   return `${num.toFixed(2).replace(/\.?0+$/, "")} mm`;
 }
 
-function collectSolveSummaryModuleParamItems(mod, configValues, { prefixLabels = false } = {}) {
-  if (!mod) return [];
-  return Object.values(mod.params || {})
-    .sort((a, b) => (a.order || 0) - (b.order || 0))
-    .filter((param) => isModuleParamVisibleInSummary(param, configValues))
-    .map((param) => {
-      const value = configValues[param.name] ?? param.default;
-      return {
-        label: prefixLabels ? `${mod.name}: ${param.label}` : param.label,
-        value: formatSolveSummaryValue(param, value),
-      };
-    });
-}
-
 function getSolveRunEssentialsItems(run) {
   // Stage 8 essentials, bound to a completed run's recipe snapshot (never live config).
   const settings = getSolveRunSettingsSnapshot(run);
@@ -9136,7 +8882,6 @@ function buildSolveRunCardMetadataFooter(run) {
 const SOLVE_DIFF_SETTING_LABELS = {
   image_sample_pitch_mm: "Solve Pitch",
   solver_fine_pitch_mm: "Solve Pitch",
-  detail_cap_pitch_mm: "Detail Cap Pitch",
   layer_height: "Layer Height",
   d_wb: "White Base Thickness",
   d_wc_min: "Min White Cap",
@@ -9150,20 +8895,13 @@ const SOLVE_DIFF_SETTING_LABELS = {
   color_region_target_mm: "Color Region Target",
   smooth_radius_mm: "Cliff Smooth Radius",
   hybrid_split_ratio: "Hybrid Split Ratio",
-  allow_print_despite_hazards: "Bypass Hazard Gate",
   detail_cap_smoothing_enabled: "Detail Cap Smoothing",
   detail_cap_smoothing_exact_speckle_max_px: "Detail Exact Speckle Cleanup",
   detail_cap_smoothing_cumulative_component_max_px: "Detail Island Cleanup",
   detail_cap_smoothing_cumulative_hole_max_px: "Detail Hole Cleanup",
-  v2_enable_cliff_closure: "V2 Cliff Closure",
-  v2_enable_cap_topology_cleanup: "V2 Topology Cleanup",
-  v2_full_cap_quality_report: "V2 Full Cap Report",
-  v2_cleanup_de_budget: "V2 Cleanup dE Budget",
-  v2_max_cleanup_rounds: "V2 Max Cleanup Rounds",
   cap_mode: "Boundary Cap Mode",
   boundary_cap_de_budget: "Boundary Cap Appearance Budget",
   smooth_kernel: "Smoothing Radius",
-  smooth_iters: "Smoothing Iterations",
 };
 
 function humanizeModuleName(name) {
@@ -9191,7 +8929,7 @@ function formatSolveSettingValue(key, value) {
     return value.map((item) => formatSolveSettingValue(key, item)).join(", ");
   }
   if (typeof value === "number") {
-    if (/(_mm|_deg)$/.test(key) || ["layer_height", "d_wb", "d_wc_min", "t_max", "de_threshold", "smooth_kernel", "v2_cleanup_de_budget", "boundary_cap_de_budget"].includes(key)) {
+    if (/(_mm|_deg)$/.test(key) || ["layer_height", "d_wb", "d_wc_min", "t_max", "de_threshold", "smooth_kernel", "boundary_cap_de_budget"].includes(key)) {
       return String(value).includes(".")
         ? value.toFixed(3).replace(/\.?0+$/, "")
         : String(value);
@@ -9258,14 +8996,10 @@ function categorizeSolveSettingDiff(key, kind = "setting") {
     "luminance_handler_detail_residual",
     "luminance_handler_include_solver_detail",
     "luminance_detail_authoring_printability",
-    "v2_enable_cliff_closure", "v2_enable_cap_topology_cleanup",
-    "v2_full_cap_quality_report", "v2_cleanup_de_budget", "v2_max_cleanup_rounds",
   ].includes(key)) return "solver";
   if ([
-    "cap_mode", "boundary_cap_de_budget", "smooth_kernel", "smooth_iters",
+    "cap_mode", "boundary_cap_de_budget", "smooth_kernel",
     "smooth_radius_mm", "hybrid_split_ratio",
-    "detail_cap_pitch_mm",
-    "allow_print_despite_hazards",
     "detail_cap_max_layers",
     "detail_cap_smoothing_enabled",
     "detail_cap_smoothing_exact_speckle_max_px",
@@ -9467,7 +9201,6 @@ const READ_ONLY_RUN_SETTING_SECTIONS = [
       { key: "detail_cap_max_layers", label: "Detail Depth", unit: "layers" },
       { key: "cap_mode", label: "Boundary Cap", format: "cap-mode", advanced: true },
       { key: "boundary_cap_de_budget", label: "Appearance Budget", unit: "dE", advanced: true },
-      { key: "detail_cap_pitch_mm", label: "Detail Cap Pitch", unit: "mm", advanced: true },
       { key: "detail_cap_smoothing_enabled", label: "Detail Smoothing", advanced: true },
       { key: "detail_cap_smoothing_exact_speckle_max_px", label: "Exact Speckle Limit", unit: "px", advanced: true },
       { key: "detail_cap_smoothing_cumulative_component_max_px", label: "Component Limit", unit: "px", advanced: true },
@@ -10188,17 +9921,41 @@ function getSolveSurfaceExtraSteps() {
   return Math.max(0, Math.round((tMax - base) / lh));
 }
 
-/**
- * Viridis polynomial (matches server-side _save_cap_height_map).
- * Input: t in [0,1]. Output: [r, g, b] each in [0,255].
- */
-function viridis(t) {
+const DIAGNOSTIC_PALETTE_INFERNO = "inferno-v1";
+const DIAGNOSTIC_PALETTE_LEGACY = "legacy-approximate";
+const INFERNO_RGB8_HEX = "00000401000501010601010802010a02020c02020e03021004031204031405041706041907051b08051d09061f0a07220b07240c08260d08290e092b10092d110a30120a32140b34150b37160b39180c3c190c3e1b0c411c0c431e0c451f0c48210c4a230c4c240c4f260c51280b53290b552b0b572d0b592f0a5b310a5c320a5e340a5f3609613809623909633b09643d09653e0966400a67420a68440a68450a69470b6a490b6a4a0c6b4c0c6b4d0d6c4f0d6c510e6c520e6d540f6d550f6d57106e59106e5a116e5c126e5d126e5f136e61136e62146e64156e65156e67166e69166e6a176e6c186e6d186e6f196e71196e721a6e741a6e751b6e771c6d781c6d7a1d6d7c1d6d7d1e6d7f1e6c801f6c82206c84206b85216b87216b88226a8a226a8c23698d23698f24699025689225689326679526679727669827669a28659b29649d29649f2a63a02a63a22b62a32c61a52c60a62d60a82e5fa92e5eab2f5ead305dae305cb0315bb1325ab3325ab43359b63458b73557b93556ba3655bc3754bd3853bf3952c03a51c13a50c33b4fc43c4ec63d4dc73e4cc83f4bca404acb4149cc4248ce4347cf4446d04545d24644d34743d44842d54a41d74b3fd84c3ed94d3dda4e3cdb503bdd513ade5238df5337e05536e15635e25734e35933e45a31e55c30e65d2fe75e2ee8602de9612bea632aeb6429eb6628ec6726ed6925ee6a24ef6c23ef6e21f06f20f1711ff1731df2741cf3761bf37819f47918f57b17f57d15f67e14f68013f78212f78410f8850ff8870ef8890cf98b0bf98c0af98e09fa9008fa9207fa9407fb9606fb9706fb9906fb9b06fb9d07fc9f07fca108fca309fca50afca60cfca80dfcaa0ffcac11fcae12fcb014fcb216fcb418fbb61afbb81dfbba1ffbbc21fbbe23fac026fac228fac42afac62df9c72ff9c932f9cb35f8cd37f8cf3af7d13df7d340f6d543f6d746f5d949f5db4cf4dd4ff4df53f4e156f3e35af3e55df2e661f2e865f2ea69f1ec6df1ed71f1ef75f1f179f2f27df2f482f3f586f3f68af4f88ef5f992f6fa96f8fb9af9fc9dfafda1fcffa4";
+const INFERNO_RGB8 = Array.from({ length: 256 }, (_, index) => {
+  const offset = index * 6;
+  return [0, 2, 4].map(channel => parseInt(INFERNO_RGB8_HEX.slice(offset + channel, offset + channel + 2), 16));
+});
+
+function legacyScalarPalette(t) {
   t = Math.max(0, Math.min(1, t));
   return [
-    Math.round(Math.max(0, Math.min(255, ( 0.267 + 2.173*t - 1.802*t*t) * 255))),
-    Math.round(Math.max(0, Math.min(255, (-0.004 + 1.874*t - 0.870*t*t) * 255))),
-    Math.round(Math.max(0, Math.min(255, ( 0.329 - 1.120*t + 0.791*t*t) * 255))),
+    Math.floor(Math.max(0, Math.min(255, ( 0.267 + 2.173*t - 1.802*t*t) * 255))),
+    Math.floor(Math.max(0, Math.min(255, (-0.004 + 1.874*t - 0.870*t*t) * 255))),
+    Math.floor(Math.max(0, Math.min(255, ( 0.329 - 1.120*t + 0.791*t*t) * 255))),
   ];
+}
+
+function inferno(t) {
+  const position = Math.max(0, Math.min(1, Number(t) || 0)) * 255;
+  const lower = Math.floor(position);
+  const upper = Math.min(255, lower + 1);
+  const fraction = position - lower;
+  return INFERNO_RGB8[lower].map((value, channel) => (
+    Math.floor(value * (1 - fraction) + INFERNO_RGB8[upper][channel] * fraction + 0.5)
+  ));
+}
+
+function getRunDiagnosticPaletteVersion(run) {
+  return run?.results?.diagnostic_palette_version === DIAGNOSTIC_PALETTE_INFERNO
+    ? DIAGNOSTIC_PALETTE_INFERNO
+    : DIAGNOSTIC_PALETTE_LEGACY;
+}
+
+function sampleScalarPalette(t, paletteVersion = DIAGNOSTIC_PALETTE_INFERNO) {
+  return paletteVersion === DIAGNOSTIC_PALETTE_INFERNO ? inferno(t) : legacyScalarPalette(t);
 }
 
 const SURFACE_CONTOUR_SCALE = 3;
@@ -10277,9 +10034,9 @@ function strokeDiscreteLabelBoundaries(ctx, boundaries, scale = SURFACE_CONTOUR_
 
 /**
  * Render total surface data onto a canvas with highpass threshold.
- * Pixels below threshold are black. Viridis scale is [0, tMax].
+ * Pixels below threshold are black. The scalar palette scale is [0, tMax].
  */
-function renderHighpass(canvas, surfaceData, tMax, threshold) {
+function renderHighpass(canvas, surfaceData, tMax, threshold, paletteVersion = DIAGNOSTIC_PALETTE_INFERNO) {
   const { width, height, data } = surfaceData;
   canvas.width = width;
   canvas.height = height;
@@ -10290,7 +10047,7 @@ function renderHighpass(canvas, surfaceData, tMax, threshold) {
     const v = data[i];
     const off = i * 4;
     if (v >= threshold) {
-      const [r, g, b] = viridis(v / tMax);
+      const [r, g, b] = sampleScalarPalette(v / tMax, paletteVersion);
       px[off] = r; px[off+1] = g; px[off+2] = b; px[off+3] = 255;
     } else {
       px[off] = 0; px[off+1] = 0; px[off+2] = 0; px[off+3] = 255;
@@ -10355,17 +10112,17 @@ function initHighpassControls() {
 }
 
 /** Uniform fill for "this is color stack, not cap" regions.
- *  Mid-gray — clearly not on the viridis scale. */
+ *  Mid-gray — clearly not on the scalar diagnostic scale. */
 const COLOR_FLOOR_FILL = [128, 128, 128];
 
 /**
  * Render total surface with band window and color-floor distinction.
  *
  * - Out of band: black
- * - In band AND above color ceiling: viridis (fixed [0, tMax])
+ * - In band AND above color ceiling: versioned scalar palette (fixed [0, tMax])
  * - In band AND at or below color ceiling: uniform gray
  */
-function renderExplorer(canvas, surfaceData, ceilingData, tMax, center, halfBand) {
+function renderExplorer(canvas, surfaceData, ceilingData, tMax, center, halfBand, paletteVersion = DIAGNOSTIC_PALETTE_INFERNO) {
   const { width, height, data: surface } = surfaceData;
   const ceiling = ceilingData.data;
   canvas.width = width;
@@ -10385,7 +10142,7 @@ function renderExplorer(canvas, surfaceData, ceilingData, tMax, center, halfBand
         px[off+1] = COLOR_FLOOR_FILL[1];
         px[off+2] = COLOR_FLOOR_FILL[2];
       } else {
-        const [r, g, b] = viridis(v / tMax);
+        const [r, g, b] = sampleScalarPalette(v / tMax, paletteVersion);
         px[off] = r; px[off+1] = g; px[off+2] = b;
       }
       px[off+3] = 255;
@@ -10618,8 +10375,8 @@ function renderSolveComparisonGrid() {
   if (view === "thickness_maps") {
     grid.style.display = "none";
     if (thickCard) thickCard.style.display = "";
-    // Thickness Maps has its own White cap Total/Boundary/Detail selector row; keep the
-    // sub-controls host visible and let updateSolveSubControls() show only that row.
+    // Keep the shared sub-controls host visible so the contextual caption remains aligned
+    // with the other solve views. Thickness Maps itself has no selectable sub-view state.
     updateSolveSubControls();
     updateSolveLegend(view);
     renderSolveInspectorPanel(selected, view);
@@ -11128,7 +10885,7 @@ function renderSolveSurfaceCanvases() {
         return;
       }
       if (view === "surface_highpass") {
-        renderHighpass(canvas, cached.surface, tMax, threshold);
+        renderHighpass(canvas, cached.surface, tMax, threshold, getRunDiagnosticPaletteVersion(run));
       } else {
         // Explorer is always rich; fall back to the plain renderer only if material data is
         // missing (an error/loading state, not a user-selectable mode).
@@ -11138,7 +10895,7 @@ function renderSolveSurfaceCanvases() {
             renderExplorerRich(canvas, materialData, center, halfBand);
             if (contourCanvas) contourCanvas.style.display = "none";
           } else {
-            renderExplorer(canvas, cached.surface, cached.ceiling, tMax, center, halfBand);
+            renderExplorer(canvas, cached.surface, cached.ceiling, tMax, center, halfBand, getRunDiagnosticPaletteVersion(run));
             renderSurfaceContourOverlay(contourCanvas, cached.surface);
           }
         });
@@ -11277,7 +11034,6 @@ function updateSolveSubControls() {
   const capDiffCtrl = $("#solveCapDiffControls");
   const filamentDiffCtrl = $("#solveFilamentDiffControls");
   const whiteCapCtrl = $("#solveWhiteCapControls");
-  const thicknessMapCtrl = $("#solveThicknessMapControls");
   const contourCtrl = $("#solveContourControls");
   const sourceCtrl = $("#solveSourceControls");
   const sourceToggle = $("#solveSourceImageToggle");
@@ -11285,11 +11041,6 @@ function updateSolveSubControls() {
   syncSolveViewToggleActive();
   document.querySelectorAll("[data-solve-white-cap-view]").forEach(btn => {
     const active = btn.dataset.solveWhiteCapView === solveView;
-    btn.classList.toggle("is-active", active);
-    btn.setAttribute("aria-checked", active ? "true" : "false");
-  });
-  document.querySelectorAll("[data-solve-thickness-map-kind]").forEach(btn => {
-    const active = btn.dataset.solveThicknessMapKind === solveThicknessMapKind;
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-checked", active ? "true" : "false");
   });
@@ -11326,7 +11077,6 @@ function updateSolveSubControls() {
     btn.setAttribute("aria-checked", active ? "true" : "false");
   });
   if (whiteCapCtrl) whiteCapCtrl.classList.toggle("is-hidden", !isSolveWhiteCapView(view));
-  if (thicknessMapCtrl) thicknessMapCtrl.classList.toggle("is-hidden", view !== "thickness_maps");
   if (contourCtrl) contourCtrl.classList.toggle("is-hidden", !isSolveContourView(view));
   if (highpassCtrl) highpassCtrl.classList.toggle("is-hidden", view !== "surface_highpass");
   if (explorerCtrl) explorerCtrl.classList.toggle("is-hidden", view !== "surface_explorer");
@@ -11384,19 +11134,16 @@ function getSolveViewCaption(view = solveView) {
     };
   }
   if (view === "surface_explorer") {
-    const height = getSolveExplorerHeight();
+    const height = getSolveExplorerCenter();
     return {
       title: "Surface Explorer",
       body: `Shows which material appears at ${height.toFixed(2)} mm from the base.`,
     };
   }
   if (view === "thickness_maps") {
-    const kind = solveThicknessMapKind === "boundary"
-      ? "boundary cap"
-      : solveThicknessMapKind === "detail" ? "detail cap" : "total white cap";
     return {
       title: "Thickness Maps",
-      body: `Shows how much of each filament is used, with the white cap set to ${kind}.`,
+      body: "Shows how much of each filament is used, including total, boundary, and detail white-cap maps.",
     };
   }
   if (view === "surface_highpass") {
@@ -11436,12 +11183,33 @@ function updateSolveViewCaption(view = solveView) {
   el.classList.remove("is-hidden");
 }
 
+function getDiagnosticPaletteLegendState(runs) {
+  const versions = new Set((runs || []).map(getRunDiagnosticPaletteVersion));
+  const mixed = versions.size > 1;
+  const version = mixed ? null : (versions.values().next().value || DIAGNOSTIC_PALETTE_INFERNO);
+  return {
+    mixed,
+    version,
+    gradient: version === DIAGNOSTIC_PALETTE_LEGACY
+      ? "linear-gradient(to right, #440053, #b16819, #e6b600, #e1e800, #a2ff00)"
+      : "linear-gradient(to right, #000004, #420a68, #932667, #dd513a, #fca50a, #fcffa4)",
+  };
+}
+
+function diagnosticPaletteLegendHtml(state) {
+  if (state.mixed) {
+    return `<div class="solve-palette-warning" role="note">Mixed diagnostic palettes. Rerun the legacy solve for direct color comparison.</div>`;
+  }
+  return `<div class="legend-bar" data-diagnostic-palette="${esc(state.version)}" style="background:${state.gradient}"></div>`;
+}
+
 function updateSolveLegend(view = solveView) {
   const row = $("#solveLegend");
   const el = $("#solveLegendContent");
   if (!row || !el) return;
   const selected = getSelectedRuns().filter(r => r.results);
   const result = selected[0]?.results;
+  const paletteLegend = getDiagnosticPaletteLegendState(selected);
   const contourLegendHtml = (label = "Layer-height contour") => `
     <div class="solve-contour-legend">
       <span class="solve-contour-legend-line"></span>
@@ -11449,15 +11217,11 @@ function updateSolveLegend(view = solveView) {
     </div>`;
 
   if (view === "thickness_maps") {
-    // Per-filament maps self-normalize to their own max (no shared scale yet — see TM-SCALE),
-    // so the legend is descriptive and names the selected white-cap triad member rather than
-    // claiming a quantitative color scale. Reflects solveThicknessMapKind, never a prior view.
-    const kindLabel = solveThicknessMapKind === "boundary"
-      ? "Boundary"
-      : solveThicknessMapKind === "detail" ? "Detail" : "Total";
+    // Per-filament maps self-normalize to their own max (no shared scale yet — see TM-SCALE).
     el.innerHTML = `
       <div class="sub-legend-block">
-        <span class="sub-legend-desc">Per-filament thickness maps (each self-normalized to its own max) &middot; White cap: ${kindLabel}</span>
+        <span class="sub-legend-desc">Per-filament thickness maps (each self-normalized to its own max) &middot; White cap: Total, Boundary, and Detail</span>
+        ${diagnosticPaletteLegendHtml(paletteLegend)}
       </div>`;
     row.classList.remove("is-hidden");
     return;
@@ -11497,7 +11261,7 @@ function updateSolveLegend(view = solveView) {
     el.innerHTML = `
       <div class="sub-legend-block">
         <span class="sub-legend-desc">${label}</span>
-        <div class="legend-bar" style="background:linear-gradient(to right, #440053, #b16819, #e6b600, #e1e800, #a2ff00)"></div>
+        ${diagnosticPaletteLegendHtml(paletteLegend)}
         <div class="legend-labels"><span>0 mm</span><span>${(scaleMax / 2).toFixed(1)} mm</span><span>${scaleMax.toFixed(1)} mm</span></div>
         <div class="solve-legend-inline">
           <span><span class="solve-legend-swatch is-empty"></span> ${zeroLabel}</span>
@@ -11514,7 +11278,7 @@ function updateSolveLegend(view = solveView) {
     el.innerHTML = `
       <div class="sub-legend-block">
         <span class="sub-legend-desc">${label}</span>
-        <div class="legend-bar" style="background:linear-gradient(to right, #440053, #b16819, #e6b600, #e1e800, #a2ff00)"></div>
+        ${diagnosticPaletteLegendHtml(paletteLegend)}
         <div class="legend-labels"><span>0 mm</span><span>${(tMax/2).toFixed(1)} mm</span><span>${tMax.toFixed(1)} mm</span></div>
         ${contourLegend ? `<div class="solve-legend-inline">${contourLegend}</div>` : ""}
       </div>`;
@@ -11525,7 +11289,7 @@ function updateSolveLegend(view = solveView) {
     el.innerHTML = `
       <div class="sub-legend-block">
         <span class="sub-legend-desc">Surface Highpass (≥ threshold)</span>
-        <div class="legend-bar" style="background:linear-gradient(to right, #440053, #b16819, #e6b600, #e1e800, #a2ff00)"></div>
+        ${diagnosticPaletteLegendHtml(paletteLegend)}
         <div class="legend-labels"><span>${threshold.toFixed(2)} mm</span><span>${(tMax/2).toFixed(1)} mm</span><span>${tMax.toFixed(1)} mm</span></div>
       </div>`;
     row.classList.remove("is-hidden");
@@ -11588,18 +11352,19 @@ function renderSolveThicknessMaps(selectedRuns) {
     if (!r) return "";
     const showLabel = selectedRuns.length > 1;
     let html = showLabel ? `<div class="filament-maps-label"><strong>${esc(run.label)}</strong></div>` : "";
-    html += (r.filament_maps || []).map((m, mapIdx) => {
+    html += (r.filament_maps || []).map((m) => {
       const fil = filamentById(m.filament_id);
-      const label = fil?.color_name || m.filament_id;
+      const label = m.display_name || fil?.color_name || fil?.display_name || m.filament_id;
+      const mapKey = `filament:${m.filament_id}`;
       const volume = formatThicknessMapVolume(m.volume_mm3);
       const statsLine = [
         volume,
         `max ${m.max_d?.toFixed(2) || 0} mm`,
         `${m.active_px?.toLocaleString() || 0} px`,
       ].filter(Boolean).join(" · ");
-      const clickAttrs = m.map_url ? ` data-solve-card-kind="thickness" data-thickness-url="${esc(m.map_url)}" data-thickness-label="${esc(label)}" data-run-id="${esc(run.id)}" data-map-index="${mapIdx}"` : "";
+      const clickAttrs = m.map_url ? ` data-solve-card-kind="thickness" data-run-id="${esc(run.id)}"` : "";
       return `
-        <div class="filament-map-card${m.map_url ? ' is-clickable' : ''}"${clickAttrs}>
+        <div class="filament-map-card${m.map_url ? ' is-clickable' : ''}" data-map-key="${escAttr(mapKey)}"${clickAttrs}>
           <div class="solve-grid-column-header">
             <h4>${esc(label)}</h4>
             <div class="comparison-column-chips"><span class="comparison-chip" style="background:${esc(fil?.hex || '#ccc')}"></span></div>
@@ -11610,21 +11375,23 @@ function renderSolveThicknessMaps(selectedRuns) {
         </div>`;
     }).join("");
     const capItems = getSolveWhiteCapThicknessItems(run);
-    capItems.forEach((item, itemIdx) => {
-      const capIndex = (r.filament_maps || []).length + itemIdx;
-      const capStatsLine = [
-        formatThicknessMapVolume(item.volumeMm3),
-        `max ${item.maxD.toFixed(2)} mm`,
-        `${item.activePx.toLocaleString()} px`,
-      ].filter(Boolean).join(" · ");
+    capItems.forEach((item) => {
+      const capStatsLine = item.available ? [
+          formatThicknessMapVolume(item.volumeMm3),
+          `max ${item.maxD.toFixed(2)} mm`,
+          `${item.activePx.toLocaleString()} px`,
+        ].filter(Boolean).join(" · ") : "Unavailable";
+      const clickAttrs = item.available
+        ? ` data-solve-card-kind="thickness" data-run-id="${esc(run.id)}"`
+        : "";
       html += `
-        <div class="filament-map-card is-clickable" data-solve-card-kind="thickness" data-thickness-url="${esc(item.url)}" data-thickness-label="${esc(item.label)}" data-run-id="${esc(run.id)}" data-map-index="${capIndex}">
+        <div class="filament-map-card${item.available ? ' is-clickable' : ' is-unavailable'}" data-map-key="${escAttr(item.key)}"${clickAttrs}>
           <div class="solve-grid-column-header">
             <h4>${esc(item.label)}</h4>
             <div class="comparison-column-chips"><span class="comparison-chip" style="background:#F4EFEB"></span></div>
             <div class="comparison-column-stats">${esc(capStatsLine)}</div>
           </div>
-          <img src="${esc(item.url)}" alt="${esc(item.label)}">
+          ${item.available ? `<img src="${esc(item.url)}" alt="${esc(item.label)}">` : `<div class="solve-grid-empty-map">Unavailable</div>`}
           ${buildSolveCardScaleBarSlot()}
         </div>`;
     });
@@ -11637,16 +11404,6 @@ function formatThicknessMapVolume(volumeMm3) {
   if (!Number.isFinite(volume) || volume < 0) return "";
   if (volume >= 1000) return `vol ${(volume / 1000).toFixed(2)} cm3`;
   return `vol ${volume.toFixed(volume >= 10 ? 0 : 2)} mm3`;
-}
-
-function openThicknessLightbox(url, label) {
-  const lb = $("#compLightbox");
-  const content = $("#compLightboxContent");
-  if (!lb || !content || !url) return;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
-  const caption = label ? `<div class="comp-lightbox-caption">${esc(label)}</div>` : "";
-  content.innerHTML = `<img class="comp-lightbox-img" src="${esc(url)}" style="image-rendering:pixelated;min-width:min(70vh, 85vw);">${caption}`;
-  lb.classList.remove("is-hidden");
 }
 
 let _solveLightboxState = null;
@@ -11676,16 +11433,18 @@ function buildSolveRunPaletteChips(run) {
   }).join("");
 }
 
-function buildSolveLightboxHeader(run, view) {
+function buildSolveLightboxHeader(run, viewLabel, trailingControls = "") {
   const paletteChips = buildSolveRunPaletteChips(run);
-  const viewLabel = getSolveLightboxViewLabel(view);
   return `
     <div class="comp-lightbox-topbar surface-lightbox-topbar">
       <div class="comp-lightbox-runmeta">
         <span class="comp-lightbox-runtitle">${esc(run.label)}</span>
         <span class="comp-lightbox-viewtag">${esc(viewLabel)}</span>
       </div>
-      <div class="comp-lightbox-palette" aria-label="Palette">${paletteChips}</div>
+      <div class="comp-lightbox-header-end">
+        ${trailingControls}
+        <div class="comp-lightbox-palette" aria-label="Palette">${paletteChips}</div>
+      </div>
     </div>
   `;
 }
@@ -11694,60 +11453,83 @@ function getSelectedSolveRunsWithResults() {
   return getSelectedRuns().filter(r => r.results);
 }
 
-// White-cap thickness maps for the Thickness Maps view. These are the actual cap *thickness*
-// maps (distinct from the height maps shown in the White Cap view). Only the triad member
-// selected by `solveThicknessMapKind` is returned, so cards and lightboxes stay in sync.
+// White-cap thickness maps for the Thickness Maps view. These are actual cap *thickness*
+// maps (distinct from the height maps shown in the White Cap view). Keep all semantic slots,
+// including unavailable legacy artifacts, so labels and card order can never shift.
 function getSolveWhiteCapThicknessItems(run) {
   const r = run?.results || {};
-  const byKind = {
-    total: {
+  return [
+    {
+      key: "cap:total",
       label: "Total White Cap",
+      viewLabel: "Total White Cap Thickness",
       url: r.cap_map_url,
       activePx: Number(r.cap_map_active_px || 0),
       maxD: Number(r.cap_map_max_d || 0),
       volumeMm3: r.cap_map_volume_mm3,
-    },
-    boundary: {
+    }, {
+      key: "cap:boundary",
       label: "Boundary Cap",
+      viewLabel: "Boundary Cap Thickness",
       url: r.boundary_cap_map_url,
       activePx: Number(r.boundary_cap_map_active_px || 0),
       maxD: Number(r.boundary_cap_map_max_d || 0),
       volumeMm3: r.boundary_cap_map_volume_mm3,
-    },
-    detail: {
+    }, {
+      key: "cap:detail",
       label: "Detail Cap",
+      viewLabel: "Detail Cap Thickness",
       url: r.detail_cap_map_url,
       activePx: Number(r.detail_cap_map_active_px || 0),
       maxD: Number(r.detail_cap_map_max_d || 0),
       volumeMm3: r.detail_cap_map_volume_mm3,
     },
-  };
-  const item = byKind[solveThicknessMapKind] || byKind.total;
-  return item.url ? [item] : [];
+  ].map(item => ({ ...item, available: Boolean(item.url) }));
 }
 
-function getSolveThicknessItems(run) {
+function getSolveThicknessDisplayItems(run) {
   if (!run?.results) return [];
   const maps = run.results.filament_maps || [];
   const items = maps.map((m) => {
     const fil = filamentById(m.filament_id);
     return {
-      label: fil?.color_name || m.filament_id,
+      key: `filament:${m.filament_id}`,
+      label: m.display_name || fil?.color_name || fil?.display_name || m.filament_id,
+      viewLabel: `${m.display_name || fil?.color_name || fil?.display_name || m.filament_id} Thickness`,
       url: m.map_url || "",
+      available: Boolean(m.map_url),
     };
   });
   items.push(...getSolveWhiteCapThicknessItems(run));
-  return items.filter(item => !!item.url);
+  return items;
 }
 
-function openThicknessLightboxForPosition(runId, mapIndex) {
+function getSolveThicknessItems(run) {
+  return getSolveThicknessDisplayItems(run).filter(item => item.available);
+}
+
+function openThicknessLightboxForKey(runId, mapKey) {
   const run = solveRuns.find(r => r.id === runId);
   const items = getSolveThicknessItems(run);
-  const idx = Math.max(0, Math.min(items.length - 1, mapIndex));
-  const item = items[idx];
+  const idx = items.findIndex(candidate => candidate.key === mapKey);
+  const item = idx >= 0 ? items[idx] : null;
   if (!run || !item) return;
-  _solveLightboxState = { kind: "thickness", runId, mapIndex: idx };
-  openThicknessLightbox(item.url, item.label);
+  _solveLightboxState = { kind: "thickness", runId, mapKey: item.key, mapIndex: idx };
+
+  const lb = $("#compLightbox");
+  const content = $("#compLightboxContent");
+  if (!lb || !content) return;
+  const lifecycle = beginLightboxLifecycle();
+  const zoomControls = buildStaticLightboxZoomControls();
+  content.innerHTML = `
+    <div class="comp-lightbox-pane">
+      ${buildSolveLightboxHeader(run, item.viewLabel, zoomControls)}
+      <div class="comp-lightbox-media static-zoom-media">
+        <img class="comp-lightbox-img" src="${esc(item.url)}" style="image-rendering:pixelated;" alt="${esc(item.label)}">
+      </div>
+    </div>`;
+  lb.classList.remove("is-hidden");
+  setupStaticLightboxZoom(content, lifecycle);
 }
 
 function solveRunById(runId) {
@@ -11798,15 +11580,173 @@ function openSolveCardLightboxFromElement(card) {
     return;
   }
   if (kind === "thickness") {
-    const idxAttr = card.dataset.mapIndex;
-    if (idxAttr != null && idxAttr !== "") {
-      openThicknessLightboxForPosition(runId, parseInt(idxAttr, 10) || 0);
-    } else if (card.dataset.thicknessUrl) {
-      openThicknessLightbox(card.dataset.thicknessUrl, card.dataset.thicknessLabel || "");
-    }
+    if (runId && card.dataset.mapKey) openThicknessLightboxForKey(runId, card.dataset.mapKey);
     return;
   }
   // kind === "diff" (or unknown): no lightbox — preserves the prior no-op for diff columns.
+}
+
+let _lightboxCleanup = null;
+let _lightboxInstanceToken = 0;
+
+function beginLightboxLifecycle() {
+  if (_lightboxCleanup) _lightboxCleanup();
+  const token = ++_lightboxInstanceToken;
+  const cleanups = [];
+  let active = true;
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    while (cleanups.length) {
+      const dispose = cleanups.pop();
+      try { dispose(); } catch (_error) { /* cleanup remains best-effort and idempotent */ }
+    }
+    if (_lightboxCleanup === cleanup) _lightboxCleanup = null;
+  };
+  _lightboxCleanup = cleanup;
+  return {
+    token,
+    addCleanup(dispose) { if (active) cleanups.push(dispose); else dispose(); },
+    isActive() { return active && token === _lightboxInstanceToken; },
+    cleanup,
+  };
+}
+
+function computeLightboxScaleBounds({
+  intrinsicWidth,
+  intrinsicHeight,
+  viewportWidth,
+  viewportHeight,
+  headerHeight = 0,
+  headerMinWidth = 0,
+  inset = 24,
+}) {
+  const imageWidth = Math.max(1, Number(intrinsicWidth) || 1);
+  const imageHeight = Math.max(1, Number(intrinsicHeight) || 1);
+  const usableWidth = Math.max(1, (Number(viewportWidth) || 1) - inset * 2);
+  const usableHeight = Math.max(1, (Number(viewportHeight) || 1) - inset * 2);
+  const mediaHeight = Math.max(1, usableHeight - Math.max(0, Number(headerHeight) || 0));
+  const fitScale = Math.max(0.0001, Math.min(usableWidth / imageWidth, mediaHeight / imageHeight));
+  const collapsed = fitScale < 1;
+  const minScale = collapsed ? fitScale : 1;
+  const maxScale = fitScale;
+  return {
+    minScale,
+    maxScale,
+    collapsed,
+    usableWidth,
+    usableHeight,
+    headerWidth: Math.min(usableWidth, Math.max(0, Number(headerMinWidth) || 0)),
+  };
+}
+
+function normalizeStaticZoomWheelDelta(event, viewportHeight = window.innerHeight) {
+  const multiplier = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewportHeight : 1;
+  return Number(event.deltaY || 0) * multiplier;
+}
+
+function applyStaticZoomWheelDelta(value, accumulatedDelta, deltaPixels, threshold = 36, step = 5) {
+  let accumulated = accumulatedDelta + deltaPixels;
+  let next = Number(value) || 0;
+  while (Math.abs(accumulated) >= threshold) {
+    const direction = accumulated < 0 ? 1 : -1;
+    const candidate = Math.max(0, Math.min(100, next + direction * step));
+    accumulated -= Math.sign(accumulated) * threshold;
+    if (candidate === next) {
+      accumulated = 0;
+      break;
+    }
+    next = candidate;
+  }
+  return { value: next, accumulatedDelta: accumulated, changed: next !== Number(value) };
+}
+
+function buildStaticLightboxZoomControls() {
+  return `
+    <label class="comp-lightbox-zoom">
+      <span class="comp-lightbox-zoom-label">Zoom</span>
+      <span class="comp-lightbox-zoom-endpoint">Min</span>
+      <input class="comp-lightbox-zoom-slider" type="range" min="0" max="100" step="1" value="100" aria-label="Zoom" aria-valuetext="100%, maximum">
+      <span class="comp-lightbox-zoom-endpoint">Max</span>
+    </label>`;
+}
+
+function setupStaticLightboxZoom(content, lifecycle, onLayout = null) {
+  const pane = content?.querySelector(".comp-lightbox-pane");
+  const header = pane?.querySelector(".comp-lightbox-topbar");
+  const media = pane?.querySelector(".static-zoom-media");
+  const image = media?.querySelector(".comp-lightbox-img");
+  const slider = header?.querySelector(".comp-lightbox-zoom-slider");
+  if (!pane || !header || !media || !image || !slider) return;
+  let wheelDelta = 0;
+
+  const updateAccessibleValue = () => {
+    const value = Number(slider.value);
+    const endpoint = value === 0 ? ", minimum" : value === 100 ? ", maximum" : "";
+    slider.setAttribute("aria-valuetext", `${value}%${endpoint}`);
+  };
+
+  const relayout = () => {
+    if (!lifecycle.isActive()) return;
+    const intrinsicWidth = image.naturalWidth;
+    const intrinsicHeight = image.naturalHeight;
+    if (!intrinsicWidth || !intrinsicHeight) return;
+    pane.style.width = "auto";
+    const bounds = computeLightboxScaleBounds({
+      intrinsicWidth,
+      intrinsicHeight,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      headerHeight: header.getBoundingClientRect().height,
+      headerMinWidth: header.scrollWidth,
+    });
+    slider.disabled = bounds.collapsed;
+    const normalized = bounds.collapsed ? 100 : Number(slider.value) / 100;
+    const scale = bounds.minScale + (bounds.maxScale - bounds.minScale) * normalized;
+    const width = Math.max(1, Math.floor(intrinsicWidth * scale));
+    const height = Math.max(1, Math.floor(intrinsicHeight * scale));
+    pane.style.width = `${Math.ceil(Math.max(width, bounds.headerWidth))}px`;
+    media.style.width = `${width}px`;
+    media.style.height = `${height}px`;
+    image.style.width = `${width}px`;
+    image.style.height = `${height}px`;
+    updateAccessibleValue();
+    if (onLayout) onLayout();
+  };
+
+  const onInput = () => relayout();
+  const onWheel = (event) => {
+    if (event.ctrlKey || event.metaKey) return;
+    const outcome = applyStaticZoomWheelDelta(
+      Number(slider.value),
+      wheelDelta,
+      normalizeStaticZoomWheelDelta(event),
+    );
+    wheelDelta = outcome.accumulatedDelta;
+    if (!outcome.changed) return;
+    slider.value = String(outcome.value);
+    relayout();
+    event.preventDefault();
+  };
+  const onResize = () => relayout();
+  const onLoad = () => relayout();
+  slider.addEventListener("input", onInput);
+  media.addEventListener("wheel", onWheel, { passive: false });
+  image.addEventListener("load", onLoad);
+  window.addEventListener("resize", onResize);
+  lifecycle.addCleanup(() => slider.removeEventListener("input", onInput));
+  lifecycle.addCleanup(() => media.removeEventListener("wheel", onWheel));
+  lifecycle.addCleanup(() => image.removeEventListener("load", onLoad));
+  lifecycle.addCleanup(() => window.removeEventListener("resize", onResize));
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => relayout());
+    observer.observe(header);
+    lifecycle.addCleanup(() => observer.disconnect());
+  }
+  if (image.complete && image.naturalWidth) relayout();
+  if (typeof image.decode === "function") {
+    image.decode().catch(() => {}).then(() => { if (lifecycle.isActive()) relayout(); });
+  }
 }
 
 function openSolveRunLightbox(runId, view = solveView) {
@@ -11819,11 +11759,11 @@ function openSolveRunLightbox(runId, view = solveView) {
   const lb = $("#compLightbox");
   const content = $("#compLightboxContent");
   if (!lb || !content) return;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
+  const lifecycle = beginLightboxLifecycle();
 
   const url = _getSolveRunResultUrl(run.results, view) || "";
   const pixelated = "image-rendering:pixelated;";
-  const sizing = "min-width:min(70vh, 85vw);";
+  const zoomControls = buildStaticLightboxZoomControls();
 
   const contourLabel = view === "recipe_regions" ? "recipe boundaries" : "layer contours";
   const contourCanvas = isSolveContourView(view) && solveContoursEnabled
@@ -11831,17 +11771,18 @@ function openSolveRunLightbox(runId, view = solveView) {
     : "";
   content.innerHTML = `
         <div class="comp-lightbox-pane">
-          ${buildSolveLightboxHeader(run, view)}
-          <div class="comp-lightbox-media">
-            <img class="comp-lightbox-img" src="${url}" style="${pixelated}${sizing}">
+          ${buildSolveLightboxHeader(run, getSolveLightboxViewLabel(view), zoomControls)}
+          <div class="comp-lightbox-media static-zoom-media">
+            <img class="comp-lightbox-img" src="${url}" style="${pixelated}">
             ${contourCanvas}
           </div>
         </div>`;
   lb.classList.remove("is-hidden");
 
-  if (isSolveContourView(view) && solveContoursEnabled) {
-    renderSolveLightboxContours(run, view);
-  }
+  const renderContours = () => {
+    if (isSolveContourView(view) && solveContoursEnabled) renderSolveLightboxContours(run, view);
+  };
+  setupStaticLightboxZoom(content, lifecycle, renderContours);
 }
 
 function openSolveSourceLightbox(run, view = solveView, targetKind = "run") {
@@ -11850,36 +11791,34 @@ function openSolveSourceLightbox(run, view = solveView, targetKind = "run") {
   const lb = $("#compLightbox");
   const content = $("#compLightboxContent");
   if (!lb || !content) return;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
+  const lifecycle = beginLightboxLifecycle();
   const pixelated = "image-rendering:pixelated;";
-  const sizing = "min-width:min(70vh, 85vw);";
+  const zoomControls = buildStaticLightboxZoomControls();
   content.innerHTML = `
         <div class="comp-lightbox-pane">
-          ${buildSolveLightboxHeader(run, "source")}
-          <div class="comp-lightbox-media">
-            <img class="comp-lightbox-img" src="${esc(run.results.source_url || "")}" style="${pixelated}${sizing}" alt="Source image">
+          ${buildSolveLightboxHeader(run, getSolveLightboxViewLabel("source"), zoomControls)}
+          <div class="comp-lightbox-media static-zoom-media">
+            <img class="comp-lightbox-img" src="${esc(run.results.source_url || "")}" style="${pixelated}" alt="Source image">
           </div>
         </div>`;
   lb.classList.remove("is-hidden");
+  setupStaticLightboxZoom(content, lifecycle);
 }
 
 // ── Surface lightbox (interactive fullscreen) ─────────────────────────
-/** Track active lightbox teardown so we can clean up event listeners. */
-let _surfaceLightboxCleanup = null;
 
 async function openSurfaceLightbox(viewType, runId = null) {
   const lb = $("#compLightbox");
   const content = $("#compLightboxContent");
   if (!lb || !content) return;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
-
   const selected = getSelectedRuns().filter(r => r.results);
   if (!selected.length) return;
   const run = runId ? solveRuns.find(r => r.id === runId) : selected[0];
   if (!run) return;
+  const lifecycle = beginLightboxLifecycle();
   _solveLightboxState = { kind: "surface", runId: run.id, viewType };
   const cached = await ensureSurfaceData(run);
-  if (!cached) return;
+  if (!lifecycle.isActive() || !cached) return;
 
   const tMax = getSolveSurfaceTMax();
   const lh = getSolveSurfaceLayerHeight();
@@ -11891,7 +11830,8 @@ async function openSurfaceLightbox(viewType, runId = null) {
   const curHeight = parseInt($("#explorerHeightSlider")?.value ?? steps);
   const curBand = parseInt($("#explorerBandSlider")?.value ?? 3);
 
-  let html = '<div class="surface-lightbox-wrap">';
+  let html = `<div class="surface-lightbox-wrap">
+    ${buildSolveLightboxHeader(run, getSolveLightboxViewLabel(viewType))}`;
   if (viewType === "surface_highpass") {
     html += `
       <div class="surface-controls surface-lightbox-controls">
@@ -11929,19 +11869,27 @@ async function openSurfaceLightbox(viewType, runId = null) {
 
   const canvas = $("#lbSurfaceCanvas");
   const contourCanvas = $("#lbSurfaceContourCanvas");
+  const header = wrap?.querySelector(".comp-lightbox-topbar");
+  const controls = wrap?.querySelector(".surface-lightbox-controls");
+  const frame = wrap?.querySelector(".surface-lightbox-frame");
   const cleanups = [];
+  const paletteVersion = getRunDiagnosticPaletteVersion(run);
 
   // Scale canvas CSS to fill lightbox while preserving aspect ratio.
-  // Called after first render (which sets canvas.width/height to data dims).
-  // Uses conservative fixed budget — no DOM measurements that might read zero.
-  const nControlBars = 1; // highpass = threshold; explorer (always rich) = height; one bar each
-  const controlBudget = nControlBars * 40 + 20; // 40px per bar + padding
+  // Called after first render (which sets canvas.width/height to data dims) and
+  // measures the actual header/control strips instead of reserving a fixed budget.
   function scaleCanvasToFit() {
+    if (!lifecycle.isActive()) return;
     const dataW = canvas.width, dataH = canvas.height;
     if (!dataW || !dataH) return;
     const ar = dataW / dataH;
-    const maxW = window.innerWidth * 0.80;
-    const maxH = window.innerHeight * 0.80 - controlBudget;
+    const maxW = Math.max(1, window.innerWidth - 48);
+    const maxH = Math.max(
+      1,
+      window.innerHeight - 48
+        - (header?.getBoundingClientRect().height || 0)
+        - (controls?.getBoundingClientRect().height || 0),
+    );
     let w, h;
     if (maxW / maxH > ar) {
       h = maxH; w = h * ar;
@@ -11950,6 +11898,27 @@ async function openSurfaceLightbox(viewType, runId = null) {
     }
     canvas.style.width = `${Math.floor(w)}px`;
     canvas.style.height = `${Math.floor(h)}px`;
+    if (frame) {
+      frame.style.width = canvas.style.width;
+      frame.style.height = canvas.style.height;
+    }
+  }
+
+  const onResize = () => {
+    scaleCanvasToFit();
+    // Highpass always shows this overlay. Explorer shows it only for the legacy/plain
+    // fallback, so preserve whichever rendered state is currently visible.
+    if (contourCanvas?.style.display !== "none") {
+      renderSurfaceContourOverlay(contourCanvas, cached.surface);
+    }
+  };
+  window.addEventListener("resize", onResize);
+  cleanups.push(() => window.removeEventListener("resize", onResize));
+  if (typeof ResizeObserver !== "undefined" && header && controls) {
+    const observer = new ResizeObserver(() => onResize());
+    observer.observe(header);
+    observer.observe(controls);
+    cleanups.push(() => observer.disconnect());
   }
 
   if (viewType === "surface_highpass") {
@@ -11962,7 +11931,7 @@ async function openSurfaceLightbox(viewType, runId = null) {
       const layers = parseInt(slider.value);
       valEl.textContent = `${th.toFixed(2)} mm`;
       hintEl.textContent = `(${layers} layers)`;
-      renderHighpass(canvas, cached.surface, tMax, th);
+      renderHighpass(canvas, cached.surface, tMax, th, paletteVersion);
       scaleCanvasToFit();
       renderSurfaceContourOverlay(contourCanvas, cached.surface);
       // Sync inline slider
@@ -12000,11 +11969,12 @@ async function openSurfaceLightbox(viewType, runId = null) {
       let renderedRich = false;
       // Always rich; plain renderer only as a fallback when material data is unavailable.
       const materialData = await ensureExplorerMaterialData(run);
+      if (!lifecycle.isActive()) return;
       if (materialData) {
         renderExplorerRich(canvas, materialData, center, halfBand);
         renderedRich = true;
       } else {
-        renderExplorer(canvas, cached.surface, cached.ceiling, tMax, center, halfBand);
+        renderExplorer(canvas, cached.surface, cached.ceiling, tMax, center, halfBand, paletteVersion);
       }
       scaleCanvasToFit();
       if (renderedRich) {
@@ -12045,7 +12015,7 @@ async function openSurfaceLightbox(viewType, runId = null) {
     render();
   }
 
-  _surfaceLightboxCleanup = () => { cleanups.forEach(fn => fn()); _surfaceLightboxCleanup = null; };
+  cleanups.forEach(dispose => lifecycle.addCleanup(dispose));
 }
 
 // ── Recipe viewer lightbox (Color Regions) ────────────────────────────
@@ -12443,13 +12413,13 @@ async function openRecipeLightbox(runId) {
   const lb = $("#compLightbox");
   const content = $("#compLightboxContent");
   if (!lb || !content) return;
-  if (_surfaceLightboxCleanup) _surfaceLightboxCleanup();
-
   const run = solveRuns.find((r) => r.id === runId);
   if (!run || !run.results) return;
+  const lifecycle = beginLightboxLifecycle();
   _solveLightboxState = { kind: "recipe", runId };
 
   const recipeData = await ensureRecipeData(run);
+  if (!lifecycle.isActive()) return;
   const imgUrl = _getSolveRunResultUrl(run.results, "recipe_regions") || "";
   const recipeBoundariesAvailable = Boolean(recipeData?.recipeBoundaries);
   const registry = [];
@@ -12460,7 +12430,7 @@ async function openRecipeLightbox(runId) {
   content.innerHTML = `
     <div class="recipe-lightbox-wrap">
       <div class="recipe-lightbox-media">
-        ${buildSolveLightboxHeader(run, "recipe_regions")}
+        ${buildSolveLightboxHeader(run, getSolveLightboxViewLabel("recipe_regions"))}
         <div class="recipe-lightbox-toolbar">
           <button class="sub-toggle-btn${recipeBoundariesAvailable && solveContoursEnabled ? " is-active" : ""}" id="recipeLightboxContoursToggle" type="button" data-contours-available="${recipeBoundariesAvailable ? "true" : "false"}" aria-pressed="${recipeBoundariesAvailable && solveContoursEnabled ? "true" : "false"}" title="${recipeBoundariesAvailable ? "Show recipe boundaries on the image" : "Recipe boundaries are unavailable for this older run"}"${recipeBoundariesAvailable ? "" : " disabled aria-disabled=\"true\""}>Contours</button>
         </div>
@@ -12505,7 +12475,6 @@ async function openRecipeLightbox(runId) {
   }
 
   if (!recipeData) {
-    _surfaceLightboxCleanup = () => { _surfaceLightboxCleanup = null; };
     return;
   }
 
@@ -12674,7 +12643,7 @@ async function openRecipeLightbox(runId) {
     });
   }
 
-  _surfaceLightboxCleanup = () => {
+  lifecycle.addCleanup(() => {
     tree.removeEventListener("click", onNodeClick);
     if (bucket) bucket.removeEventListener("click", onBucketClick);
     if (frame) {
@@ -12682,8 +12651,7 @@ async function openRecipeLightbox(runId) {
       frame.removeEventListener("mouseleave", onFrameLeave);
     }
     window.removeEventListener("resize", onResize);
-    _surfaceLightboxCleanup = null;
-  };
+  });
 }
 
 // Map a filament id to its display label for user-facing messages.
@@ -13594,10 +13562,6 @@ let moduleData = [];       // module descriptors from server
 let moduleState = {};      // {module_id: true/false}
 const MODULE_UI_VISIBLE_SLOTS = new Set(["preprocessing"]);
 
-function visibleModuleData() {
-  return (moduleData || []).filter((m) => MODULE_UI_VISIBLE_SLOTS.has(m.slot));
-}
-
 function modulesForSlot(slot) {
   return (moduleData || []).filter((m) => m.slot === slot);
 }
@@ -13663,11 +13627,6 @@ function projectModuleConfigValues(moduleId, mod, configValues) {
     projected[param.name] = getModuleParamValue(configValues, moduleId, param);
   }
   return projected;
-}
-
-function moduleParamValues(mod, configValues = config) {
-  if (!mod) return configValues;
-  return projectModuleConfigValues(mod.name, mod, configValues);
 }
 
 function preprocessingPresetSpec(moduleId) {
@@ -15104,7 +15063,7 @@ function bindEvents() {
       try {
         const r = await fetch("/api/cache/clear-all", { method: "POST" });
         if (r.status === 409) {
-          showToast("A solve, export, or compare is still running — wait for it to finish before clearing.", "warn");
+          showToast("A solve, export, or palette suggestion is still running — wait for it to finish before clearing.", "warn");
         } else if (!r.ok) {
           console.warn("clear-all failed", r.status);
         }
@@ -15197,14 +15156,6 @@ function bindEvents() {
       const nextView = btn.dataset.solveWhiteCapView || "cap_map";
       solveWhiteCapView = nextView;
       solveView = nextView;
-      renderSolveComparisonGrid();
-    });
-  });
-
-  document.querySelectorAll("[data-solve-thickness-map-kind]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const kind = btn.dataset.solveThicknessMapKind;
-      solveThicknessMapKind = (kind === "boundary" || kind === "detail") ? kind : "total";
       renderSolveComparisonGrid();
     });
   });

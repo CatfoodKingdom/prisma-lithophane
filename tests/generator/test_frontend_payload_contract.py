@@ -42,7 +42,7 @@ _FILAMENT_ID = "demo-filament"
 # any emitted payload field name); the image-hash oracle confirms the solver
 # output is byte-identical. Any add/drop here is a UI-contract regression.
 _EXPECTED_RESULT_KEYS = frozenset({
-    "card_id", "mean_de", "source_rms_de", "max_de", "de_scale_max", "n_oog",
+    "card_id", "diagnostic_palette_version", "mean_de", "source_rms_de", "max_de", "de_scale_max", "n_oog",
     "total_pixels", "coverage_pct", "image_w", "image_h",
     "image_domain_width_mm", "image_domain_height_mm", "max_height",
     "predicted_url", "predicted_appearance_url",
@@ -82,6 +82,7 @@ _EXPECTED_RESULT_KEYS = frozenset({
 # Fields the UI directly binds; must be present and non-None for a result that
 # carries boundary/detail caps and at least one filament.
 _CRITICAL_NON_NULL = (
+    "diagnostic_palette_version",
     "predicted_url",
     "de_map_url",
     "de_map_perceptual_url",

@@ -30,8 +30,8 @@ test('detail-aware boundary cap is present and default while fixed cap remains r
     'Detail Aware boundary cap option should be available',
   );
   assert.ok(
-    /case "appearance_bounded_smooth": return "Detail Aware";/.test(APP_JS),
-    'Detail Aware cap mode should have a user-facing label',
+    /value === "appearance_bounded_smooth" \? "Detail Aware" : "Smooth"/.test(APP_JS),
+    'living settings-value formatting should label the Detail Aware cap mode',
   );
   assert.ok(
     /cap_mode:\s*"appearance_bounded_smooth"/.test(APP_JS),

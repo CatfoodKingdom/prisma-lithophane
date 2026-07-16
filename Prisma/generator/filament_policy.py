@@ -12,7 +12,10 @@ disk. Existing saved palettes/runs are preserved; only NEW work is gated.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from pathlib import Path
+from typing import Iterable, List
+
+from filament_order import load_filament_order_registry
 
 
 class FilamentUnavailableError(ValueError):
@@ -57,3 +60,30 @@ def unavailable_for_generation(filament_ids: Iterable[str], registry: dict) -> l
         if not is_generation_available(fid, registry):
             out.append(fid)
     return out
+
+
+def validate_palette(
+    palette: List[str],
+    profiles_dir: Path | None = None,
+    registry: dict | None = None,
+) -> None:
+    """Validate every filament in ``palette`` for a new solve.
+
+    Missing profiles are reported before generation-availability policy, just
+    as they were at the former CLI-owned validation boundary. ``registry`` and
+    ``profiles_dir`` remain injectable for deterministic callers and tests.
+    """
+    from model import PROFILES_DIR
+
+    base = profiles_dir if profiles_dir is not None else PROFILES_DIR
+    missing = [fid for fid in palette
+               if not (base / f"{fid}.json").exists()]
+    if missing:
+        raise ValueError(
+            f"No spline profile found for: {missing}\n"
+            f"Profiles directory: {base}"
+        )
+    reg = registry if registry is not None else load_filament_order_registry()
+    unavailable = unavailable_for_generation(palette, reg)
+    if unavailable:
+        raise FilamentUnavailableError(unavailable)

@@ -1,4 +1,4 @@
-"""Preprocessing slot runner tests (R2-C/D/E + R3-C/D/E/F + R4-B + R5-A).
+"""Preprocessing slot runner tests (R2-C/D/E + R3-C/D/E + R4-B).
 
 The runner is the slot's contract enforcer:
   - sort enabled operators by `(order, registration_order)` (R2-C / R3-C),
@@ -7,21 +7,15 @@ The runner is the slot's contract enforcer:
   - validate that the last enabled operator emits one of `srgb_u8` /
     `srgb_f32` BEFORE running anything (R3-D),
   - check finiteness on each operator's raw output (R3-E),
-  - canonicalize preview frames to `srgb_u8` via the shared color_convert
-    helpers and call `publish_image_preview` per operator (R3-F + R5-A),
   - degrade to a transparent pass-through when zero operators are enabled
     (R4-B).
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
-from PIL import Image
 
 from pipeline.base import PreprocessingModule
-from pipeline.snapshot import SnapshotPublisher
 from preprocessing.runner import run_preprocessing_pipeline
 from preprocessing.types import (
     PreprocessingContext,
@@ -80,17 +74,6 @@ class TestEmptyChainPassThrough:
         assert out is img  # same object, no copy
         assert trace == []
         assert debug == {}
-
-    def test_zero_operators_emits_no_preview(self, tmp_path: Path):
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="x", progress_dict=progress)
-        img = np.zeros((4, 4, 3), dtype=np.uint8)
-        run_preprocessing_pipeline(
-            img, [], context=_make_context(), snapshot_publisher=pub
-        )
-        assert "preview_url" not in progress
-        assert not (tmp_path / "progressive" / "preprocess").exists()
-
 
 # ── R3-D: end-of-chain validation ─────────────────────────────────────────────
 
@@ -230,54 +213,6 @@ class TestShapeDtypeContract:
         with pytest.raises(PreprocessingContractError) as excinfo:
             run_preprocessing_pipeline(img, [op], context=_make_context())
         assert "bad_return" in str(excinfo.value)
-
-
-# ── R1 A3 + R3-F + R5-A: preview emission ─────────────────────────────────────
-
-class TestPreviewEmission:
-    def test_one_preview_per_operator(self, tmp_path: Path):
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="x", progress_dict=progress)
-        a = _make_op("a", order=100.0)
-        b = _make_op("b", order=110.0)
-        img = np.full((4, 4, 3), 0.5, dtype=np.float32)
-        run_preprocessing_pipeline(
-            img, [a, b], context=_make_context(), snapshot_publisher=pub
-        )
-        out_dir = tmp_path / "progressive" / "preprocess"
-        assert (out_dir / "a.png").exists()
-        assert (out_dir / "b.png").exists()
-
-    def test_preview_canonicalized_to_srgb_u8(self, tmp_path: Path):
-        """R5-A: srgb_f32 operator output gets clamp+scale+round to uint8 PNG."""
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="x", progress_dict=progress)
-        op = _make_op("f32_op", in_dom="srgb_f32", out_dom="srgb_f32")
-        img = np.full((4, 4, 3), 0.5, dtype=np.float32)
-        run_preprocessing_pipeline(
-            img, [op], context=_make_context(), snapshot_publisher=pub
-        )
-        png = tmp_path / "progressive" / "preprocess" / "f32_op.png"
-        decoded = np.array(Image.open(png))
-        # 0.5 srgb_f32 → 0.5 * 255 = 127.5 → round half to even → 128.
-        assert decoded.dtype == np.uint8
-        assert decoded[0, 0, 0] == 128
-
-    def test_preview_view_only_does_not_change_chain_raster(self, tmp_path: Path):
-        """R3-F: preview canonicalization is view-only — the raster handed
-        to the next operator stays in the declared domain.
-        """
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="x", progress_dict=progress)
-        first = _make_op("first", in_dom="srgb_f32", out_dom="srgb_f32", order=100.0)
-        second = _make_op("second", in_dom="srgb_f32", out_dom="srgb_f32", order=110.0)
-        img = np.full((4, 4, 3), 0.7, dtype=np.float32)
-        out, trace, _ = run_preprocessing_pipeline(
-            img, [first, second], context=_make_context(), snapshot_publisher=pub
-        )
-        # Second op saw float32 input (preview emit didn't downgrade chain).
-        assert trace[1].metrics["called_with_dtype"] == "float32"
-        assert out.dtype == np.float32
 
 
 # ── source_image / context wiring ─────────────────────────────────────────────

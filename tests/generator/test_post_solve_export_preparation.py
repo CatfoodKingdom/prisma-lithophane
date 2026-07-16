@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 
 import numpy as np
@@ -215,17 +216,35 @@ def test_webapp_export_payload_accepts_only_product_export_options():
         ExportFilesPayload(output_format="both")
 
 
-def test_webapp_export_route_uses_files_name():
+def test_webapp_export_route_uses_background_files_lifecycle(monkeypatch):
     from fastapi.testclient import TestClient
     import server
 
-    client = TestClient(server.app)
-    old_route = client.post("/api/export/stl", json={})
-    assert old_route.status_code == 405
+    class ImmediateThread:
+        def __init__(self, target, daemon=None):
+            self._target = target
 
-    new_route = client.post("/api/export/files", json={})
-    assert new_route.status_code == 400
-    assert "No completed solve" in new_route.text
+        def start(self):
+            self._target()
+
+    original_session = copy.deepcopy(server.session)
+    monkeypatch.setattr(server.threading, "Thread", ImmediateThread)
+    client = TestClient(server.app)
+    try:
+        started = client.post("/api/export/files/start", json={})
+        assert started.status_code == 200, started.text
+        job_id = started.json()["job_id"]
+
+        terminal = client.get("/api/export/files/status")
+        assert terminal.status_code == 200, terminal.text
+        body = terminal.json()
+        assert body["job_id"] == job_id
+        assert body["status"] == "error"
+        assert body["result"] is None
+        assert "No completed solve" in body["progress"]
+    finally:
+        server.session.clear()
+        server.session.update(original_session)
 
 
 def test_rectilinear_export_policy_separates_solve_grid_from_geometry_pitch():

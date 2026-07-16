@@ -49,27 +49,21 @@ class TestPolicyHelper:
 
 
 class TestRegistryResolution:
-    def test_default_registry_uses_authoritative_sqlite_catalog(self, monkeypatch):
-        import filament_order
-
-        monkeypatch.setattr(
-            filament_order,
-            "current_filament_catalog",
-            lambda _root: (True, _REG),
-        )
-
-        assert filament_order.load_filament_order_registry() == _REG
-
-    def test_explicit_registry_path_uses_json_export(self, monkeypatch, tmp_path):
+    def test_default_registry_uses_selected_library_json(self, monkeypatch, tmp_path):
         import filament_order
 
         path = tmp_path / "registry.json"
         path.write_text(json.dumps(_REG), encoding="utf-8")
-        monkeypatch.setattr(
-            filament_order,
-            "current_filament_catalog",
-            lambda _root: (_ for _ in ()).throw(AssertionError("SQLite should not be queried")),
-        )
+        monkeypatch.setattr(filament_order, "_REGISTRY_PATH", path)
+
+        assert filament_order.load_filament_order_registry() == _REG
+
+    def test_explicit_registry_path_overrides_selected_library(self, monkeypatch, tmp_path):
+        import filament_order
+
+        path = tmp_path / "registry.json"
+        path.write_text(json.dumps(_REG), encoding="utf-8")
+        monkeypatch.setattr(filament_order, "_REGISTRY_PATH", tmp_path / "not-selected.json")
 
         assert filament_order.load_filament_order_registry(path) == _REG
 
@@ -82,12 +76,12 @@ class TestValidatePalettePolicy:
         return tmp_path
 
     def test_clean_palette_passes(self, tmp_path):
-        from pipeline_cli import validate_palette
+        from filament_policy import validate_palette
         pdir = self._profiles(tmp_path, "bambu-cyan")
         validate_palette(["bambu-cyan"], profiles_dir=pdir, registry=_REG)  # no raise
 
     def test_excluded_filament_refused(self, tmp_path):
-        from pipeline_cli import validate_palette
+        from filament_policy import validate_palette
         # orange HAS a profile file (the stale one) — so it's not "missing",
         # it must be refused on POLICY.
         pdir = self._profiles(tmp_path, "bambu-cyan", "bambu-translucent-orange")
@@ -97,7 +91,7 @@ class TestValidatePalettePolicy:
         assert "bambu-translucent-orange" in exc.value.unavailable
 
     def test_missing_profile_is_distinct_from_policy(self, tmp_path):
-        from pipeline_cli import validate_palette
+        from filament_policy import validate_palette
         pdir = self._profiles(tmp_path, "bambu-cyan")
         with pytest.raises(ValueError) as exc:
             validate_palette(["does-not-exist"], profiles_dir=pdir, registry=_REG)
@@ -106,7 +100,7 @@ class TestValidatePalettePolicy:
 
     def test_white_base_or_cap_excluded_is_refused(self, tmp_path):
         # runner.py validates palette + white base + cap through this one call.
-        from pipeline_cli import validate_palette
+        from filament_policy import validate_palette
         pdir = self._profiles(tmp_path, "bambu-cyan", "panchroma-translucent-natural")
         with pytest.raises(FilamentUnavailableError):
             validate_palette(["bambu-cyan", "panchroma-translucent-natural"],

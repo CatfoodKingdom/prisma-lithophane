@@ -6,9 +6,9 @@ from pathlib import Path
 import numpy as np
 
 
-_PROFILES_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
-from facade import SolveConfig, SolveResult, SolveStats, solve_preview, solve_full, solve_compare
+from facade import SolveConfig, SolveResult, SolveStats, solve_preview, solve_full
 
 
 def _make_config(palette=None):
@@ -23,7 +23,6 @@ def _make_config(palette=None):
         de_threshold=0.05,
         gamut_mode="hull",
         smooth_kernel=3,
-        smooth_iters=1,
         ams_slots=4,
         white_slots=1,
         use_corrections=False,
@@ -46,7 +45,7 @@ def test_solve_preview_returns_solve_result():
 
 
 def test_solve_preview_result_keeps_diagnostics_home():
-    """Task 5.4 acceptance: a staged/webapp solve_preview result carries __de__
+    """Task 5.4 acceptance: a staged preview/evaluation result carries __de__
     and __gamut_mask__ in diagnostics (not thickness_maps), and the public
     de_map / gamut_mask accessors return the diagnostics arrays."""
     img = np.random.randint(0, 256, (8, 8, 3), dtype=np.uint8)
@@ -67,21 +66,6 @@ def test_solve_full_returns_solve_result():
     assert isinstance(result, SolveResult)
     assert result.stats.total_pixels == 64
     assert result.stats.mean_de >= 0
-
-
-def test_solve_compare_returns_list():
-    img = np.random.randint(0, 256, (8, 8, 3), dtype=np.uint8)
-    palettes = [
-        ["bambu-basic-cyan"],
-        ["bambu-basic-yellow"],
-    ]
-    results = solve_compare(img, palettes, _make_config())
-
-    assert isinstance(results, list)
-    assert len(results) == 2
-    for r in results:
-        if isinstance(r, SolveResult):
-            assert r.stats.total_pixels == 64
 
 
 def test_solve_preview_predict_image():

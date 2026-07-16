@@ -1,7 +1,6 @@
 """Solve-owned canonical material plan (phase 3).
 
-Implements the Solved Material Plan contract defined in
-``docs/superpowers/specs/2026-04-11-resolution-parameter-separation-phase3-solved-material-plan-contract.md``.
+Implements the current Solved Material Plan contract.
 
 The ``SolvedMaterialPlan`` is the authoritative solve-owned artifact. Legacy
 raster views (per-filament thickness maps, predicted RGB/OKLab, surface

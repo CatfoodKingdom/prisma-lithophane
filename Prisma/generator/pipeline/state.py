@@ -12,8 +12,6 @@ import data_paths
 if TYPE_CHECKING:
     from .base import PreprocessingModule
     from thickness_maps import ThicknessMaps
-    from .blueprint_triage.report import PrintabilityReport
-    from .snapshot import SnapshotPublisher
     from .solved_material_plan import SolvedMaterialPlan
     from preprocessing.types import PreprocessingTraceStep
     from facade import SolveStats
@@ -44,12 +42,6 @@ FULL_PRESET = QualityPreset(
     max_layers=None,
 )
 
-COMPARE_PRESET = QualityPreset(
-    name="compare",
-    max_layers=15,
-)
-
-
 @dataclass
 class PipelineConfig:
     """All parameters needed to run the pipeline."""
@@ -66,7 +58,6 @@ class PipelineConfig:
     k_max: int = 3
     de_threshold: float = 0.05
     smooth_kernel: float = 7.5
-    smooth_iters: int = 3
     gamut_mode: str = "hull"
     gamut_white_rescale: bool = False
     model_domain_ingress: bool = True
@@ -122,7 +113,6 @@ class PipelineConfig:
     stage2_boundary_mutation_max_passes: int | None = 1
     stage4_printability_gate_detail: bool = False
     luminance_detail_authoring_printability: str = "off"
-    detail_cap_pitch_mm: float | None = None
     detail_cap_enabled: bool = True
     detail_cap_max_layers: int = 5
     detail_cap_smoothing_enabled: bool = True
@@ -133,23 +123,14 @@ class PipelineConfig:
     cell_mode: str = "felzenszwalb"
     smooth_boundaries: bool = False
     boundary_smooth_radius: int = 1
-    allow_print_despite_hazards: bool = False
-    # Print-aware source resample kernel (Wing B §E / B7).
-    # Threaded into `load_image()` / `_downsample_image()` at ingress.
-    # Valid values: "lanczos" (default, bit-exact with pre-B7) | "area".
-    source_resample_kernel: str = "lanczos"
     cap_mode: str = "smooth_variable"
     boundary_cap_de_budget: float = 0.008
     cap_continuity_cleanup: bool = True
     # F1 preprocessing slot. `preprocessors` holds the ordered list of
-    # ENABLED operator instances the runner will execute (sorting by
-    # `order` happens in the facade resolver, not here). `preprocessing_params`
-    # is the FULL per-operator params dict — every registered operator's
-    # params block materializes at its default per R2-F, regardless of
-    # enablement; the fingerprint subsetting per R3-B happens in
-    # `_solve_owned_fingerprint`.
+    # enabled operator instances the runner will execute. The facade consumes
+    # SolveConfig.preprocessing_params while constructing these instances and
+    # sorts them before the pipeline receives them.
     preprocessors: List[Any] = field(default_factory=list)
-    preprocessing_params: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     preset: QualityPreset = field(default_factory=lambda: FULL_PRESET)
 
@@ -189,17 +170,6 @@ class PipelineConfig:
         if self.boundary_cap_authority_mm is None:
             return max(float(self.d_wc_min), cap)
         return max(float(self.d_wc_min), min(float(self.boundary_cap_authority_mm), cap))
-
-    def effective_detail_cap_pitch_mm(self) -> float:
-        if self.detail_cap_pitch_mm is not None:
-            return float(self.detail_cap_pitch_mm)
-        for value in (
-            self.solver_fine_pitch_mm,
-            self.image_sample_pitch_mm,
-        ):
-            if value is not None:
-                return float(value)
-        return 0.20
 
     def effective_detail_cap_max_layers(self) -> int:
         if not self.detail_cap_enabled:
@@ -245,7 +215,7 @@ class PipelineState:
     image_domain_height_mm: float | None = None
     # Canonical solve-owned plan artifact, populated by the solve path
     # (build_solved_material_plan_for_export, runner.py) and consumed by
-    # export, triage, and scheduling.
+    # export and presentation projections.
     solved_plan: Optional["SolvedMaterialPlan"] = None
     # Staged backend authority slot. When populated, Stage 0–5
     # artifacts live here.
@@ -267,13 +237,6 @@ class PipelineState:
     export_maps: Dict[str, np.ndarray] = field(default_factory=dict)
     export_metadata: Dict[str, Any] = field(default_factory=dict)
     cap_quality: Dict[str, Any] = field(default_factory=dict)
-    blueprint_triage: Optional["PrintabilityReport"] = None
-
-    # Optional publisher handle attached by the runner before solving.
-    # Currently dormant: the progressive-solve snapshot emitter was removed in
-    # the Stage 3 cleanup, and the live preprocessing image-preview path threads
-    # its publisher as a direct parameter (not via this field).
-    snapshot_publisher: Optional["SnapshotPublisher"] = None
 
     # F1 preprocessing slot:
     # `source_image` is the pre-preprocess raster preserved by the runner

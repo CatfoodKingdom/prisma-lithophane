@@ -317,15 +317,21 @@ def test_export_writes_deliverables_to_output_dir_not_cache(tmp_path, monkeypatc
     monkeypatch.setattr(server, "session", seeded_session)
 
     client = TestClient(server.app)
-    resp = client.post("/api/export/files", json={
+    started = client.post("/api/export/files/start", json={
         "geometry_source": "field_derived",
         "field_scale": 4,
         "output_format": "stls",
         "validate_written_meshes": False,
     })
-    assert resp.status_code == 200, resp.text
+    assert started.status_code == 200, started.text
+    job_id = started.json()["job_id"]
+    status = client.get("/api/export/files/status")
+    assert status.status_code == 200, status.text
+    status_body = status.json()
+    assert status_body["job_id"] == job_id
+    assert status_body["status"] == "complete"
 
-    data = resp.json()
+    data = status_body["result"]
 
     # export_id must be present in the response
     assert "export_id" in data, "Response missing export_id"
@@ -343,7 +349,6 @@ def test_export_writes_deliverables_to_output_dir_not_cache(tmp_path, monkeypatc
     assert f"dir={export_id}" in manifest_url, (
         f"manifest_url {manifest_url!r} does not contain dir={export_id}"
     )
-
     # Each file URL must reference export_id
     for f in data.get("files", []):
         url = f.get("url", "")
@@ -366,3 +371,38 @@ def test_export_writes_deliverables_to_output_dir_not_cache(tmp_path, monkeypatc
     assert cache_stls == [], (
         f"Export wrote STL files into run cache: {cache_stls}"
     )
+
+
+def test_background_export_stale_fingerprint_errors_before_publication(tmp_path, monkeypatch):
+    """The supported worker rejects a stale current solve without publishing output."""
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    monkeypatch.setattr(server, "_OUTPUT_DIR", output_dir)
+    monkeypatch.setattr(server.threading, "Thread", _ImmediateThread)
+
+    seeded_session = copy.deepcopy(_SESSION_TEMPLATE)
+    seeded_session["config"].update({
+        "image_path": "photo.png",
+        "palette": ["demo-filament"],
+    })
+    seeded_session["solve"].update({
+        "status": "complete",
+        "card_id": None,
+        "thickness_maps": {"demo-filament": np.ones((2, 2), dtype=np.float32)},
+        "solve_owned_fingerprint": "stale-fingerprint",
+    })
+    monkeypatch.setattr(server, "session", seeded_session)
+
+    client = TestClient(server.app)
+    started = client.post("/api/export/files/start", json={"output_format": "stls"})
+    assert started.status_code == 200, started.text
+    job_id = started.json()["job_id"]
+
+    status = client.get("/api/export/files/status")
+    assert status.status_code == 200, status.text
+    body = status.json()
+    assert body["job_id"] == job_id
+    assert body["status"] == "error"
+    assert body["result"] is None
+    assert "Solve is stale" in body["progress"]
+    assert list(output_dir.iterdir()) == []

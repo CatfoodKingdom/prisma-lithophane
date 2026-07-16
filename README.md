@@ -94,6 +94,7 @@ Paste these commands into PowerShell, one line at a time:
 
 ```powershell
 uv sync --frozen --only-group generator-runtime --no-install-project
+New-Item -ItemType Directory -Force "$HOME\PrismaRuntime"
 .\.venv\Scripts\python.exe -m Prisma.launcher --app-root "$HOME\PrismaRuntime"
 ```
 
@@ -103,6 +104,7 @@ Paste these commands into the terminal, one line at a time:
 
 ```bash
 uv sync --frozen --only-group generator-runtime --no-install-project
+mkdir -p "$HOME/PrismaRuntime"
 .venv/bin/python -m Prisma.launcher --app-root "$HOME/PrismaRuntime"
 ```
 
@@ -110,7 +112,8 @@ Prisma normally opens its browser interface automatically. If it does not,
 open the local `http://127.0.0.1:...` address printed in the terminal. Keep the
 terminal open while using Prisma. Close it, or press **Ctrl+C**, to stop Prisma.
 
-`PrismaRuntime` is a separate data folder created inside your home folder. It
+`PrismaRuntime` is a separate data folder inside your home folder. The commands
+above create it before starting Prisma. It
 holds images, exports, settings, and installed models so that personal data
 does not get mixed into the downloaded source files.
 

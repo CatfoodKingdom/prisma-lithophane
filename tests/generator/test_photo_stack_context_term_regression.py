@@ -248,7 +248,7 @@ def test_color_only_multicolor_stack_keeps_original_context_terms() -> None:
     rgb, out = _predict_rgb(predictor, layers)
 
     # The color-only gate was reverted: OD-only composition made predictions
-    # worse; see DevelopmentSandbox/model_domain_conversion/gate_fix_rematch/REMATCH.md.
+    # worse; retain the accepted historical gate-fix decision.
     assert out["evidence_class"] == "unsupported_or_diagnostic"
     np.testing.assert_array_equal(
         rgb,

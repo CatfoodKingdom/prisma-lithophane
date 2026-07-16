@@ -1,6 +1,6 @@
 """Shared Wing C tranche — F2 palette-metadata service.
 
-Per `docs/superpowers/brainstorm/2026-04-21-image-preprocessing/wing-c/consensus.md`:
+The current palette-metadata contract requires:
 
   - § I.1 — one F2 resolution per solve. The runner calls
             `resolve_palette_metadata_for_chain` once for the enabled
@@ -16,10 +16,9 @@ Per `docs/superpowers/brainstorm/2026-04-21-image-preprocessing/wing-c/consensus
   - § R6 C.4 supersedes § I.3 — palette-change invalidation is the
             responsibility of the F1/F2-owned shared-context fingerprint
             (`PaletteMetadataRequest.fingerprint()`), NOT per-operator
-            hooks. The fingerprint participates in the snapshot publisher's
-            preview-cache key (§ B.6) and is copied onto the resolved
+            hooks. The fingerprint is copied onto the resolved
             `PaletteMetadata.request_fingerprint` so downstream callers can
-            tell two metadata snapshots apart by hash alone.
+            distinguish metadata for different requests by hash alone.
 
 This module implements the SHAPE + INVALIDATION contract. Operator
 algorithms (C1/C2 mappings) live in their own modules and consume only

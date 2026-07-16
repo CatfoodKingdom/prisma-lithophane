@@ -15,10 +15,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 # ── runner: plan-authoritative image domain ──────────────────────────────────

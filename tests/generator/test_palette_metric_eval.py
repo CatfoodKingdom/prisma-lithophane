@@ -9,7 +9,7 @@ for _p in (_GEN_DIR, _ROOT / "Prisma"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from evaluation.palette_metric_eval import (
+from tools.generator.evaluation.palette_metric_eval import (
     METRIC_KEYS,
     SMALL_SAMPLE_CAVEAT,
     evaluate_palette_metrics,

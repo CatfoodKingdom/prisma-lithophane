@@ -19,12 +19,6 @@ from pathlib import Path
 
 import numpy as np
 
-_PRISMA_DIR = Path(__file__).resolve().parent.parent
-
-DEFAULT_MODEL_DOMAIN_DISPLAY_TRANSFORM_PATH = (
-    str(_PRISMA_DIR / "data" / "camera_transform")
-)
-
 from lib.camera_transform import apply_forward, load_camera_transform  # noqa: E402
 
 

@@ -24,56 +24,7 @@ _PRISMA = Path(__file__).resolve().parents[3] / "Prisma"
 sys.path.insert(0, str(_PRISMA))
 sys.path.insert(0, str(_PRISMA / "generator"))
 
-from pipeline_cli import _downsample_image, load_image
-
-
-# ── Kernel dispatch unit tests ───────────────────────────────────────────────
-
-
-def _checkerboard(h: int = 64, w: int = 64) -> np.ndarray:
-    """Deterministic non-trivial RGB fixture — alternating color tiles."""
-    rng = np.random.default_rng(20260421)
-    return rng.integers(0, 256, size=(h, w, 3), dtype=np.uint8)
-
-
-def test_lanczos_bit_exact_regression():
-    """Non-negotiable: _downsample_image(img, 2, kernel='lanczos') is
-    bit-exact with pre-B7 PIL.LANCZOS downsample."""
-    img = _checkerboard(64, 64)
-    expected = np.array(
-        Image.fromarray(img).resize((32, 32), Image.LANCZOS), dtype=np.uint8
-    )
-    actual = _downsample_image(img, 2, kernel="lanczos")
-    np.testing.assert_array_equal(actual, expected)
-
-
-def test_lanczos_is_default_kernel():
-    """Default keyword preserves the pre-B7 call signature bit-exactly."""
-    img = _checkerboard(64, 64)
-    default = _downsample_image(img, 2)
-    explicit = _downsample_image(img, 2, kernel="lanczos")
-    np.testing.assert_array_equal(default, explicit)
-
-
-def test_area_no_overshoot_at_edges():
-    """Area-preserving downsample cannot exceed source max (no ringing)."""
-    img = np.zeros((32, 32, 3), dtype=np.uint8)
-    img[:, :16] = 10
-    img[:, 16:] = 240
-    out = _downsample_image(img, 2, kernel="area")
-    assert out.max() <= img.max()
-
-
-def test_unknown_kernel_raises():
-    img = _checkerboard(16, 16)
-    with pytest.raises(ValueError, match="Unknown resample kernel"):
-        _downsample_image(img, 2, kernel="mitchell")
-
-
-def test_scale_one_returns_input_identity():
-    img = _checkerboard(16, 16)
-    out = _downsample_image(img, 1, kernel="area")
-    np.testing.assert_array_equal(out, img)
+from image_ingress import load_image
 
 
 # ── load_image shrink-branch dispatch ────────────────────────────────────────
@@ -243,37 +194,3 @@ def test_settings_profile_default_fills_lanczos(_patched_modules):
 
     normalized = server._normalize_settings_profile_settings({})
     assert normalized["source_resample_kernel"] == "lanczos"
-
-
-def test_build_solve_config_threads_kernel():
-    """Session config → SolveConfig via _build_solve_config."""
-    from server import _DEFAULT_CONFIG, _build_solve_config
-
-    cfg = dict(_DEFAULT_CONFIG)
-    cfg["source_resample_kernel"] = "area"
-    cfg["palette"] = ["bambu-basic-cyan"]
-    sc = _build_solve_config(cfg)
-    assert sc.source_resample_kernel == "area"
-
-
-# ── End-to-end: kernel reaches the actual downsample site ────────────────────
-
-
-def test_load_image_called_with_config_kernel(monkeypatch, tmp_path):
-    """server.load_image is invoked with the session's source_resample_kernel."""
-    import server
-
-    src = _write_png(tmp_path / "src.png", (400, 600, 3))
-    captured = {}
-
-    def _fake_load_image(path, **kwargs):
-        captured["kernel"] = kwargs.get("source_resample_kernel")
-        return np.zeros((100, 100, 3), dtype=np.uint8)
-
-    monkeypatch.setattr(server, "load_image", _fake_load_image)
-    cfg = dict(server._DEFAULT_CONFIG)
-    cfg["source_resample_kernel"] = "area"
-    cfg["image_path"] = str(src)
-
-    server._load_source_image_for_export(cfg)
-    assert captured.get("kernel") == "area"

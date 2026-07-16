@@ -43,9 +43,9 @@ def test_session_config_accepts_canonical_resolution_and_egress_is_canonical_onl
     body = resp.json()
     _assert_canonical_resolution_only(body["config"])
 
-    readback = client.get("/api/session/config")
+    readback = client.get("/api/session")
     assert readback.status_code == 200, readback.text
-    _assert_canonical_resolution_only(readback.json())
+    _assert_canonical_resolution_only(readback.json()["config"])
 
 
 def test_session_config_rejects_legacy_pixel_size_alias(client):
@@ -204,7 +204,7 @@ def test_session_config_drops_retired_boundary_mutation_switches(client):
     })
 
     assert resp.status_code == 200, resp.text
-    cfg = client.get("/api/session/config").json()
+    cfg = client.get("/api/session").json()["config"]
     assert cfg["stage2_boundary_mutation_enabled"] is True
     assert "stage2_boundary_mutation_segment_mode" not in cfg
     assert "stage2_boundary_mutation_edge_run_mode" not in cfg
@@ -248,9 +248,9 @@ def test_session_config_accepts_base_shading_limit_alias(client):
     assert cfg["luminance_base_shading_limit_fraction"] == pytest.approx(0.42)
     assert cfg["luminance_handler_optical_authority_fraction"] == pytest.approx(0.42)
 
-    readback = client.get("/api/session/config")
+    readback = client.get("/api/session")
     assert readback.status_code == 200, readback.text
-    assert readback.json()["luminance_base_shading_limit_fraction"] == pytest.approx(0.42)
+    assert readback.json()["config"]["luminance_base_shading_limit_fraction"] == pytest.approx(0.42)
 
 
 def test_luminance_mode_preset_preserves_base_shading_limit_alias(client):

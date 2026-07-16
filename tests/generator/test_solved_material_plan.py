@@ -1,7 +1,7 @@
 """Tests for Prisma/generator/pipeline/solved_material_plan.py.
 
 Phase 3 commit 1 — scaffolding for the canonical solve-owned plan.
-See docs/superpowers/specs/2026-04-11-resolution-parameter-separation-phase3-solved-material-plan-contract.md
+See the current solve-owned material-plan contract.
 """
 from __future__ import annotations
 

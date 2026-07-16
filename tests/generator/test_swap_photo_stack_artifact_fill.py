@@ -28,7 +28,7 @@ from thickness_maps import MapKey, ThicknessMaps
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES_DIR = ROOT / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR
 WHITE = "bambu-tough-white"
 COLOR = "chrominal-deep-sea-blue"
 LAYER_HEIGHT = 0.1

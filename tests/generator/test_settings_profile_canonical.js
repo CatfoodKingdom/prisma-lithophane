@@ -279,7 +279,6 @@ function loadLuminanceModeFunctions() {
     extractFunction('function formatLuminanceBaseShadingLimitPercent'),
     extractFunction('function applyMandatoryProductSettings'),
     extractFunction('function applyLuminanceMode'),
-    extractFunction('function formatLuminanceMode'),
   ].join('\n\n');
   vm.runInNewContext(script, context, { filename: APP_JS });
   return context;
@@ -304,7 +303,6 @@ function loadGamutModeProfileFunctions() {
     extractFunction('function _dropRetiredSettingsProfileKeys'),
     extractFunction('function normalizeActiveGamutMode'),
     extractFunction('function _applySettingsProfileToConfig'),
-    extractFunction('function formatGamutMode'),
   ].join('\n\n');
   vm.runInNewContext(script, context, { filename: APP_JS });
   return context;
@@ -402,7 +400,6 @@ function loadModuleParamFunctions() {
     extractFunction('function getModuleParamValue'),
     extractFunction('function setModuleParamValue'),
     extractFunction('function projectModuleConfigValues'),
-    extractFunction('function moduleParamValues'),
   ].join('\n\n');
   vm.runInNewContext(script, context, { filename: APP_JS });
   return context;
@@ -672,7 +669,7 @@ test('settings profiles apply preprocessing params and detect nested modificatio
 test('preprocessing module params render from nested preprocessing settings', () => {
   const context = loadModuleParamFunctions();
   const mod = context.moduleData[0];
-  const values = context.moduleParamValues(mod);
+  const values = context.projectModuleConfigValues(mod.name, mod, context.config);
 
   assert.equal(values.feature_scale_multiplier, 1.0);
   assert.equal(values.sigma_range, 0.035);
@@ -774,8 +771,6 @@ test('luminance mode selector is profile-owned and expands to backend flags', ()
   assert.ok(SOURCE.includes('function updateLuminanceModeFields'), 'missing luminance mode visibility updater');
 
   const context = loadLuminanceModeFunctions();
-  assert.equal(context.formatLuminanceMode(), 'color');
-
   context.config.luminance_handler_optical_authority_fraction = 1.8;
   context.applyLuminanceMode('luminance_detail');
   assert.equal(context.config.luminance_mode, 'luminance_detail');
@@ -788,7 +783,6 @@ test('luminance mode selector is profile-owned and expands to backend flags', ()
     context.config.luminance_detail_authoring_printability,
     'absolute_finalgate',
   );
-  assert.equal(context.formatLuminanceMode(), 'luminance');
   assert.equal(
     context.formatLuminanceBaseShadingLimitPercent(
       context.config.luminance_base_shading_limit_fraction,
@@ -824,8 +818,6 @@ test('gamut mode select exposes only live options and keeps historical chroma la
   context._applySettingsProfileToConfig({ gamut_mode: 'hue_preserving' });
 
   assert.equal(context.config.gamut_mode, 'hue_preserving');
-  assert.equal(context.formatGamutMode(), 'preserve hue');
-  assert.equal(context.formatGamutMode('chroma'), 'reduce saturation');
 });
 
 test('legacy chroma gamut profile loads clean and would save as hue-preserving', async () => {
@@ -1087,8 +1079,8 @@ test('detail layer limit is profile-owned and seeded in initial config', () => {
     'retired detail_cap_coverage should not be profile-owned',
   );
   assert.ok(
-    profileKeys.includes('detail_cap_pitch_mm'),
-    'detail_cap_pitch_mm missing from SETTINGS_PROFILE_KEYS',
+    !profileKeys.includes('detail_cap_pitch_mm'),
+    'retired detail_cap_pitch_mm should not be profile-owned',
   );
   for (const key of [
     'detail_cap_smoothing_enabled',
@@ -1133,8 +1125,8 @@ test('detail layer limit is profile-owned and seeded in initial config', () => {
     'retired detail_cap_coverage should not be in initial frontend config',
   );
   assert.ok(
-    configKeys.includes('detail_cap_pitch_mm'),
-    'detail_cap_pitch_mm missing from initial frontend config',
+    !configKeys.includes('detail_cap_pitch_mm'),
+    'retired detail_cap_pitch_mm should not be in initial frontend config',
   );
   for (const key of [
     'detail_cap_smoothing_enabled',
@@ -1474,7 +1466,7 @@ test('user-facing quality summaries use color rmse instead of coverage percent',
   );
   assert.ok(
     SOURCE.includes('source_rms_de'),
-    'app should read the source_rms_de metric from solve/compare responses',
+    'app should read the source_rms_de metric from solve responses',
   );
   for (const removedText of [
     '% cov',
@@ -1745,10 +1737,6 @@ test('app prompt dialog supports semantic titles', () => {
   assert.ok(
     /function appPrompt\(message, defaultValue = "", \{ title = "Input", validate = null \} = \{\}\)/.test(SOURCE),
     'shared prompt helper should accept an optional title',
-  );
-  assert.ok(
-    /appPrompt\(title, nextDefault, \{ title: "Settings Profile" \}\)/.test(SOURCE),
-    'settings profile name prompts should use a semantic dialog title',
   );
 });
 

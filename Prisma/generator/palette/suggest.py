@@ -512,7 +512,7 @@ def extract_color_signature(
         wb_profile = load_profile("panchroma-matte-cotton-white")
 
     if img is None:
-        from pipeline_cli import load_image
+        from image_ingress import load_image
 
         img = load_image(
             image_path,
@@ -542,26 +542,6 @@ def extract_color_signature(
         n_clusters=n_clusters,
         domain=stats["signature_domain"],
         n_pixels=target_oklab.shape[0],
-    )
-
-
-def extract_appearance_color_signature(
-    image_path: str | Path = None,
-    n_clusters: int = 100,
-    max_dim_mm: float = 80.0,
-    image_sample_pitch_mm: float = 0.20,
-    img: Optional[np.ndarray] = None,
-    **kwargs,
-) -> ColorSignature:
-    """Deprecated compatibility alias for :func:`extract_color_signature`."""
-
-    return extract_color_signature(
-        image_path=image_path,
-        n_clusters=n_clusters,
-        max_dim_mm=max_dim_mm,
-        image_sample_pitch_mm=image_sample_pitch_mm,
-        img=img,
-        **kwargs,
     )
 
 
@@ -1081,20 +1061,6 @@ def _score_palette_metrics(
     pct = float(sig.weights[d_min > de_threshold].sum() * 100)
     p90 = _weighted_percentile(d_min, sig.weights, 90.0)
     return mean_de, max_de, pct, p90
-
-
-def _score_palette_fast(
-    palette: List[str],
-    sig: ColorSignature,
-    dist_single: Dict[str, np.ndarray],
-    dist_pair: Dict[Tuple[str, str], np.ndarray],
-    de_threshold: float = SUGGESTION_COVERAGE_DE_THRESHOLD,
-) -> Tuple[float, float, float]:
-    """Score a palette using precomputed OKLab centroid distances."""
-    mean_de, max_de, pct, _p90 = _score_palette_metrics(
-        palette, sig, dist_single, dist_pair, de_threshold
-    )
-    return mean_de, max_de, pct
 
 
 def _palette_rank_score(
@@ -1933,66 +1899,6 @@ def _build_palette_gamut(
         return np.zeros((0, 3), dtype=np.float32)
 
     return np.concatenate(parts, axis=0)
-
-
-# ── Printability metrics ────────────────────────────────────────────────────
-
-def estimate_fragmentation(thickness_maps: Dict[str, np.ndarray]) -> float:
-    """
-    Estimate spatial fragmentation / speckle severity from filament maps.
-
-    Counts edge transitions (active↔inactive) per active pixel across all
-    filament maps. Higher = more speckled / harder to print cleanly.
-    """
-    score = 0.0
-    for fid, arr in thickness_maps.items():
-        if fid.startswith("__"):
-            continue
-        active = arr > 1e-9
-        if not active.any():
-            continue
-        transitions = float(
-            np.abs(np.diff(active.astype(np.int8), axis=0)).sum()
-            + np.abs(np.diff(active.astype(np.int8), axis=1)).sum()
-        )
-        score += transitions / max(1.0, float(active.sum()))
-    return score
-
-
-def estimate_grouping_cost(
-    thickness_maps: Dict[str, np.ndarray],
-    palette: List[str],
-) -> float:
-    """
-    Estimate grouping difficulty from filament usage imbalance.
-
-    Returns the coefficient of variation of active pixel counts across
-    filaments. Higher = harder to partition into balanced AMS groups.
-    """
-    active_counts = []
-    for fid in palette:
-        if fid in thickness_maps:
-            active_counts.append(float((thickness_maps[fid] > 1e-9).sum()))
-    if not active_counts:
-        return 0.0
-    mean = np.mean(active_counts)
-    if mean < 1.0:
-        return 0.0
-    return float(np.std(active_counts) / mean)
-
-
-def estimate_swap_cost(
-    thickness_maps: Dict[str, np.ndarray],
-    palette: List[str],
-) -> float:
-    """
-    Estimate swap burden: count of filaments with any active pixels.
-    """
-    active = 0
-    for fid in palette:
-        if fid in thickness_maps and (thickness_maps[fid] > 1e-9).any():
-            active += 1
-    return float(active)
 
 
 # ── Swap-tier aware palette suggestion ───────────────────────────────────────

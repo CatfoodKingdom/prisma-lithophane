@@ -14,15 +14,18 @@ Per F4_PHASE.md § 2.6:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
 
 from facade import SolveConfig, SolveResult
 
-from evaluation import preprocessing_harness
-from evaluation.preprocessing_harness import (
+from tools.generator.evaluation import preprocessing_harness
+from tools.generator.evaluation.preprocessing_harness import (
     EvaluationInput,
     EvaluationResult,
     EvaluationRunError,
@@ -30,10 +33,54 @@ from evaluation.preprocessing_harness import (
 )
 
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
+
+
+def test_namespace_import_and_cli_help_are_runtime_independent(tmp_path: Path):
+    repo_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    for key in tuple(env):
+        if key.startswith("PRISMA_"):
+            env.pop(key)
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(repo_root), env.get("PYTHONPATH", "")) if part
+    )
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONNOUSERSITE"] = "1"
+
+    import_check = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; import tools.generator.evaluation; "
+                "assert {'data_paths', 'facade', 'server'}.isdisjoint(sys.modules)"
+            ),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert import_check.returncode == 0, import_check.stderr
+
+    help_check = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tools.generator.evaluation.preprocessing_eval_cli",
+            "--help",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert help_check.returncode == 0, help_check.stderr
+    assert "--case-id" in help_check.stdout
+    assert not any(tmp_path.iterdir())
 
 
 def _make_config(
@@ -50,7 +97,6 @@ def _make_config(
         de_threshold=0.05,
         gamut_mode="hull",
         smooth_kernel=0,
-        smooth_iters=1,
         ams_slots=4,
         white_slots=1,
         use_corrections=False,

@@ -57,7 +57,6 @@ def _base_config() -> dict:
         "max_dim_mm": 130.0,
         "frame": None,
         "smooth_kernel": 15.0,
-        "smooth_iters": 3,
         "source_resample_kernel": "lanczos",
         "border": False,
         "border_width_mm": 3.0,

@@ -65,7 +65,7 @@ if str(_PRISMA_DIR) not in sys.path:
 import data_paths  # noqa: E402
 from progress import ProgressCancelled, ProgressReporter  # noqa: E402
 
-from pipeline_cli import (  # noqa: E402
+from image_ingress import (  # noqa: E402
     load_image,
     apply_adjustments,
 )
@@ -78,9 +78,7 @@ from model import (  # noqa: E402
 from facade import (  # noqa: E402
     SolveConfig,
     SolveStats,
-    solve_preview,
     solve_full,
-    solve_compare,
 )
 from filament_order import canonical_palette_order, load_filament_order_registry  # noqa: E402
 from grouping.banded_export import (  # noqa: E402
@@ -91,6 +89,7 @@ from grouping.banded_export import (  # noqa: E402
 )
 from grouping.band_plan import band_fill_thicknesses  # noqa: E402
 from thickness_maps import MapKey  # noqa: E402
+from scalar_palette import INFERNO_V1, scalar_diagnostic_rgb  # noqa: E402
 from white_cap_contract import (  # noqa: E402
     PHYSICAL_GEOMETRY_METADATA_KEY,
     WHITE_CAP_FIELD_TARGET_METADATA_KEY,
@@ -110,7 +109,6 @@ from mesh.post_solve_export import (  # noqa: E402
     normalize_geometry_source,
     write_export_manifest,
 )
-from pipeline.blueprint_triage.report import PrintabilityError  # noqa: E402
 from pipeline.material_exposure import (  # noqa: E402
     MaterialExposureAudit,
     audit_colored_filament_exposure_from_thickness_maps,
@@ -429,7 +427,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     # ingress and are not stored in session state.
     "image_sample_pitch_mm": 0.20,
     "solver_fine_pitch_mm": 0.20,
-    "detail_cap_pitch_mm": 0.20,
     "detail_cap_enabled": True,
     "detail_cap_max_layers": 5,
     "detail_cap_smoothing_enabled": True,
@@ -463,8 +460,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "k_max": 3,
     "de_threshold": 0.01,
     "smooth_kernel": 5.0,
-    "smooth_iters": 3,
-    "allow_print_despite_hazards": False,
     "border": False,
     "border_width_mm": 3.0,
     "border_height_mm": 3.0,
@@ -508,11 +503,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "cell_mode": "felzenszwalb",
     "smooth_boundaries": False,
     "boundary_smooth_radius": 1,
-    "v2_cleanup_de_budget": 0.10,
-    "v2_enable_cliff_closure": True,
-    "v2_enable_cap_topology_cleanup": False,
-    "v2_max_cleanup_rounds": 1,
-    "v2_full_cap_quality_report": False,
 }
 
 session: Dict[str, Any] = {
@@ -536,21 +526,12 @@ session: Dict[str, Any] = {
         "image_domain_width_mm": None,   # solve-owned physical image width
         "image_domain_height_mm": None,  # solve-owned physical image height
         "solved_plan": None,             # SolvedMaterialPlan (populated by the solve path)
-        "blueprint_triage": None,
         "export_maps": None,             # product/export contract arrays
         "export_metadata": None,         # product/export contract metadata
         "solve_owned_fingerprint": None, # hash of solve-owned config at solve time
         "cancel_requested": False,
     },
     "solve_cache": {},        # card_id -> {"solve": ..., "config": ...}
-    "compare": {
-        "status": "idle",       # idle | running | complete | error | cancelled
-        "progress": {},
-        "elapsed_s": 0.0,
-        "result": None,
-        "cancel_requested": False,
-        "job_id": None,
-    },
     "suggest": {
         "status": "idle",       # idle | running | complete | error | cancelled
         "progress": {},
@@ -570,7 +551,6 @@ session: Dict[str, Any] = {
 }
 
 _solve_lock = threading.Lock()
-_compare_lock = threading.Lock()
 _suggest_lock = threading.Lock()
 _ACTIVE_MODEL_JOB_STATUSES = {"running", "cancelling"}
 _PALETTE_BACKEND_CACHE_MAX_SIZE = 2
@@ -590,8 +570,8 @@ class ConfigPayload(BaseModel):
     """All configuration knobs that the frontend can set.
 
     Resolution fields: the canonical pitch fields are image_sample_pitch_mm,
-    solver_fine_pitch_mm, detail_cap_pitch_mm, detail_cap_enabled,
-    detail_cap_max_layers, color_region_target_mm.
+    solver_fine_pitch_mm, detail_cap_enabled, detail_cap_max_layers,
+    color_region_target_mm.
     Legacy aliases such as pixel_size_mm and color_pixel_mm are rejected on
     ingress without being carried as live model fields.
     """
@@ -610,12 +590,9 @@ class ConfigPayload(BaseModel):
     k_max: int = 3
     de_threshold: float = 0.01
     smooth_kernel: float = 5.0
-    smooth_iters: int = 3
-    allow_print_despite_hazards: bool = False
     image_sample_pitch_mm: Optional[float] = None
     solver_fine_pitch_mm: Optional[float] = None
     color_region_target_mm: Optional[float] = None
-    detail_cap_pitch_mm: Optional[float] = None
     detail_cap_enabled: bool = True
     detail_cap_max_layers: Optional[int] = 5
     detail_cap_smoothing_enabled: bool = True
@@ -682,11 +659,6 @@ class ConfigPayload(BaseModel):
     cell_mode: str = "felzenszwalb"
     smooth_boundaries: bool = False
     boundary_smooth_radius: int = 1
-    v2_cleanup_de_budget: float = 0.10
-    v2_enable_cliff_closure: bool = True
-    v2_enable_cap_topology_cleanup: bool = False
-    v2_max_cleanup_rounds: int = 1
-    v2_full_cap_quality_report: bool = False
     @field_validator("source_resample_kernel", mode="before")
     @classmethod
     def _normalize_source_resample_kernel(cls, value: Any) -> str:
@@ -745,11 +717,23 @@ class ConfigPayload(BaseModel):
         return _normalize_preprocessing_params(value)
 
 
+_PHANTOM_CONFIG_FIELDS = frozenset({
+    "smooth_iters",
+    "allow_print_despite_hazards",
+    "detail_cap_pitch_mm",
+    "v2_cleanup_de_budget",
+    "v2_enable_cliff_closure",
+    "v2_enable_cap_topology_cleanup",
+    "v2_max_cleanup_rounds",
+    "v2_full_cap_quality_report",
+})
+
+
 _QUIET_DROPPED_CONFIG_EXTRAS = frozenset({
     "stage2_boundary_mutation_segment_mode",
     "stage2_boundary_mutation_edge_run_mode",
     "preview_resolution",
-})
+}) | _PHANTOM_CONFIG_FIELDS
 
 
 class PaletteValidatePayload(BaseModel):
@@ -813,24 +797,6 @@ def _white_ids(cfg: dict = None) -> list:
     return [wb] if wb == wc else [wb, wc]
 
 
-def _load_source_image_for_export(cfg: dict) -> Optional[np.ndarray]:
-    """Reload the configured source image for authored export paths."""
-    image_rel = cfg.get("image_path")
-    if not image_rel:
-        return None
-
-    image_path = _IMAGES_DIR / image_rel
-    if not image_path.exists():
-        logger.warning("Export source image not found: %s", image_path)
-        return None
-
-    try:
-        return _load_run_source_image(image_path, cfg)
-    except Exception:
-        logger.exception("Failed to reload source image for export")
-        return None
-
-
 def _load_run_source_image(image_path: Path, cfg: dict, *, max_dim_mm: Optional[float] = None) -> np.ndarray:
     """Load the framed, adjusted source raster for solve-adjacent paths."""
 
@@ -856,9 +822,79 @@ def _prepare_export_materialization(
     )
 
 
+def _drop_phantom_config_fields(cfg: Optional[dict]) -> dict:
+    """Return a deep-copied mapping without the eight quietly retired no-op fields."""
+    resolved = deepcopy(dict(cfg or {}))
+    for key in _PHANTOM_CONFIG_FIELDS:
+        resolved.pop(key, None)
+    return resolved
+
+
+def _sanitize_recipe_snapshot_phantom_fields(snapshot: Any) -> Any:
+    """Copy and sanitize only the settings-bearing recipe snapshot carriers."""
+    if not isinstance(snapshot, dict):
+        return deepcopy(snapshot)
+    sanitized = deepcopy(snapshot)
+    if isinstance(sanitized.get("config"), dict):
+        sanitized["config"] = _drop_phantom_config_fields(sanitized["config"])
+    profile_snapshot = sanitized.get("profile_snapshot")
+    if isinstance(profile_snapshot, dict) and isinstance(profile_snapshot.get("settings"), dict):
+        profile_snapshot["settings"] = _drop_phantom_config_fields(profile_snapshot["settings"])
+    return sanitized
+
+
+def _sanitize_solve_diagnostics_phantom_fields(diagnostics: Any) -> Any:
+    """Copy and sanitize only a solve diagnostic's resolved-settings carrier."""
+    if not isinstance(diagnostics, dict):
+        return deepcopy(diagnostics)
+    sanitized = deepcopy(diagnostics)
+    if isinstance(sanitized.get("resolved_settings"), dict):
+        sanitized["resolved_settings"] = _drop_phantom_config_fields(
+            sanitized["resolved_settings"]
+        )
+    return sanitized
+
+
+def _sanitize_run_metadata_phantom_fields(metadata: Any) -> dict:
+    """Copy run metadata and sanitize its exact known settings carriers only."""
+    if not isinstance(metadata, dict):
+        return {}
+    sanitized = deepcopy(metadata)
+    if isinstance(sanitized.get("config"), dict):
+        sanitized["config"] = _drop_phantom_config_fields(sanitized["config"])
+    if isinstance(sanitized.get("recipe_snapshot"), dict):
+        sanitized["recipe_snapshot"] = _sanitize_recipe_snapshot_phantom_fields(
+            sanitized["recipe_snapshot"]
+        )
+    if isinstance(sanitized.get("solve_start_diagnostics"), dict):
+        sanitized["solve_start_diagnostics"] = _sanitize_solve_diagnostics_phantom_fields(
+            sanitized["solve_start_diagnostics"]
+        )
+    return sanitized
+
+
+def _sanitize_archive_run_json_phantom_fields(run_json: Any) -> dict:
+    """Copy archive run.json and sanitize its bounded settings carriers only."""
+    if not isinstance(run_json, dict):
+        return {}
+    sanitized = deepcopy(run_json)
+    if isinstance(sanitized.get("config"), dict):
+        sanitized["config"] = _drop_phantom_config_fields(sanitized["config"])
+    if isinstance(sanitized.get("run_metadata"), dict):
+        sanitized["run_metadata"] = _sanitize_run_metadata_phantom_fields(
+            sanitized["run_metadata"]
+        )
+    result = sanitized.get("result")
+    if isinstance(result, dict) and isinstance(result.get("solve_start_diagnostics"), dict):
+        result["solve_start_diagnostics"] = _sanitize_solve_diagnostics_phantom_fields(
+            result["solve_start_diagnostics"]
+        )
+    return sanitized
+
+
 def _force_mandatory_product_settings(cfg: dict) -> dict:
     """Return cfg with non-optional product safety settings enabled."""
-    resolved = dict(cfg)
+    resolved = _drop_phantom_config_fields(cfg)
     for key in _QUIET_DROPPED_CONFIG_EXTRAS:
         resolved.pop(key, None)
     layer_height = max(float(resolved.get("layer_height", 0.08) or 0.08), 1e-9)
@@ -1053,7 +1089,6 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
         # Canonical solve-resolution fields only.
         image_sample_pitch_mm=cfg.get("image_sample_pitch_mm"),
         solver_fine_pitch_mm=cfg.get("solver_fine_pitch_mm"),
-        detail_cap_pitch_mm=cfg.get("detail_cap_pitch_mm"),
         detail_cap_enabled=True,
         detail_cap_max_layers=(
             2
@@ -1122,7 +1157,6 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
         k_max=cfg["k_max"],
         de_threshold=cfg["de_threshold"],
         smooth_kernel=cfg["smooth_kernel"],
-        smooth_iters=cfg["smooth_iters"],
         ams_slots=cfg.get("ams_slots", 4),
         white_slots=cfg.get("white_slots", 1),
         use_corrections=cfg["use_corrections"],
@@ -1185,8 +1219,6 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
             "luminance_handler_include_solver_detail",
             True,
         ),
-        allow_print_despite_hazards=cfg.get("allow_print_despite_hazards", False),
-        source_resample_kernel=cfg.get("source_resample_kernel", "lanczos"),
         preprocessing_params=deepcopy(cfg.get("preprocessing_params", {})),
         cap_mode=cfg.get("cap_mode", "appearance_bounded_smooth"),
         boundary_cap_de_budget=cfg.get("boundary_cap_de_budget", 0.008),
@@ -1194,11 +1226,6 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
         cell_mode=cfg.get("cell_mode", "felzenszwalb"),
         smooth_boundaries=cfg.get("smooth_boundaries", False),
         boundary_smooth_radius=cfg.get("boundary_smooth_radius", 1),
-        v2_cleanup_de_budget=cfg.get("v2_cleanup_de_budget", 0.10),
-        v2_enable_cliff_closure=cfg.get("v2_enable_cliff_closure", True),
-        v2_enable_cap_topology_cleanup=cfg.get("v2_enable_cap_topology_cleanup", False),
-        v2_max_cleanup_rounds=cfg.get("v2_max_cleanup_rounds", 1),
-        v2_full_cap_quality_report=cfg.get("v2_full_cap_quality_report", False),
     )
 
 
@@ -1237,19 +1264,13 @@ def _save_cap_height_map(
     zero_rgb: tuple[int, int, int] | None = None,
     zero_mask: np.ndarray | None = None,
 ) -> None:
-    """Save a viridis-colored cap height map."""
-    t = np.clip(wc_map / max_mm, 0.0, 1.0)
-    r = np.clip(( 0.267 + 2.173*t - 1.802*t**2) * 255, 0, 255).astype(np.uint8)
-    g = np.clip((-0.004 + 1.874*t - 0.870*t**2) * 255, 0, 255).astype(np.uint8)
-    b = np.clip(( 0.329 - 1.120*t + 0.791*t**2) * 255, 0, 255).astype(np.uint8)
-    rgb = np.stack([r, g, b], axis=-1)
-    if zero_rgb is not None:
-        mask = (
-            np.asarray(zero_mask, dtype=bool)
-            if zero_mask is not None
-            else np.asarray(wc_map) <= 1e-9
-        )
-        rgb[mask] = np.asarray(zero_rgb, dtype=np.uint8)
+    """Save a canonical Inferno scalar diagnostic map."""
+    rgb = scalar_diagnostic_rgb(
+        wc_map,
+        max_value=max_mm,
+        zero_rgb=zero_rgb,
+        zero_mask=zero_mask,
+    )
     Image.fromarray(rgb).save(str(path))
 
 
@@ -1751,10 +1772,8 @@ def _write_thickness_blobs(
       cap blob:       <prefix>_cap_height.bin   (or cap_height.bin if prefix is None)
       filament blob:  <prefix>_filament_<fid>.bin
 
-    Special keys in thickness_maps starting with "__" are skipped (cap is
-    written from `cap_map`, not from thickness_maps["__white_cap__"], so the
-    two sources can diverge during the compare path without affecting
-    output).
+    Special keys in thickness_maps starting with "__" are skipped; the cap is
+    written from `cap_map`, not from thickness_maps["__white_cap__"].
 
     Returns:
       {
@@ -1848,22 +1867,6 @@ def _save_masked_white_cap_height_map(
         zero_mask=padded_mask_values <= np.float32(1e-9),
     )
     return {"active_px": active_px, "max_d": round(max_d, 4)}
-
-
-def _make_gamut_overlay(source_img: np.ndarray, gamut_mask: np.ndarray) -> np.ndarray:
-    """Overlay red on out-of-gamut pixels."""
-    overlay = source_img.copy()
-    mask = np.asarray(gamut_mask) > 0
-    if mask.shape != overlay.shape[:2]:
-        raise ValueError(
-            f"gamut mask shape {mask.shape} does not match source image shape {overlay.shape[:2]}"
-        )
-    red = np.array([255, 60, 60], dtype=np.uint8)
-    overlay[mask] = (
-        (overlay[mask].astype(np.float32) * 0.4 + red.astype(np.float32) * 0.6)
-        .clip(0, 255).astype(np.uint8)
-    )
-    return overlay
 
 
 def _save_de_map_scaled(de_map: np.ndarray, path: Path, scale_max: float) -> None:
@@ -1988,7 +1991,6 @@ _SOLVE_OWNED_KEYS = (
     "image_sample_pitch_mm",
     "solver_fine_pitch_mm",
     "color_region_target_mm",
-    "detail_cap_pitch_mm",
     "detail_cap_max_layers",
     "detail_cap_smoothing_enabled",
     "detail_cap_smoothing_exact_speckle_max_px",
@@ -2034,9 +2036,6 @@ _SOLVE_OWNED_KEYS = (
     # Filament selection (white base/cap affect cap solve)
     "base_filament", "cap_filament",
     "layer_height",
-    "v2_cleanup_de_budget", "v2_enable_cliff_closure",
-    "v2_enable_cap_topology_cleanup", "v2_max_cleanup_rounds",
-    "v2_full_cap_quality_report",
     # Boundary/detail cap surface-shaping params.
     "cap_mode", "boundary_cap_de_budget",
     # (No cleanup_* raster params here: all four retired — 2.2a reassign_mode/
@@ -2048,7 +2047,7 @@ _SOLVE_OWNED_KEYS = (
     # cached solves — per consensus §R6.C.
     "source_resample_kernel",
     # Thickness smoothing kernel (applied after solver)
-    "smooth_kernel", "smooth_iters",
+    "smooth_kernel",
     # Image selection
     "image_path", "image_adjust", "max_dim_mm", "frame",
 )
@@ -2134,6 +2133,7 @@ def _write_run_json(run_dir: Path, data: dict) -> None:
     """Write run.json with canonical-only resolution fields and summary data."""
     cfg = data.get("config") or {}
     egress_cfg = _with_canonical_pitch_egress(cfg)
+    data = {**data, "config": egress_cfg}
 
     # Build resolved block directly from egress_cfg (bypasses normalize which
     # raises on divergent values — _with_canonical_pitch_egress handles that).
@@ -2146,7 +2146,6 @@ def _write_run_json(run_dir: Path, data: dict) -> None:
         resolved["phase1_coupled"] = _pitch_family_coupled(cfg)
         data = {
             **data,
-            "config": egress_cfg,
             "resolved_resolution": resolved,
         }
 
@@ -2274,19 +2273,21 @@ def _build_run_metadata(
 ) -> dict:
     """Build the durable solve metadata payload used for cache and run logs."""
     source_rms_de = getattr(stats, "source_rms_de", getattr(stats, "mean_de", None))
-    return {
+    metadata = {
         "card_id": card_id,
         "image": cfg.get("image_path", ""),
         "palette": list(cfg["palette"]),
         "profile_ref": profile_ref,
         "profile_name_at_solve": profile_name_at_solve,
         "is_profile_modified_at_solve": is_profile_modified_at_solve,
-        "recipe_snapshot": recipe_snapshot,
-        "solve_start_diagnostics": solve_start_diagnostics,
-        "config": {
+        "recipe_snapshot": _sanitize_recipe_snapshot_phantom_fields(recipe_snapshot),
+        "solve_start_diagnostics": _sanitize_solve_diagnostics_phantom_fields(
+            solve_start_diagnostics
+        ),
+        "config": _drop_phantom_config_fields({
             k: v for k, v in cfg.items()
             if not isinstance(v, (np.ndarray,))
-        },
+        }),
         "stats": {
             "mean_de": stats.mean_de,
             "source_rms_de": source_rms_de,
@@ -2308,6 +2309,7 @@ def _build_run_metadata(
             ],
         },
     }
+    return _sanitize_run_metadata_phantom_fields(metadata)
 
 
 _RUNTIME_DIAGNOSTIC_KEYS = (
@@ -2438,64 +2440,6 @@ def _run_material_exposure_audit(
         layer_height_mm=float(cfg["layer_height"]),
         excluded_material_ids=_white_ids(cfg),
     )
-
-
-# NOTE (2026-06-19) — SUSPECTED INERT in the live path (not confirmed). During a
-# solve only the NON-raising _run_material_exposure_audit runs (it records a
-# diagnostic, gates nothing); this assert-form gate that actually raises
-# PrintabilityError appears to be exercised only by
-# tests/generator/test_material_exposure_product_gate.py. Suspected, not proven —
-# an earlier audit missed references here, so re-verify the full reference graph
-# (callers, tests, config plumbing) before wiring it in, disabling, or removing it.
-def _assert_material_exposure_safe_for_product(
-    thickness_maps: dict,
-    cfg: dict,
-) -> MaterialExposureAudit:
-    audit = _run_material_exposure_audit(thickness_maps, cfg)
-    if not audit.passes:
-        summary = audit.to_summary()
-        raise PrintabilityError(
-            "White-cap solve exposes colored filament to air "
-            f"(total={summary['total_exposed_face_count']}, "
-            f"lateral={summary['lateral_internal_face_count']}, "
-            f"top={summary['top_face_count']}, "
-            f"exterior={summary['exterior_face_count']})."
-        )
-    return audit
-
-
-_PALETTE_DIR_RE = re.compile(r"^palette-(\d+)$")
-
-
-def _next_palette_index(existing_names) -> int:
-    """Return max(palette-NN) + 1 across existing_names, or 1 if none match.
-
-    Non-matching entries are ignored. Gaps are not filled; we always take
-    one above the current numeric maximum so repeated solves in a batch
-    produce stable, collision-free ordering.
-    """
-    indices = []
-    for name in existing_names:
-        m = _PALETTE_DIR_RE.match(name)
-        if m:
-            indices.append(int(m.group(1)))
-    return max(indices) + 1 if indices else 1
-
-
-def _run_dir_palette_subfolder(parent: Path) -> Path:
-    """Create the next sequential `palette-NN` subfolder under parent.
-
-    Index is scanned from existing children, so the function is self-healing
-    across crashes and manual edits. Width auto-widens past two digits so
-    a batch can exceed 99 palettes without breaking sort order within the
-    normal single-width band.
-    """
-    existing = [p.name for p in parent.iterdir() if p.is_dir()]
-    idx = _next_palette_index(existing)
-    width = max(2, len(str(idx)))
-    sub = parent / f"palette-{idx:0{width}d}"
-    sub.mkdir(parents=False, exist_ok=False)
-    return sub
 
 
 def _cfg() -> dict:
@@ -2708,12 +2652,6 @@ def _translate_resolution_schema_error(exc: Exception) -> HTTPException:
             },
         )
     raise TypeError(f"Unsupported resolution schema error: {exc!r}")
-
-
-@app.get("/api/session/config")
-def get_config() -> dict:
-    """Return current session config in canonical-only form."""
-    return _with_canonical_pitch_egress(session["config"])
 
 
 _RETIRED_CONFIG_FIELDS = frozenset({
@@ -2980,7 +2918,6 @@ _SETTINGS_PROFILE_KEYS = (
     # --- canonical resolution (Phase 2+) ---
     "image_sample_pitch_mm",
     "solver_fine_pitch_mm",
-    "detail_cap_pitch_mm",
     "detail_cap_max_layers",
     "detail_cap_smoothing_enabled",
     "detail_cap_smoothing_exact_speckle_max_px",
@@ -3557,7 +3494,7 @@ def validate_palette_endpoint(payload: PaletteValidatePayload) -> dict:
 
     `missing` = no profile on disk; `unavailable` = flagged exclude_from_model
     (a stale profile may still exist on disk, but it must not be used for a new
-    solve). The solve path itself re-validates via pipeline_cli.validate_palette.
+    solve). The solve path itself re-validates via filament_policy.validate_palette.
     """
     _require_model_library()
     from filament_policy import unavailable_for_generation
@@ -4260,443 +4197,6 @@ def cancel_suggest(job_id: str | None = None) -> dict:
         }
 
 
-# ── Gamut Preview ─────────────────────────────────────────────────────────
-
-class GamutPreviewPayload(BaseModel):
-    palette: Optional[List[str]] = None  # override session palette if provided
-
-
-@app.post("/api/gamut-preview")
-def gamut_preview(payload: GamutPreviewPayload = GamutPreviewPayload()) -> dict:
-    """
-    Quick gamut check.  Accepts an optional palette override so the frontend
-    can check non-active deck palettes without mutating the session.
-    """
-    cfg = _cfg()
-    palette = payload.palette if payload.palette else cfg["palette"]
-
-    if not cfg["image_path"]:
-        raise HTTPException(400, "No image selected")
-    if not palette:
-        raise HTTPException(400, "No palette selected")
-
-    image_path = _IMAGES_DIR / cfg["image_path"]
-    if not image_path.exists():
-        raise HTTPException(404, f"Image not found: {cfg['image_path']}")
-
-    out = _current_out_dir()
-
-    try:
-        # Load image at solve resolution
-        img = _load_run_source_image(image_path, cfg)
-
-        # Facade solve
-        sc = _build_solve_config(cfg, palette_override=palette)
-        result = solve_preview(img, sc, modules_path=_MODULES_PATH)
-        st = result.stats
-
-        # Save diagnostic images
-        _save_de_map(result.de_map, out / "de_map_preview.png")
-        gamut_overlay = _make_gamut_overlay(img, result.gamut_mask)
-        Image.fromarray(gamut_overlay).save(str(out / "gamut_overlay.png"))
-        Image.fromarray(img).save(str(out / "source_preview.png"))
-
-        pred = result.predict_image()
-        Image.fromarray(pred).save(str(out / "predicted_preview.png"))
-
-        # Cache-bust so the browser fetches the fresh preview rather than a
-        # same-named image cached from a prior gamut-preview run (files land in
-        # the shared 'current' run-cache dir).
-        _gcb = f"?t={int(time.time())}"
-        return {
-            "coverage_pct": st.coverage_pct,
-            "n_out_of_gamut": st.n_out_of_gamut,
-            "total_pixels": st.total_pixels,
-            "mean_de": st.mean_de,
-            "source_rms_de": getattr(st, "source_rms_de", st.mean_de),
-            "max_de": st.max_de,
-            "image_w": st.image_w,
-            "image_h": st.image_h,
-            "de_map_url": f"/api/run-cache/files/de_map_preview.png{_gcb}",
-            "gamut_overlay_url": f"/api/run-cache/files/gamut_overlay.png{_gcb}",
-            "source_url": f"/api/run-cache/files/source_preview.png{_gcb}",
-            "predicted_url": f"/api/run-cache/files/predicted_preview.png{_gcb}",
-        }
-
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except FileNotFoundError as exc:
-        raise HTTPException(404, str(exc))
-    except Exception as exc:
-        logger.exception("Gamut preview failed")
-        raise HTTPException(500, f"Gamut preview failed: {exc}")
-
-
-# ── Palette Comparison ────────────────────────────────────────────────────
-
-class ComparisonPayload(BaseModel):
-    palettes: List[List[str]]  # list of palette filament ID lists
-
-
-@app.post("/api/palette/compare")
-def compare_palettes(payload: ComparisonPayload) -> dict:
-    """Start a background compare job."""
-    _require_model_library()
-    cfg = _cfg()
-    if not cfg["image_path"]:
-        raise HTTPException(400, "No image selected")
-    if not payload.palettes:
-        raise HTTPException(400, "No palettes to compare")
-
-    image_path = _IMAGES_DIR / cfg["image_path"]
-    if not image_path.exists():
-        raise HTTPException(404, f"Image not found: {cfg['image_path']}")
-
-    compare = session["compare"]
-    if compare["status"] == "running":
-        raise HTTPException(409, "Compare already running")
-
-    registry = load_filament_order_registry()
-    palettes = [canonical_palette_order(p, registry) for p in payload.palettes]
-    snapshot = dict(cfg)
-
-    job_id = uuid.uuid4().hex
-
-    # Set status synchronously so _assert_no_active_job() sees "running"
-    # immediately after this handler returns (mirrors export_files_start).
-    _reserve_model_job(
-        "compare",
-        already_running="Compare already running",
-        state={
-            "status": "running",
-            "job_id": job_id,
-            "progress": {},
-            "elapsed_s": 0.0,
-            "result": None,
-            "cancel_requested": False,
-        },
-    )
-
-    def _run_compare():
-        logger.info("Compare thread started for %d palettes", len(palettes))
-        with _compare_lock:
-            compare["status"] = "running"
-            compare["progress"] = {"stage_label": "Loading image..."}
-            compare["result"] = None
-            compare["cancel_requested"] = False
-            start = time.time()
-            out = _current_out_dir()
-
-            try:
-                img = _load_run_source_image(image_path, snapshot)
-                H, W = img.shape[:2]
-                Image.fromarray(img).save(str(out / "compare_source.png"))
-
-                sc = _build_solve_config(snapshot)
-
-                def _progress(msg):
-                    if compare["cancel_requested"]:
-                        raise SolveCancelled()
-                    compare["elapsed_s"] = round(time.time() - start, 2)
-                    if isinstance(msg, dict):
-                        compare["progress"] = msg
-                    else:
-                        compare["progress"] = {"stage_label": msg}
-
-                solve_results = solve_compare(
-                    img,
-                    palettes,
-                    sc,
-                    progress=_progress,
-                    modules_path=_MODULES_PATH,
-                )
-
-                # Post-process (same as the old synchronous code)
-                results = []
-                palette_data = []
-
-                for idx, sr in enumerate(solve_results):
-                    _progress({
-                        "stage_label": f"Preparing compare outputs {idx + 1}/{len(solve_results)}",
-                        "stage_pct": round(100 * idx / max(len(solve_results), 1)),
-                    })
-                    if isinstance(sr, dict):
-                        results.append(sr)
-                        continue
-
-                    prefix = f"compare_{idx}"
-                    st = sr.stats
-                    pred = sr.predict_image()
-                    white_cap_scale_max = _white_cap_preview_scale_max(snapshot)
-                    Image.fromarray(pred).save(str(out / f"{prefix}_predicted.png"))
-                    _save_cap_height_map(
-                        sr.cap_map,
-                        out / f"{prefix}_cap.png",
-                        max_mm=white_cap_scale_max,
-                        zero_rgb=_ZERO_THICKNESS_RGB,
-                    )
-                    boundary_cap_stats = _save_white_cap_part_map(
-                        sr.boundary_cap,
-                        out / f"{prefix}_boundary_cap.png",
-                        max_mm=white_cap_scale_max,
-                    )
-                    detail_cap_stats = _save_white_cap_part_map(
-                        sr.detail_cap,
-                        out / f"{prefix}_detail_cap.png",
-                        max_mm=white_cap_scale_max,
-                    )
-                    _ceiling = _compute_color_ceiling(sr.thickness_maps, snapshot["d_wb"])
-                    _surface = _compute_total_surface(
-                        _ceiling,
-                        sr.cap_map,
-                    )
-                    _boundary_surface = None
-                    _boundary_cap_map = sr.boundary_cap
-                    if _boundary_cap_map is not None:
-                        _boundary_surface = _compute_cap_component_surface(
-                            _ceiling,
-                            _boundary_cap_map,
-                        )
-                    cap_surface_height_stats = _save_masked_white_cap_height_map(
-                        _surface,
-                        sr.cap_map,
-                        out / f"{prefix}_cap_surface_height.png",
-                        max_mm=snapshot["t_max"],
-                    )
-                    boundary_cap_surface_height_stats = _save_masked_white_cap_height_map(
-                        _boundary_surface,
-                        _boundary_cap_map,
-                        out / f"{prefix}_boundary_cap_surface_height.png",
-                        max_mm=snapshot["t_max"],
-                    )
-                    detail_cap_surface_height_stats = _save_masked_white_cap_height_map(
-                        _surface,
-                        sr.detail_cap,
-                        out / f"{prefix}_detail_cap_surface_height.png",
-                        max_mm=snapshot["t_max"],
-                    )
-                    _save_cap_height_map(_ceiling, out / f"{prefix}_color_ceiling.png",
-                                         max_mm=snapshot["t_max"])
-                    _save_cap_height_map(_surface, out / f"{prefix}_total_surface.png",
-                                         max_mm=snapshot["t_max"])
-                    _save_surface_blob(_surface, out / f"{prefix}_total_surface.bin")
-                    _save_surface_blob(_ceiling, out / f"{prefix}_color_ceiling.bin")
-                    _save_surface_blob(_ceiling, out / f"{prefix}_color_ceiling_contour.bin")
-                    _save_surface_blob(_surface, out / f"{prefix}_total_surface_contour.bin")
-                    _written_thickness = _write_thickness_blobs(
-                        out, sr.cap_map, sr.thickness_maps, prefix=prefix,
-                    )
-                    if _boundary_cap_map is not None:
-                        _save_surface_blob(
-                            _boundary_cap_map,
-                            out / f"{prefix}_boundary_cap_height.bin",
-                        )
-                    _detail_cap_map = sr.detail_cap
-                    if _detail_cap_map is not None:
-                        _save_surface_blob(
-                            _detail_cap_map,
-                            out / f"{prefix}_detail_cap_height.bin",
-                        )
-                    _explorer_plan = _save_explorer_plan_artifact(
-                        out,
-                        getattr(sr, "solved_plan", None),
-                        getattr(sr.config, "palette", ()),
-                        prefix=prefix,
-                    )
-
-                    palette_data.append({
-                        "palette": sr.config.palette, "pred": pred,
-                        "de_map": sr.de_map, "gamut_mask": sr.gamut_mask,
-                        "stats": st, "prefix": prefix,
-                        "cap_quality": dict(getattr(sr, "cap_quality", {})),
-                        "filament_ids": list(_written_thickness["filament_paths"].keys()),
-                        "white_cap_scale_max": white_cap_scale_max,
-                        "boundary_cap_stats": boundary_cap_stats,
-                        "detail_cap_stats": detail_cap_stats,
-                        "cap_surface_height_stats": cap_surface_height_stats,
-                        "boundary_cap_surface_height_stats": boundary_cap_surface_height_stats,
-                        "detail_cap_surface_height_stats": detail_cap_surface_height_stats,
-                        "explorer_plan": _explorer_plan,
-                        "explorer_base_filament_id": sr.config.white_base,
-                        "explorer_cap_filament_id": sr.config.effective_white_cap(),
-                        "explorer_base_thickness_mm": float(sr.config.d_wb),
-                    })
-
-                de_max_all = max((d["stats"].max_de for d in palette_data), default=0.35)
-                de_threshold = snapshot["de_threshold"]
-
-                for idx, d in enumerate(palette_data, start=1):
-                    _progress({
-                        "stage_label": f"Writing compare previews {idx}/{len(palette_data)}",
-                        "stage_pct": round(100 * idx / max(len(palette_data), 1)),
-                    })
-                    prefix = d["prefix"]
-                    st = d["stats"]
-                    boundary_cap_stats = d.get("boundary_cap_stats")
-                    detail_cap_stats = d.get("detail_cap_stats")
-                    white_cap_scale_max = d.get(
-                        "white_cap_scale_max",
-                        _white_cap_preview_scale_max(snapshot),
-                    )
-                    cap_surface_height_stats = d.get("cap_surface_height_stats")
-                    boundary_cap_surface_height_stats = d.get("boundary_cap_surface_height_stats")
-                    detail_cap_surface_height_stats = d.get("detail_cap_surface_height_stats")
-                    explorer_plan = d.get("explorer_plan") or {}
-                    _save_de_map_scaled(d["de_map"], out / f"{prefix}_de_perceptual.png",
-                                        scale_max=de_threshold * 3)
-                    _save_de_map_scaled(d["de_map"], out / f"{prefix}_de_maxset.png",
-                                        scale_max=de_max_all * 1.05)
-                    _save_de_raw(d["de_map"], out / f"{prefix}_de_raw.png",
-                                 de_max=de_max_all * 1.05)
-
-                    _ccb = f"?t={int(time.time())}"
-                    results.append({
-                        "palette": d["palette"],
-                        "mean_de": st.mean_de, "max_de": st.max_de,
-                        "source_rms_de": getattr(st, "source_rms_de", st.mean_de),
-                        "de_scale_max": round(de_max_all * 1.05, 4),
-                        "n_oog": st.n_out_of_gamut,
-                        "total_pixels": st.total_pixels,
-                        "coverage_pct": st.coverage_pct,
-                        "image_w": W, "image_h": H,
-                        "predicted_url": f"/api/run-cache/files/{prefix}_predicted.png{_ccb}",
-                        "de_map_perceptual_url": f"/api/run-cache/files/{prefix}_de_perceptual.png{_ccb}",
-                        "de_map_maxset_url": f"/api/run-cache/files/{prefix}_de_maxset.png{_ccb}",
-                        "de_raw_url": f"/api/run-cache/files/{prefix}_de_raw.png{_ccb}",
-                        "cap_map_url": f"/api/run-cache/files/{prefix}_cap.png{_ccb}",
-                        "boundary_cap_map_url": (
-                            f"/api/run-cache/files/{prefix}_boundary_cap.png{_ccb}"
-                            if boundary_cap_stats is not None
-                            else None
-                        ),
-                        "boundary_cap_map_active_px": (
-                            int(boundary_cap_stats["active_px"])
-                            if boundary_cap_stats is not None
-                            else 0
-                        ),
-                        "boundary_cap_map_max_d": (
-                            float(boundary_cap_stats["max_d"])
-                            if boundary_cap_stats is not None
-                            else 0.0
-                        ),
-                        "detail_cap_map_url": (
-                            f"/api/run-cache/files/{prefix}_detail_cap.png{_ccb}"
-                            if detail_cap_stats is not None
-                            else None
-                        ),
-                        "detail_cap_map_active_px": (
-                            int(detail_cap_stats["active_px"])
-                            if detail_cap_stats is not None
-                            else 0
-                        ),
-                        "detail_cap_map_max_d": (
-                            float(detail_cap_stats["max_d"])
-                            if detail_cap_stats is not None
-                            else 0.0
-                        ),
-                        "white_cap_scale_max_d": round(float(white_cap_scale_max), 4),
-                        "cap_surface_height_url": (
-                            f"/api/run-cache/files/{prefix}_cap_surface_height.png{_ccb}"
-                            if cap_surface_height_stats is not None
-                            else None
-                        ),
-                        "cap_surface_height_max_d": (
-                            float(cap_surface_height_stats["max_d"])
-                            if cap_surface_height_stats is not None
-                            else 0.0
-                        ),
-                        "boundary_cap_surface_height_url": (
-                            f"/api/run-cache/files/{prefix}_boundary_cap_surface_height.png{_ccb}"
-                            if boundary_cap_surface_height_stats is not None
-                            else None
-                        ),
-                        "boundary_cap_surface_height_max_d": (
-                            float(boundary_cap_surface_height_stats["max_d"])
-                            if boundary_cap_surface_height_stats is not None
-                            else 0.0
-                        ),
-                        "detail_cap_surface_height_url": (
-                            f"/api/run-cache/files/{prefix}_detail_cap_surface_height.png{_ccb}"
-                            if detail_cap_surface_height_stats is not None
-                            else None
-                        ),
-                        "detail_cap_surface_height_max_d": (
-                            float(detail_cap_surface_height_stats["max_d"])
-                            if detail_cap_surface_height_stats is not None
-                            else 0.0
-                        ),
-                        "color_ceiling_url": f"/api/run-cache/files/{prefix}_color_ceiling.png{_ccb}",
-                        "total_surface_url": f"/api/run-cache/files/{prefix}_total_surface.png{_ccb}",
-                        "color_ceiling_bin_url": f"/api/run-cache/files/{prefix}_color_ceiling.bin{_ccb}",
-                        "color_ceiling_contour_bin_url": f"/api/run-cache/files/{prefix}_color_ceiling_contour.bin{_ccb}",
-                        "total_surface_bin_url": f"/api/run-cache/files/{prefix}_total_surface.bin{_ccb}",
-                        "total_surface_contour_bin_url": f"/api/run-cache/files/{prefix}_total_surface_contour.bin{_ccb}",
-                        "cap_height_bin_url": f"/api/run-cache/files/{prefix}_cap_height.bin{_ccb}",
-                        "boundary_cap_height_bin_url": (
-                            f"/api/run-cache/files/{prefix}_boundary_cap_height.bin{_ccb}"
-                            if boundary_cap_stats is not None
-                            else None
-                        ),
-                        "detail_cap_height_bin_url": (
-                            f"/api/run-cache/files/{prefix}_detail_cap_height.bin{_ccb}"
-                            if detail_cap_stats is not None
-                            else None
-                        ),
-                        "filament_bin_urls": {
-                            fid: f"/api/run-cache/files/{prefix}_filament_{fid}.bin{_ccb}"
-                            for fid in d["filament_ids"]
-                        },
-                        "explorer_stack_label_bin_url": (
-                            f"/api/run-cache/files/{explorer_plan['filename']}{_ccb}"
-                            if explorer_plan
-                            else None
-                        ),
-                        "explorer_stack_table": explorer_plan.get("stack_table"),
-                        "explorer_base_filament_id": d.get("explorer_base_filament_id"),
-                        "explorer_cap_filament_id": d.get("explorer_cap_filament_id"),
-                        "explorer_base_thickness_mm": d.get("explorer_base_thickness_mm"),
-                        "cap_quality": d["cap_quality"],
-                        "source_url": f"/api/run-cache/files/compare_source.png{_ccb}",
-                    })
-
-                compare["result"] = {"results": results}
-                compare["status"] = "complete"
-                compare["progress"] = {"stage_label": "Done", "stage_pct": 100}
-                logger.info("Compare complete: %d palettes, %.1fs",
-                            len(palettes), time.time() - start)
-
-            except SolveCancelled:
-                compare["status"] = "cancelled"
-                compare["progress"] = {"stage_label": "Cancelled"}
-                logger.info("Compare cancelled by user after %.1fs", time.time() - start)
-            except Exception as exc:
-                logger.exception("Compare failed")
-                compare["status"] = "error"
-                compare["progress"] = {"stage_label": str(exc)}
-            finally:
-                compare["elapsed_s"] = round(time.time() - start, 2)
-                compare["cancel_requested"] = False
-
-    thread = threading.Thread(target=_run_compare, daemon=True)
-    thread.start()
-    return {"status": "running", "job_id": job_id}
-
-
-@app.get("/api/palette/compare/status")
-def compare_status() -> dict:
-    """Poll compare status."""
-    compare = session["compare"]
-    prog = compare["progress"]
-    return {
-        "job_id": compare.get("job_id"),
-        "status": compare["status"],
-        "progress": prog.get("stage_label", "") if isinstance(prog, dict) else str(prog),
-        "progress_detail": prog if isinstance(prog, dict) else {},
-        "elapsed_s": round(compare["elapsed_s"], 2),
-        "result": compare["result"],
-    }
-
-
 # ── Solve ─────────────────────────────────────────────────────────────────
 
 class SolveStartPayload(BaseModel):
@@ -4948,14 +4448,14 @@ def _materialize_post_solve_export_bundle_from_cached_solve(
         "schema": "post-solve-export-run-metadata-v1",
         "card_id": card_id,
         "created_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-        "config": {
+        "config": _drop_phantom_config_fields({
             **dict(cfg),
             "luminance_mode": cfg.get("luminance_mode", "standard"),
             "solver_fine_pitch_mm": cfg.get("solver_fine_pitch_mm") or cfg.get("image_sample_pitch_mm"),
             "image_sample_pitch_mm": cfg.get("image_sample_pitch_mm") or cfg.get("solver_fine_pitch_mm"),
             "layer_height": cfg.get("layer_height"),
             "d_wb": cfg.get("d_wb"),
-        },
+        }),
         "resolved_settings": {
             "luminance_mode": cfg.get("luminance_mode", "standard"),
             "solver_fine_pitch_mm": cfg.get("solver_fine_pitch_mm") or cfg.get("image_sample_pitch_mm"),
@@ -5052,7 +4552,7 @@ def _copy_export_maps_for_session(export_maps: dict | None) -> dict[str, np.ndar
 
 def _write_completed_solve_cache_entry(card_id: str, cfg: dict, solve: dict, result) -> dict:
     session["solve_cache"][card_id] = {
-        "config": json.loads(json.dumps(cfg, default=str)),
+        "config": json.loads(json.dumps(_drop_phantom_config_fields(cfg), default=str)),
         "solve": {
             "status": "complete",
             "card_id": card_id,
@@ -5063,7 +4563,6 @@ def _write_completed_solve_cache_entry(card_id: str, cfg: dict, solve: dict, res
             "image_domain_width_mm": solve.get("image_domain_width_mm"),
             "image_domain_height_mm": solve.get("image_domain_height_mm"),
             "solved_plan": solve.get("solved_plan"),
-            "blueprint_triage": solve.get("blueprint_triage"),
             "debug_maps": getattr(result, "debug_maps", {}) or {},
             "export_maps": _copy_export_maps_for_session(
                 getattr(result, "export_maps", {}) or {}
@@ -5123,7 +4622,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
         raise HTTPException(404, f"Image not found: {raw_cfg['image_path']}")
 
     # Snapshot config so the solve thread isn't affected by mid-solve changes
-    cfg = dict(raw_cfg)
+    cfg = _drop_phantom_config_fields(raw_cfg)
     _validate_solve_pitch_for_nozzle(cfg)
     cfg["palette"] = canonical_palette_order(
         palette,
@@ -5136,7 +4635,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
     _raw_recipe = dict(payload.recipe_snapshot or {})
     if "config" in _raw_recipe and isinstance(_raw_recipe["config"], dict):
         _raw_recipe = {**_raw_recipe, "config": _with_canonical_pitch_egress(_raw_recipe["config"])}
-    recipe_snapshot = _raw_recipe
+    recipe_snapshot = _sanitize_recipe_snapshot_phantom_fields(_raw_recipe)
     job_id = str(uuid.uuid4())[:8]
     solve_start_diagnostics = _build_solve_start_diagnostics(cfg)
     sc = _build_solve_config(cfg)
@@ -5209,7 +4708,6 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
             solve["image_domain_width_mm"] = None
             solve["image_domain_height_mm"] = None
             solve["solved_plan"] = None
-            solve["blueprint_triage"] = None
             solve["export_maps"] = None
             solve["export_metadata"] = None
             solve["solve_owned_fingerprint"] = None
@@ -5301,7 +4799,6 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                 solve["image_domain_width_mm"] = result.image_domain_width_mm
                 solve["image_domain_height_mm"] = result.image_domain_height_mm
                 solve["solved_plan"] = result.solved_plan
-                solve["blueprint_triage"] = getattr(result, "blueprint_triage", None)
                 solve["debug_maps"] = getattr(result, "debug_maps", {}) or {}
                 solve["export_maps"] = _copy_export_maps_for_session(
                     getattr(result, "export_maps", {}) or {}
@@ -5504,7 +5001,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     out / "detail_cap_surface_height_contour.bin",
                 )
 
-                # Static viridis PNGs (same scale as cap map but pegged to t_max)
+                # Static Inferno PNGs (same scale as cap map but pegged to t_max)
                 _save_cap_height_map(
                     color_ceiling,
                     out / "color_ceiling.png", max_mm=t_max)
@@ -5628,16 +5125,13 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                         image_domain_height_mm=result.image_domain_height_mm,
                     )
 
-                    d_norm = np.clip(d_map / max(d_map.max(), 1e-9), 0, 1)
-                    # Viridis colormap (same polynomial as cap height map)
-                    r_ch = np.clip(( 0.267 + 2.173*d_norm - 1.802*d_norm**2) * 255, 0, 255).astype(np.uint8)
-                    g_ch = np.clip((-0.004 + 1.874*d_norm - 0.870*d_norm**2) * 255, 0, 255).astype(np.uint8)
-                    b_ch = np.clip(( 0.329 - 1.120*d_norm + 0.791*d_norm**2) * 255, 0, 255).astype(np.uint8)
                     inactive = d_map <= 1e-9
-                    r_ch[inactive] = 0
-                    g_ch[inactive] = 0
-                    b_ch[inactive] = 0
-                    rgb = np.stack([r_ch, g_ch, b_ch], axis=-1)
+                    rgb = scalar_diagnostic_rgb(
+                        d_map,
+                        max_value=max(float(d_map.max()), 1e-9),
+                        zero_rgb=_ZERO_THICKNESS_RGB,
+                        zero_mask=inactive,
+                    )
                     map_name = f"{fs.filament_id}_thickness.png"
                     Image.fromarray(rgb).save(str(out / map_name))
 
@@ -5735,6 +5229,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                 # Every solve output directory should be self-describing, even when
                 # full run logging is off.
                 run_metadata["model_domain_display"] = _view_domain_provenance
+                run_metadata["diagnostic_palette_version"] = INFERNO_V1
                 _write_run_json(out, run_metadata)
 
                 # Also bust filament map URLs
@@ -5750,6 +5245,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                 )
                 solve["result"] = {
                     "card_id": card_id,
+                    "diagnostic_palette_version": INFERNO_V1,
                     "mean_de": st.mean_de,
                     "source_rms_de": getattr(st, "source_rms_de", st.mean_de),
                     "max_de": st.max_de,
@@ -6494,29 +5990,6 @@ def _perform_export_files(
         raise
 
 
-@app.post("/api/export/files")
-def export_files(payload: ExportFilesPayload) -> dict:
-    """Synchronous export endpoint retained for direct API callers/tests."""
-    _require_model_library()
-    export = session["export"]
-    _reserve_model_job(
-        "export",
-        already_running="Export already running",
-        state={
-            "status": "running",
-            "cancel_requested": False,
-            "job_id": None,
-            "result": None,
-        },
-    )
-    try:
-        return _perform_export_files(payload)
-    finally:
-        with _MODEL_RESOURCE_COORDINATION_LOCK:
-            if export.get("job_id") is None:
-                export["status"] = "idle"
-
-
 @app.post("/api/export/files/start")
 def export_files_start(payload: ExportFilesPayload) -> dict:
     """Start a print-file export in the background so the UI can poll progress."""
@@ -6856,35 +6329,6 @@ def _build_swap_instruction_payload(
     )
 
 
-@app.get("/api/export/swap-instructions")
-def get_swap_instructions(card_id: str | None = None) -> dict:
-    """Get AMS swap plan for the selected/current export target."""
-    solve, cfg, _target_card_id = _resolve_export_target(card_id)
-
-    if solve["status"] != "complete":
-        raise HTTPException(400, "No completed solve available for swap instructions")
-    if card_id is None:
-        current_fp = _solve_owned_fingerprint(cfg)
-        if solve.get("solve_owned_fingerprint") != current_fp:
-            raise HTTPException(
-                409,
-                "Solve is stale — a solve-owned setting changed since the last "
-                "solve. Re-solve before generating swap instructions.",
-            )
-
-    thickness_maps = solve["thickness_maps"]
-    if thickness_maps is None:
-        raise HTTPException(400, "No thickness maps available")
-    export_thickness_maps, ordering = _prepare_export_materialization(cfg, thickness_maps)
-
-    return _build_swap_instruction_payload(
-        solve=solve,
-        cfg=cfg,
-        export_thickness_maps=export_thickness_maps,
-        ordering=ordering,
-    )
-
-
 @app.get("/api/export/files-zip")
 def download_export_files_zip(dir: str | None = None):
     """Return a ZIP of the generated export files and manifest."""
@@ -6935,9 +6379,8 @@ def _serve_file_response(path: Path):
 def serve_export_file(filename: str, dir: str | None = None):
     """Serve an exported file (STL, PNG, etc.) from the output directory.
 
-    Uses `:path` converter so subdirectory paths like
-    `progressive/preprocess/<op>.png` reach this handler; `_safe_path` still rejects
-    traversal attempts via `is_relative_to()`.
+    Uses the `:path` converter so nested export paths reach this handler;
+    `_safe_path` still rejects traversal attempts via `is_relative_to()`.
     """
     out_dir = _export_out_dir(dir) if dir else _OUTPUT_DIR
     path = _safe_path(out_dir, filename)
@@ -6960,7 +6403,7 @@ def open_export_folder(payload: ExportFolderPayload) -> dict:
 
 @app.get("/api/run-cache/files/{filename:path}")
 def serve_run_cache_file(filename: str, run: str | None = None):
-    """Serve a solve diagnostic / progressive / preview file from the run cache."""
+    """Serve a solve diagnostic or cached preview file from the run cache."""
     out_dir = _run_cache_dir(run)
     path = _safe_path(out_dir, filename)
     if not path.exists():
@@ -6977,7 +6420,7 @@ def _assert_no_active_job(*, action: str = "clear cache") -> None:
     with _MODEL_RESOURCE_COORDINATION_LOCK:
         if action != "manage model libraries" and _MODEL_LIBRARY_OPERATION_LOCK.locked():
             raise HTTPException(409, "Cannot clear cache while a model-library operation is running")
-        for key in ("solve", "export", "compare", "suggest"):
+        for key in ("solve", "export", "suggest"):
             if session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES:
                 raise HTTPException(409, f"Cannot {action} while a {key} job is running")
 
@@ -7132,23 +6575,6 @@ def restart_prisma() -> dict:
     return {"restarting": True}
 
 
-@app.post("/api/cache/clear-runs")
-def clear_cache_runs() -> dict:
-    """Clear cached solve runs + auto-run archives + in-RAM solve cache.
-
-    Auto-run archives (cache/auto_runs/) are cache artifacts and are swept here.
-    Keeps LUTs, output, and the user-curated saved_runs/.
-    """
-    from cache_admin import safe_clear_dir
-    _assert_no_active_job()
-    removed = sum(
-        safe_clear_dir(d, root=data_paths.CACHE_DIR)
-        for d in (data_paths.RUN_CACHE_DIR, data_paths.AUTO_RUNS_DIR)
-    )
-    session.get("solve_cache", {}).clear()
-    return {"cleared": "runs", "removed": removed}
-
-
 @app.post("/api/cache/clear-all")
 def clear_cache_all() -> dict:
     """Clear ALL clearable cache (files + solve and palette in-RAM caches).
@@ -7194,6 +6620,7 @@ def _cached_solve_or_409(card_id: str) -> tuple[dict, dict]:
 
 
 def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, saved_at: str):
+    cfg = _drop_phantom_config_fields(cfg)
     image_name = Path(str(cfg.get("image_path", ""))).name or "image"
     image_path = _IMAGES_DIR / image_name
     if not image_path.exists():
@@ -7215,13 +6642,29 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
     if run_dir.is_dir():
         for p in run_dir.rglob("*"):
             if p.is_file():
-                run_cache_files[p.relative_to(run_dir).as_posix()] = p.read_bytes()
+                rel = p.relative_to(run_dir).as_posix()
+                payload = p.read_bytes()
+                if rel == "run.json":
+                    try:
+                        decoded = json.loads(payload.decode("utf-8"))
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        pass
+                    else:
+                        if isinstance(decoded, dict):
+                            sanitized = _sanitize_run_metadata_phantom_fields(decoded)
+                            if sanitized != decoded:
+                                payload = json.dumps(
+                                    sanitized,
+                                    indent=2,
+                                    default=str,
+                                ).encode("utf-8")
+                run_cache_files[rel] = payload
         metadata_path = run_dir / "run.json"
         if metadata_path.is_file():
             try:
                 parsed_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 if isinstance(parsed_metadata, dict):
-                    cached_run_metadata = parsed_metadata
+                    cached_run_metadata = _sanitize_run_metadata_phantom_fields(parsed_metadata)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 logger.warning("Could not read run metadata for archive card %s", card_id)
     run_json = {
@@ -7243,6 +6686,7 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
     # added remain valid and continue through the diagnostics/config fallback.
     if cached_run_metadata is not None:
         run_json["run_metadata"] = _json_safe_runtime_diagnostic(cached_run_metadata)
+    run_json = _sanitize_archive_run_json_phantom_fields(run_json)
     solve_state = {"solve_owned_fingerprint": solve.get("solve_owned_fingerprint")}
     return run_json, thickness_arrays, image_bytes, image_name, solve_state, run_cache_files
 
@@ -7521,7 +6965,7 @@ def _reject_retired_loaded_archive_artifacts(parsed) -> None:
 
 
 def _validate_loaded_archive_config(cfg: dict) -> dict:
-    incoming = dict(cfg or {})
+    incoming = _drop_phantom_config_fields(cfg)
     if incoming.get("detail_cap_enabled") is False:
         raise HTTPException(
             422,
@@ -7550,7 +6994,7 @@ def _optional_loaded_run_metadata(parsed) -> dict:
     """
     raw = (getattr(parsed, "run_json", {}) or {}).get("run_metadata")
     if isinstance(raw, dict):
-        return deepcopy(raw)
+        return _sanitize_run_metadata_phantom_fields(raw)
     cached = (getattr(parsed, "run_cache_files", {}) or {}).get("run.json")
     if not cached:
         return {}
@@ -7558,13 +7002,13 @@ def _optional_loaded_run_metadata(parsed) -> dict:
         decoded = json.loads(cached.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {}
-    return deepcopy(decoded) if isinstance(decoded, dict) else {}
+    return _sanitize_run_metadata_phantom_fields(decoded)
 
 
 def _rehydrate_loaded_archive(parsed) -> dict:
     """Build a completed-solve payload + populate solve_cache from a ParsedArchive."""
     card_id = _fresh_loaded_card_id()
-    rj = parsed.run_json
+    rj = _sanitize_archive_run_json_phantom_fields(parsed.run_json)
     cfg = _validate_loaded_archive_config(rj.get("config") or {})
     _reject_retired_loaded_archive_artifacts(parsed)
     run_metadata = _optional_loaded_run_metadata(parsed)
@@ -7606,7 +7050,7 @@ def _rehydrate_loaded_archive(parsed) -> dict:
             "export_maps": export_maps,
             "export_metadata": deepcopy(rj.get("export_metadata") or {}),
             "color_profiles": None, "wb_profile": None, "wc_profile": None,
-            "grouping": None, "solved_plan": None, "blueprint_triage": None,
+            "grouping": None, "solved_plan": None,
             "image_domain_width_mm": rj.get("image_domain_width_mm"),
             "image_domain_height_mm": rj.get("image_domain_height_mm"),
             "material_exposure_audit": None,
@@ -7659,15 +7103,16 @@ def load_run_settings(payload: LoadRunSettingsPayload) -> dict:
     except run_archive.ArchiveError as exc:
         raise HTTPException(400, f"Invalid run archive: {exc}") from exc
 
-    config = _validate_loaded_archive_config(parsed.run_json.get("config") or {})
+    run_json = _sanitize_archive_run_json_phantom_fields(parsed.run_json)
+    config = _validate_loaded_archive_config(run_json.get("config") or {})
     _reject_retired_loaded_archive_artifacts(parsed)
-    result = parsed.run_json.get("result") or {}
+    result = run_json.get("result") or {}
     diagnostics = result.get("solve_start_diagnostics") if isinstance(result, dict) else None
     metadata = _optional_loaded_run_metadata(parsed)
     return {
         "config": config,
-        "palette": parsed.run_json.get("palette") or [],
-        "label": parsed.run_json.get("label"),
+        "palette": run_json.get("palette") or [],
+        "label": run_json.get("label"),
         "run_metadata": metadata,
         "result": {"solve_start_diagnostics": diagnostics} if isinstance(diagnostics, dict) else {},
     }

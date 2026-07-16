@@ -78,33 +78,6 @@ def compose_stack(layers: List[Tuple[dict, float]]) -> np.ndarray:
     return np.array(compose(layers))
 
 
-def predict_pixel(
-    color_profiles: Dict[str, dict],
-    thicknesses: Dict[str, float],
-    wb_profile: dict,
-    d_wb: float,
-    wc_profile: dict,
-    d_wc: float,
-) -> np.ndarray:
-    """
-    Predict linear-RGB transmission for one pixel given:
-      color_profiles : filament_id → loaded profile
-      thicknesses     : filament_id → thickness in mm (0.0 = absent)
-      wb_profile      : white base profile
-      d_wb            : white base thickness in mm
-      wc_profile      : white cap profile
-      d_wc            : white cap thickness in mm
-
-    Returns np.array([T_r, T_g, T_b]) in [0, 1] linear.
-    """
-    layers = [(wb_profile, d_wb)]
-    for fid, d in thicknesses.items():
-        if d > 0:
-            layers.append((color_profiles[fid], d))
-    layers.append((wc_profile, d_wc))
-    return compose_stack(layers)
-
-
 # ── Image → target map ────────────────────────────────────────────────────────
 
 def srgb_to_linear(img_srgb: np.ndarray) -> np.ndarray:

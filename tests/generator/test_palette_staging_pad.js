@@ -330,7 +330,7 @@ test('rail deck hover preview opens from card body but not action buttons', () =
 
   const hoverBehaviorSource = APP_JS.slice(
     APP_JS.indexOf('function scheduleRailDeckHoverPreview('),
-    APP_JS.indexOf('function buildDeckSupportSummaryHtml'),
+    APP_JS.indexOf('function buildDeckSupportChipsHtml'),
   );
   assert.ok(
     hoverBehaviorSource.includes('.rail-deck-card-actions button'),

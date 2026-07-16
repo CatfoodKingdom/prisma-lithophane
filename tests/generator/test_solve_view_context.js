@@ -53,18 +53,13 @@ test('S4c: arrow-key lightbox navigation includes the source card', () => {
   );
 });
 
-test('S4c: Thickness Maps legend reflects the selected solveThicknessMapKind', () => {
+test('Thickness Maps legend describes the fixed cap triad', () => {
   assert.ok(
     APP_JS.includes('Per-filament thickness maps (each self-normalized'),
     'updateSolveLegend must render a Thickness Maps legend',
   );
-  // The kind label is derived from solveThicknessMapKind inside the thickness legend branch.
-  const idx = APP_JS.indexOf('Per-filament thickness maps');
-  const branch = APP_JS.slice(Math.max(0, idx - 400), idx);
-  assert.ok(
-    branch.includes('solveThicknessMapKind'),
-    'the Thickness Maps legend must be keyed on solveThicknessMapKind',
-  );
+  assert.ok(APP_JS.includes('White cap: Total, Boundary, and Detail'));
+  assert.ok(!APP_JS.includes('solveThicknessMapKind'));
 });
 
 test('S4c: async render callbacks bail when the displayed view changed', () => {
@@ -78,15 +73,38 @@ test('S4c: async render callbacks bail when the displayed view changed', () => {
   );
 });
 
-test('S4c: thickness lightbox Up/Down preserves the current map index (nit-2)', () => {
+test('thickness lightbox Up/Down preserves the semantic map key', () => {
   assert.ok(
-    APP_JS.includes('openThicknessLightboxForPosition(selectedRuns[runIndex + 1].id, _solveLightboxState.mapIndex)'),
-    'ArrowDown must keep the current map index on the adjacent run',
+    APP_JS.includes('item.key === _solveLightboxState.mapKey'),
+    'adjacent-run lookup must require the same map key',
   );
   assert.ok(
-    APP_JS.includes('openThicknessLightboxForPosition(selectedRuns[runIndex - 1].id, _solveLightboxState.mapIndex)'),
-    'ArrowUp must keep the current map index on the adjacent run',
+    APP_JS.includes('openThicknessLightboxForKey(nextRun.id, _solveLightboxState.mapKey)'),
+    'Up/Down must open by stable semantic key',
   );
+  assert.ok(!APP_JS.includes('openThicknessLightboxForPosition'));
+});
+
+test('Thickness, Highpass, and Explorer use resolved standard headers', () => {
+  const thicknessStart = APP_JS.indexOf('function openThicknessLightboxForKey');
+  const thicknessBody = APP_JS.slice(thicknessStart, APP_JS.indexOf('function solveRunById', thicknessStart));
+  assert.match(thicknessBody, /buildSolveLightboxHeader\(run, item\.viewLabel, zoomControls\)/);
+  assert.match(thicknessBody, /setupStaticLightboxZoom\(content, lifecycle\)/);
+
+  const surfaceStart = APP_JS.indexOf('async function openSurfaceLightbox');
+  const surfaceBody = APP_JS.slice(surfaceStart, APP_JS.indexOf('// ── Recipe viewer lightbox', surfaceStart));
+  assert.match(surfaceBody, /buildSolveLightboxHeader\(run, getSolveLightboxViewLabel\(viewType\)\)/);
+  assert.match(surfaceBody, /header\?\.getBoundingClientRect\(\)\.height/);
+  assert.match(surfaceBody, /controls\?\.getBoundingClientRect\(\)\.height/);
+  assert.ok(!surfaceBody.includes('controlBudget'));
+  assert.ok(!surfaceBody.includes('buildStaticLightboxZoomControls'));
+});
+
+test('Explorer contextual caption resolves the live center-height helper', () => {
+  const captionStart = APP_JS.indexOf('function getSolveViewCaption');
+  const captionBody = APP_JS.slice(captionStart, APP_JS.indexOf('function updateSolveViewCaption', captionStart));
+  assert.match(captionBody, /view === "surface_explorer"[\s\S]*?getSolveExplorerCenter\(\)/);
+  assert.ok(!captionBody.includes('getSolveExplorerHeight'));
 });
 
 test('Thickness Maps show emitted filament volume before max thickness', () => {
@@ -111,7 +129,7 @@ test('Thickness Maps show volume for every white-cap map variant', () => {
   }
   assert.match(
     APP_JS,
-    /formatThicknessMapVolume\(item\.volumeMm3\)[\s\S]*?`max \$\{item\.maxD\.toFixed\(2\)\} mm`[\s\S]*?`\$\{item\.activePx\.toLocaleString\(\)\} px`/,
+    /item\.available \? \[[\s\S]*?formatThicknessMapVolume\(item\.volumeMm3\)[\s\S]*?`max \$\{item\.maxD\.toFixed\(2\)\} mm`[\s\S]*?`\$\{item\.activePx\.toLocaleString\(\)\} px`/,
     'white-cap cards should render emitted volume alongside their map statistics',
   );
 });

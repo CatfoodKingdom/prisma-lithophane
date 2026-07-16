@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -298,15 +298,6 @@ class VisibleRecipeRawGeometryPlan:
             return self.fine_recipe_label_map
         return self.zone_recipe_labels[self.zone_label_map]
 
-    @property
-    def stage2_fine_override_final_printability_rejection_map(
-        self,
-    ) -> np.ndarray | None:
-        """Backward-compatible alias for the Stage 2 substrate absorption map."""
-
-        return self.stage2_final_substrate_repair_map
-
-
 @dataclass
 class FillerGeometryPlan:
     """Stage 3 geometry-only filler output."""
@@ -461,19 +452,6 @@ class CapSynthesisPlan:
     stage2_geometry_pressure_attribution: Stage2GeometryPressureAttribution | None = None
     blueprint_printability_diagnostic: "BlueprintPrintabilityDiagnostic | None" = None
 
-    @property
-    def boundary_cap_printability_rejection_map(self) -> np.ndarray | None:
-        """Backward-compatible alias for the boundary-cap repair reason map."""
-
-        return self.boundary_cap_printability_repair_map
-
-    @property
-    def detail_printability_rejection_map(self) -> np.ndarray | None:
-        """Backward-compatible alias for optional-detail suppression reasons."""
-
-        return self.detail_printability_suppression_map
-
-
 @dataclass(frozen=True)
 class BlueprintPrintabilityComponentFacts:
     """One connected plan-level printability finding in physical units."""
@@ -590,12 +568,3 @@ class StagedBackendResult:
     filler_plan: FillerGeometryPlan
     cap_plan: CapSynthesisPlan
     compatibility_bundle: CompatibilityBundle
-
-
-def iter_zone_masks(zone_label_map: np.ndarray) -> Iterable[tuple[int, np.ndarray]]:
-    """Yield dense zone id -> boolean mask pairs."""
-    if zone_label_map.size == 0:
-        return
-    zone_count = int(np.max(zone_label_map)) + 1
-    for zone_id in range(zone_count):
-        yield zone_id, zone_label_map == zone_id

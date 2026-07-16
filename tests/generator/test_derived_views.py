@@ -10,14 +10,10 @@ into the plan.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pipeline.solved_material_plan import SolvedMaterialPlan, StackDefinition
 from pipeline.derived_views import (
     committed_stack_label_map,
-    per_filament_thickness_maps,
-    cap_height_map_view,
-    compatibility_thickness_maps,
 )
 
 
@@ -105,118 +101,10 @@ def test_committed_stack_label_map_is_fresh_array_not_plan_internal():
     assert plan.segment_id_map[0, 0] == 0
 
 
-# ── per_filament_thickness_maps ─────────────────────────────────────────────
-
-
-def test_per_filament_thickness_maps_covers_all_filaments_by_default():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan)
-    assert set(maps.keys()) == {"cyan", "magenta"}
-
-
-def test_per_filament_thickness_maps_values_match_stack_content():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan)
-
-    # Stack 0 = {cyan: 0.16}; stack 1 = {cyan: 0.08, magenta: 0.32}
-    expected_cyan = np.array(
-        [
-            [0.16, 0.16, 0.08],
-            [0.16, 0.08, 0.08],
-        ],
-        dtype=np.float32,
-    )
-    expected_magenta = np.array(
-        [
-            [0.00, 0.00, 0.32],
-            [0.00, 0.32, 0.32],
-        ],
-        dtype=np.float32,
-    )
-    np.testing.assert_allclose(maps["cyan"], expected_cyan)
-    np.testing.assert_allclose(maps["magenta"], expected_magenta)
-
-
-def test_per_filament_thickness_maps_returns_float32_arrays():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan)
-    for arr in maps.values():
-        assert arr.dtype == np.float32
-        assert arr.shape == plan.segment_id_map.shape
-
-
-def test_per_filament_thickness_maps_filament_ids_filter_restricts_output():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan, filament_ids=["cyan"])
-    assert set(maps.keys()) == {"cyan"}
-
-
-def test_per_filament_thickness_maps_zeros_for_filament_absent_from_all_stacks():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan, filament_ids=["yellow"])
-    assert "yellow" in maps
-    np.testing.assert_array_equal(
-        maps["yellow"], np.zeros(plan.segment_id_map.shape, dtype=np.float32)
-    )
-
-
-def test_per_filament_thickness_maps_one_way_ownership():
-    plan = _two_stack_plan()
-    maps = per_filament_thickness_maps(plan)
-    maps["cyan"][0, 0] = 99.0
-    # Re-deriving yields the original stack-0 cyan value, not the mutation.
-    maps2 = per_filament_thickness_maps(plan)
-    assert maps2["cyan"][0, 0] == pytest.approx(0.16)
-
-
-def test_per_filament_thickness_maps_reflects_assignment_changes():
-    plan = _two_stack_plan()
-    plan.segment_stack_id[0] = 1  # flip segment 0 onto stack 1
-    maps = per_filament_thickness_maps(plan)
-    # All pixels now resolve to stack 1 = {cyan: 0.08, magenta: 0.32}.
-    np.testing.assert_allclose(
-        maps["cyan"],
-        np.full(plan.segment_id_map.shape, 0.08, dtype=np.float32),
-    )
-    np.testing.assert_allclose(
-        maps["magenta"],
-        np.full(plan.segment_id_map.shape, 0.32, dtype=np.float32),
-    )
-
-
-# ── cap_height_map_view ─────────────────────────────────────────────────────
-
-
-def test_cap_height_map_view_matches_plan_cap():
-    plan = _two_stack_plan()
-    view = cap_height_map_view(plan)
-    np.testing.assert_array_equal(view, plan.cap_height_map)
-
-
-def test_cap_height_map_view_is_writable_copy():
-    """Compat view must be safe for consumers to mutate without leaking."""
-    plan = _two_stack_plan()
-    view = cap_height_map_view(plan)
-    assert view.flags.writeable is True
-    view[0, 0] = 9.9
-    assert plan.cap_height_map[0, 0] != 9.9
-
-
-def test_compatibility_thickness_maps_bundle_color_and_white_cap_views():
-    plan = _two_stack_plan()
-    maps = compatibility_thickness_maps(plan)
-    assert set(maps.keys()) == {"cyan", "magenta", "__white_cap__"}
-    np.testing.assert_array_equal(maps["__white_cap__"], plan.cap_height_map)
-    maps["__white_cap__"][0, 0] = 9.9
-    assert plan.cap_height_map[0, 0] != 9.9
-
-
 # ── one-way ownership: plan stays authoritative ─────────────────────────────
 
 
 def test_segment_id_map_remains_read_only_after_any_derivation():
     plan = _two_stack_plan()
     _ = committed_stack_label_map(plan)
-    _ = per_filament_thickness_maps(plan)
-    _ = cap_height_map_view(plan)
     assert plan.segment_id_map.flags.writeable is False

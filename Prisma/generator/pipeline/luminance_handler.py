@@ -54,20 +54,6 @@ def clear_luminance_handler_runtime(cfg: Any) -> None:
     setattr(cfg, _RUNTIME_BOUNDARY_AUTHORITY_ATTR, None)
 
 
-def runtime_luminance_boundary_authority_mm(cfg: Any) -> float | None:
-    """Return the image-derived boundary authority, if one has been computed."""
-    value = getattr(cfg, _RUNTIME_BOUNDARY_AUTHORITY_ATTR, None)
-    if value is None:
-        return None
-    try:
-        value_f = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not np.isfinite(value_f):
-        return None
-    return value_f
-
-
 def _quantized_cap_floor(d_wc_min: float, layer_height: float) -> float:
     min_steps = int(np.ceil(float(d_wc_min) / float(layer_height) - 1e-9))
     floor_mm = float(min_steps) * float(layer_height)
@@ -709,5 +695,4 @@ __all__ = [
     "clear_luminance_handler_runtime",
     "configure_luminance_handler_runtime",
     "luminance_handler_enabled",
-    "runtime_luminance_boundary_authority_mm",
 ]

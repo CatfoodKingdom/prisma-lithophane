@@ -12,7 +12,8 @@ model (``predict_transmission(profile, 0.0) == [1, 1, 1]``), so dropping the cap
 is a strict subset of the existing composition, not new physics.
 
 These tests pin the seam on the spline backend (``appearance_provider=None``)
-with real measured profiles, so they exercise the genuine composition path:
+with deterministic spline profiles, so they exercise the genuine composition
+path without depending on private measured data:
 
 * the color-only render differs from the full render wherever a non-zero cap
   sits (cap omission is observable),
@@ -24,23 +25,38 @@ with real measured profiles, so they exercise the genuine composition path:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from facade import SolveConfig, SolveResult, SolveStats
-from model import load_profile, predict_transmission
+from model import predict_transmission
 from thickness_maps import MapKey, ThicknessMaps
 
 _BASE_ID = "bambu-matte-white"
 _COLOR_ID = "bambu-basic-bamboogreen"
 
 
+def _spline_profile(filament_id: str, coefficients: tuple[float, float, float]) -> dict:
+    knots = np.arange(26, dtype=np.float64) * 0.08
+    floor = 0.02
+    curves = [
+        floor + (1.0 - floor) * np.exp(-coefficient * knots)
+        for coefficient in coefficients
+    ]
+    return {
+        "filament_id": filament_id,
+        "model": "spline",
+        "schema_version": 1,
+        "knots_mm": knots.tolist(),
+        "T_r": curves[0].tolist(),
+        "T_g": curves[1].tolist(),
+        "T_b": curves[2].tolist(),
+    }
+
+
 def _load_profiles():
-    try:
-        base = load_profile(_BASE_ID)
-        color = load_profile(_COLOR_ID)
-    except FileNotFoundError as exc:  # pragma: no cover - environment guard
-        pytest.skip(f"required spline profile missing: {exc}")
-    return base, color
+    return (
+        _spline_profile(_BASE_ID, (0.8, 0.8, 0.8)),
+        _spline_profile(_COLOR_ID, (0.7, 0.5, 1.0)),
+    )
 
 
 def _make_spline_result(*, cap_value: float) -> SolveResult:

@@ -9,7 +9,7 @@ import model
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_LUT_PATH = _ROOT / "DevelopmentSandbox" / "model_domain_conversion" / "inverse_lut_33.npz"
+_LUT_PATH = _ROOT / "tests" / "fixtures" / "model_domain_conversion" / "inverse_lut_33.npz"
 
 # Oracle values derived ONCE via scipy.interpolate.RegularGridInterpolator
 # on inverse_lut_33.npz (grid = np.linspace(0, 1, 33) per axis, values = the (33,33,33,3) array,
@@ -70,7 +70,7 @@ def test_model_domain_ingress_on_matches_inverse_lut_trilinear_samples(monkeypat
         {},
         0.2,
         model_domain_ingress=True,
-        model_domain_ingress_lut_path="DevelopmentSandbox/model_domain_conversion/inverse_lut_33.npz",
+        model_domain_ingress_lut_path="tests/fixtures/model_domain_conversion/inverse_lut_33.npz",
     )
     np.testing.assert_allclose(relative_actual, expected, rtol=0.0, atol=1e-6)
 

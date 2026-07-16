@@ -52,7 +52,6 @@ def _base_config() -> dict:
         "max_dim_mm": 130.0,
         "frame": None,
         "smooth_kernel": 15.0,
-        "smooth_iters": 3,
         "border": False,
         "border_width_mm": 3.0,
     }

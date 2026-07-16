@@ -566,7 +566,7 @@ def test_stale_auto_id_after_clear_returns_404(tmp_path, monkeypatch):
         {"save_id": "auto-1", "label": "Auto", "saved_at": "20260616-101500", "source_image_name": "steve.jpg", "tier": "auto"},
     )
 
-    assert client.post("/api/cache/clear-runs").status_code == 200
+    assert client.post("/api/cache/clear-all").status_code == 200
     assert client.post("/api/runs/load", json={"save_id": "auto-1", "tier": "auto"}).status_code == 404
     assert client.get("/api/runs/auto/auto-1/download").status_code == 404
     assert client.post("/api/runs/auto/auto-1/promote").status_code == 404

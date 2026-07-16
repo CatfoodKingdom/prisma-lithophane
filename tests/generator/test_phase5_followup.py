@@ -88,7 +88,7 @@ def test_compute_stats_prefers_diagnostics_over_thickness_maps():
 
 
 def test_compute_stats_falls_back_when_diagnostics_absent():
-    """Legacy/direct-state fallback: when diagnostics is empty (CLI-style or
+    """Legacy/direct-state fallback: when diagnostics is empty (older or
     hand-built states), _compute_stats reads DE/GAMUT from thickness_maps.
     Task 5.4 keeps this fallback for non-webapp callers; production staged
     finalization always populates diagnostics (see test above)."""

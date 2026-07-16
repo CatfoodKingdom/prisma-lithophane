@@ -8,96 +8,9 @@ from pathlib import Path
 from scipy.spatial import KDTree
 
 from palette.suggest import (
-    estimate_fragmentation,
-    estimate_grouping_cost,
-    estimate_swap_cost,
     _weighted_mean_de,
     _palette_rank_score,
 )
-
-
-# ── Fragmentation ────────────────────────────────────────────────────────────
-
-def test_fragmentation_solid_block_low():
-    """A solid block has minimal edge transitions — low fragmentation."""
-    maps = {"cyan": np.ones((10, 10), dtype=np.float32) * 0.5}
-    score = estimate_fragmentation(maps)
-    assert score < 0.5, f"Solid block should have low fragmentation, got {score}"
-
-
-def test_fragmentation_checkerboard_high():
-    """A checkerboard has maximal transitions — high fragmentation."""
-    board = np.zeros((10, 10), dtype=np.float32)
-    board[::2, ::2] = 0.5
-    board[1::2, 1::2] = 0.5
-    maps = {"cyan": board}
-    score = estimate_fragmentation(maps)
-    assert score > 1.0, f"Checkerboard should have high fragmentation, got {score}"
-
-
-def test_fragmentation_ignores_dunder_keys():
-    """Keys starting with __ (like __white_cap__) are skipped."""
-    maps = {
-        "__white_cap__": np.ones((10, 10), dtype=np.float32),
-        "__de__": np.ones((10, 10), dtype=np.float32),
-        "cyan": np.ones((10, 10), dtype=np.float32) * 0.3,
-    }
-    maps_no_dunder = {"cyan": np.ones((10, 10), dtype=np.float32) * 0.3}
-    assert estimate_fragmentation(maps) == estimate_fragmentation(maps_no_dunder)
-
-
-def test_fragmentation_empty_map_zero():
-    """All-zero maps should return 0."""
-    maps = {"cyan": np.zeros((10, 10), dtype=np.float32)}
-    assert estimate_fragmentation(maps) == 0.0
-
-
-# ── Grouping cost ────────────────────────────────────────────────────────────
-
-def test_grouping_cost_balanced_low():
-    """Filaments with equal active area have low grouping cost."""
-    maps = {
-        "cyan": np.ones((10, 10), dtype=np.float32) * 0.3,
-        "yellow": np.ones((10, 10), dtype=np.float32) * 0.3,
-        "magenta": np.ones((10, 10), dtype=np.float32) * 0.3,
-    }
-    score = estimate_grouping_cost(maps, ["cyan", "yellow", "magenta"])
-    assert score < 0.1, f"Balanced usage should have low grouping cost, got {score}"
-
-
-def test_grouping_cost_imbalanced_high():
-    """One filament covering everything, another covering almost nothing."""
-    maps = {
-        "cyan": np.ones((10, 10), dtype=np.float32) * 0.5,
-        "yellow": np.zeros((10, 10), dtype=np.float32),
-    }
-    maps["yellow"][0, 0] = 0.5
-    score = estimate_grouping_cost(maps, ["cyan", "yellow"])
-    assert score > 0.5, f"Imbalanced usage should have high grouping cost, got {score}"
-
-
-def test_grouping_cost_empty_palette():
-    """Empty palette returns 0."""
-    assert estimate_grouping_cost({}, []) == 0.0
-
-
-# ── Swap cost ────────────────────────────────────────────────────────────────
-
-def test_swap_cost_counts_active():
-    """Swap cost equals the number of filaments with any active pixels."""
-    maps = {
-        "cyan": np.ones((5, 5), dtype=np.float32) * 0.3,
-        "yellow": np.zeros((5, 5), dtype=np.float32),
-        "magenta": np.ones((5, 5), dtype=np.float32) * 0.1,
-    }
-    cost = estimate_swap_cost(maps, ["cyan", "yellow", "magenta"])
-    assert cost == 2.0
-
-
-def test_swap_cost_all_inactive():
-    """All-zero maps = 0 swap cost."""
-    maps = {"cyan": np.zeros((5, 5), dtype=np.float32)}
-    assert estimate_swap_cost(maps, ["cyan"]) == 0.0
 
 
 # ── Batch transmission and vectorized gamut ──────────────────────────────────
@@ -116,7 +29,6 @@ from palette.suggest import (
     _apply_three_color_rescore_to_sweep,
     _select_diverse_candidates,
     _precompute_centroid_distances,
-    _score_palette_fast,
     _score_palette_metrics,
     _scale_oklab_l,
     _thorough_search,
@@ -243,7 +155,9 @@ def test_precomputed_scoring_matches_kdtree():
     )
 
     # Score with precomputed
-    m_pre, mx_pre, p_pre = _score_palette_fast(fids, sig, dist_s, dist_p)
+    m_pre, mx_pre, p_pre, _p90_pre = _score_palette_metrics(
+        fids, sig, dist_s, dist_p
+    )
 
     # Score with KDTree
     pair_cache = {}

@@ -35,14 +35,6 @@ def resolve_save_paths(save_id: str, *, root: Path | None = None) -> tuple[Path,
     return store_root / f"{save_id}.zip", store_root / f"{save_id}.json"
 
 
-def _sidecar_path(save_id: str) -> Path:
-    return resolve_save_paths(save_id)[1]
-
-
-def _zip_path(save_id: str) -> Path:
-    return resolve_save_paths(save_id)[0]
-
-
 def write_save(save_id: str, zip_bytes: bytes, sidecar: dict, *, root: Path | None = None) -> None:
     """Atomically write {save_id}.zip and {save_id}.json (temp + os.replace)."""
     store_root = _store_root(root)

@@ -30,7 +30,7 @@ from scipy.spatial import KDTree
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROFILES_DIR = ROOT / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR
 LAYER_HEIGHT = 0.1
 WHITE = "bambu-tough-white"
 COLORS = [

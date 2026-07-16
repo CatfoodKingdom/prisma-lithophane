@@ -1,8 +1,6 @@
 """Shared Wing C tranche — `PaletteMetadata` types + resolver.
 
-Covers the F2 contract Wing C v1 operators consume per
-`docs/superpowers/brainstorm/2026-04-21-image-preprocessing/wing-c/consensus.md`
-sections § B.6, § I.1-I.3, § I.5.
+The tests cover the current F2 contract consumed by Wing C v1 operators.
 
 The four palette-metadata fields pinned by § I.5 are:
   - `achievable_black_oklab` (C1)
@@ -17,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -37,10 +36,7 @@ from preprocessing.palette_metadata import (
 )
 
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+_PROFILES_DIR = Path(os.environ["PRISMA_MODEL_LIBRARY_ROOT"]) / "filaments" / "profiles"
 
 
 def _make_config(**overrides) -> PipelineConfig:

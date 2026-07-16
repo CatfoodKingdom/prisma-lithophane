@@ -1,25 +1,10 @@
-"""
-lith_lut.py -- Pre-computed color LUT + KD-tree per filament subset (Prisma).
+"""Joint LUT builders and production batch query for the Generator.
 
-Architecture (revised — joint LUT)
------------------------------------
-The cap dimension is included in each LUTEntry. Each entry covers a filament
-subset AND enumerates cap thicknesses jointly with color thicknesses.
-
-For each combination of (d_wc, d_c1, ..., d_ck) subject to a total budget
-constraint, stores: oklab(T_wb × T_wc(d_wc) × ∏T_ci(d_ci)).
-
-Query pipeline (per pixel):
-  target = T_source / T_wb                 (divide out fixed white base)
-  (d_wc, d_c1, ..., d_ck) = joint_lut_query(oklab(target))
-
-Legacy cap curve is retained for dual-resolution cap refinement.
-
-Usage:
-    cap_curve = build_cap_curve(wc_profile, d_wc_min, d_wc_max, layer_height)
-    luts = build_luts(color_profiles, wb_profile, wc_profile, ...)
-    thickness_list, de = query_luts_batch(luts, target_oklab)
-    # thickness_list[i] includes '__white_cap__' key
+Each ``LUTEntry`` stores the full-stack OKLab result for a filament subset,
+including the fixed white base, color layers, and jointly enumerated white cap.
+Historical-spline, appearance-provider, and swap-banded builders all preserve
+that contract. Callers pass full-stack OKLab targets to ``query_luts_batch``,
+which returns per-target color/cap recipes and unweighted OKLab distance.
 """
 from __future__ import annotations
 import hashlib, itertools, json, sys, time
@@ -38,7 +23,7 @@ if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
 import data_paths
-from model import compose_stack, to_oklab, predict_transmission
+from model import to_oklab, predict_transmission
 from appearance_model import StackRequest
 from progress import ProgressReporter
 
@@ -73,7 +58,6 @@ def _emit_build_progress(progress, label: str, pct: float) -> None:
 
 CACHE_DIR = data_paths.LUT_CACHE_DIR
 data_paths.LUT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-_LUT_SCORE_MAX_BROADCAST_FLOATS = 8_000_000
 _SPLINE_LUT_BUILDER_VERSION = "spline_joint_canonical_order_v1"
 _BANDED_SPLINE_LUT_BUILDER_VERSION = "banded_spline_lut_v1"
 _BANDED_PROVIDER_LUT_BUILDER_VERSION = "banded_photo_stack_lut_v1_commutative_fill"
@@ -150,14 +134,6 @@ def _corrections_checksum(corrections: Optional[dict]) -> str:
 # -- Data structures -----------------------------------------------------------
 
 @dataclass
-class CapCurve:
-    """1-D mapping: OKLab L* -> white cap thickness d_wc (legacy, used for dual-res refinement)."""
-    d_wc_steps: np.ndarray   # (N,) ascending d_wc values (mm)
-    L_values:   np.ndarray   # (N,) OKLab L* for each d_wc (descending)
-    T_wc_table: np.ndarray   # (N, 3) linear-RGB transmission per d_wc step
-
-
-@dataclass
 class LUTEntry:
     """Joint LUT entry: filament subset + cap, with KD-tree for fast query."""
     filaments:      Tuple[str, ...]   # color filament IDs in this subset
@@ -194,65 +170,6 @@ def derive_d_wc_max(
             return round(d, 6)
         d = round(d + layer_height, 6)
     return max_search_mm
-
-
-# -- Cap curve (legacy, for dual-resolution refinement) ------------------------
-
-def build_cap_curve(
-    wc_profile: dict,
-    d_wc_min: float = 0.08,
-    d_wc_max: Optional[float] = None,
-    layer_height: float = 0.08,
-    verbose: bool = True,
-) -> CapCurve:
-    """
-    Build the cap curve: a 1-D lookup from OKLab L* -> d_wc.
-    Retained for dual-resolution cap refinement at full resolution.
-    """
-    if d_wc_max is None:
-        d_wc_max = derive_d_wc_max(wc_profile, layer_height=layer_height)
-        if verbose:
-            print(f"  Cap curve: d_wc_max = {d_wc_max:.2f} mm (auto)")
-
-    n_min = max(1, round(d_wc_min / layer_height))
-    n_max = max(n_min, round(d_wc_max / layer_height))
-    d_steps = np.array([round(i * layer_height, 6) for i in range(n_min, n_max + 1)])
-
-    T_table = np.array([predict_transmission(wc_profile, d) for d in d_steps],
-                       dtype=np.float32)          # (N, 3)
-    L_vals  = to_oklab(T_table)[:, 0]            # (N,) -- L* channel only
-
-    if verbose:
-        print(f"  Cap curve: {len(d_steps)} steps, "
-              f"L* range [{L_vals.min():.3f}, {L_vals.max():.3f}]")
-
-    return CapCurve(d_wc_steps=d_steps, L_values=L_vals, T_wc_table=T_table)
-
-
-def cap_curve_lookup_batch(
-    L_targets: np.ndarray,
-    cap_curve: CapCurve,
-    *,
-    max_broadcast_floats: int = _LUT_SCORE_MAX_BROADCAST_FLOATS,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Vectorised nearest-neighbor lookup: L* -> (d_wc, T_wc).
-    Retained for dual-resolution cap refinement.
-    """
-    targets = np.asarray(L_targets, dtype=np.float32)
-    steps = np.asarray(cap_curve.L_values, dtype=np.float32)
-    if targets.size * steps.size <= int(max_broadcast_floats):
-        diffs = np.abs(targets[:, np.newaxis] - steps[np.newaxis, :])
-        best = np.argmin(diffs, axis=1)
-    else:
-        best = np.empty(targets.shape[0], dtype=np.int64)
-        chunk = max(1, int(max_broadcast_floats) // max(1, steps.size))
-        for start in range(0, targets.shape[0], chunk):
-            stop = min(targets.shape[0], start + chunk)
-            diffs = np.abs(targets[start:stop, np.newaxis] - steps[np.newaxis, :])
-            best[start:stop] = np.argmin(diffs, axis=1)
-    return cap_curve.d_wc_steps[best].astype(np.float32), \
-           cap_curve.T_wc_table[best].astype(np.float32)
 
 
 # -- Joint LUT (cap + color) -------------------------------------------------
@@ -1648,46 +1565,6 @@ def build_luts_with_provider(
 
 # -- Query ---------------------------------------------------------------------
 
-def query_luts(
-    luts: List[LUTEntry],
-    target_oklab: np.ndarray,
-) -> Tuple[Dict[str, float], float]:
-    """
-    Find the best joint (cap + color) thickness assignment for a single OKLab target.
-    Returns (thicknesses_dict, delta_e). Dict includes '__white_cap__' key.
-    dE is always in unweighted OKLab space regardless of chroma_weight.
-    """
-    cw = luts[0].chroma_weight if luts else 1.0
-    if cw != 1.0:
-        query_target = target_oklab.copy()
-        query_target[0] /= cw
-    else:
-        query_target = target_oklab
-
-    best_weighted_de = np.inf
-    best_thicknesses: Dict[str, float] = {}
-    best_oklab = None
-
-    for entry in luts:
-        dist, idx = entry.tree.query(query_target, k=1)
-        if dist < best_weighted_de:
-            best_weighted_de = float(dist)
-            best_oklab = entry.oklab[idx]
-            best_thicknesses = {
-                fid: float(entry.thicknesses[idx, j])
-                for j, fid in enumerate(entry.filaments)
-            }
-            best_thicknesses['__white_cap__'] = float(entry.cap_thicknesses[idx])
-
-    # Return unweighted dE
-    if cw != 1.0 and best_oklab is not None:
-        true_de = float(np.sqrt(((best_oklab - target_oklab) ** 2).sum()))
-    else:
-        true_de = best_weighted_de
-
-    return best_thicknesses, true_de
-
-
 def query_luts_batch(
     luts: List[LUTEntry],
     target_oklab: np.ndarray,
@@ -1809,256 +1686,6 @@ def nearest_sample_de_unweighted(
         dists, _ = tree.query(targets, k=1)
         best_de = np.minimum(best_de, dists)
     return best_de.astype(np.float32)
-
-
-def query_luts_fixed_cap(
-    luts: List[LUTEntry],
-    target_oklab: np.ndarray,
-    fixed_cap: np.ndarray,
-    layer_height: float = 0.08,
-) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
-    """
-    Re-solve color layers with cap thickness fixed (two-pass smoothing).
-
-    For each pixel, only considers LUT entries whose cap_thickness matches
-    the given fixed cap value (within 0.5 × layer_height tolerance).
-    Falls back to the unconstrained best if no entries match.
-
-    Parameters
-    ----------
-    luts          : joint LUTs from build_luts()
-    target_oklab  : (N, 3) OKLab targets (unscaled)
-    fixed_cap     : (N,) fixed cap thickness per pixel (already quantized)
-    layer_height  : for tolerance matching
-
-    Returns
-    -------
-    result : dict mapping filament_id -> (N,) float32 thickness array.
-             Includes '__white_cap__' key set to fixed_cap values.
-    de     : (N,) float32 delta-E array (always unweighted).
-    """
-    n = len(target_oklab)
-    tol = 0.5 * layer_height
-    cw = luts[0].chroma_weight if luts else 1.0
-
-    # Scale target for weighted nearest-neighbor search
-    if cw != 1.0:
-        query_target = target_oklab.copy()
-        query_target[:, 0] /= cw
-    else:
-        query_target = target_oklab
-
-    # First pass: find unconstrained best (fallback)
-    best_de      = np.full(n, np.inf)
-    best_idx     = np.zeros(n, dtype=int)
-    best_lut_id  = np.zeros(n, dtype=int)
-
-    # Second pass: find best within cap constraint
-    capped_de      = np.full(n, np.inf)
-    capped_idx     = np.zeros(n, dtype=int)
-    capped_lut_id  = np.zeros(n, dtype=int)
-
-    for lut_id, entry in enumerate(luts):
-        dists, idxs = entry.tree.query(query_target, k=min(20, len(entry.oklab)))
-
-        # Handle k=1 case (returns 1D arrays)
-        if dists.ndim == 1:
-            dists = dists[:, np.newaxis]
-            idxs  = idxs[:, np.newaxis]
-
-        # Unconstrained best (k=0 column)
-        improved = dists[:, 0] < best_de
-        best_de     = np.where(improved, dists[:, 0], best_de)
-        best_idx    = np.where(improved, idxs[:, 0],  best_idx)
-        best_lut_id = np.where(improved, lut_id,      best_lut_id)
-
-        # Cap-constrained best: scan k nearest for matching cap
-        for ki in range(dists.shape[1]):
-            candidate_caps = entry.cap_thicknesses[idxs[:, ki]]
-            cap_match = np.abs(candidate_caps - fixed_cap) < tol
-            improved_capped = cap_match & (dists[:, ki] < capped_de)
-            capped_de     = np.where(improved_capped, dists[:, ki],  capped_de)
-            capped_idx    = np.where(improved_capped, idxs[:, ki],   capped_idx)
-            capped_lut_id = np.where(improved_capped, lut_id,        capped_lut_id)
-
-    # Use capped result where available, fallback to unconstrained
-    has_capped = np.isfinite(capped_de)
-    final_de     = np.where(has_capped, capped_de,     best_de)
-    final_idx    = np.where(has_capped, capped_idx,    best_idx)
-    final_lut_id = np.where(has_capped, capped_lut_id, best_lut_id)
-
-    # Build structured result arrays
-    all_fids = sorted({fid for entry in luts for fid in entry.filaments})
-    result: Dict[str, np.ndarray] = {
-        fid: np.zeros(n, dtype=np.float32) for fid in all_fids
-    }
-
-    # Compute true (unweighted) dE when chroma_weight != 1
-    true_de = np.full(n, np.inf, dtype=np.float32) if cw != 1.0 else None
-    for lut_id, entry in enumerate(luts):
-        mask = final_lut_id == lut_id
-        if not mask.any():
-            continue
-        idxs = final_idx[mask]
-        for j, fid in enumerate(entry.filaments):
-            result[fid][mask] = entry.thicknesses[idxs, j]
-        if true_de is not None:
-            diff = entry.oklab[idxs] - target_oklab[mask]
-            true_de[mask] = np.sqrt((diff ** 2).sum(axis=1)).astype(np.float32)
-
-    # Use the fixed cap, not the LUT entry's cap
-    result['__white_cap__'] = fixed_cap.astype(np.float32)
-
-    return result, (true_de if true_de is not None else final_de.astype(np.float32))
-
-
-def query_cap_fixed_color(
-    luts: List[LUTEntry],
-    target_oklab: np.ndarray,
-    fixed_stack: Dict[str, float],
-    color_profiles: Dict[str, dict],
-    wb_profile: dict,
-    wc_profile: dict,
-    d_wb: float = 0.20,
-    layer_height: float = 0.08,
-    d_wc_max: float = 2.0,
-) -> Tuple[float, float]:
-    """
-    Find the cap thickness that minimizes dE for a single pixel, with the
-    color stack held fixed.
-
-    Dual of query_luts_fixed_cap: that one pins cap and varies color;
-    this one pins color and varies cap.
-
-    Parameters
-    ----------
-    luts            : joint LUTs (unused directly, accepted for API symmetry)
-    target_oklab    : (3,) OKLab target for this pixel
-    fixed_stack     : {filament_id: thickness_mm} color thicknesses (fixed)
-    color_profiles : filament_id -> loaded profile
-    wb_profile      : white base profile
-    wc_profile      : white cap profile
-    d_wb            : white base thickness (fixed)
-    layer_height    : cap grid step
-    d_wc_max        : maximum cap thickness to consider
-
-    Returns
-    -------
-    best_cap : float, optimal cap thickness (mm)
-    best_de  : float, OKLab dE at optimal cap
-    """
-    # Build base transmission: T_wb * prod(T_fi(d_i))
-    layers = [(wb_profile, d_wb)]
-    for fid, d in fixed_stack.items():
-        if d > 0 and fid in color_profiles:
-            layers.append((color_profiles[fid], d))
-    T_base = compose_stack(layers)  # (3,) linear RGB
-
-    # Enumerate cap thicknesses
-    d_wc_max = max(0.0, float(d_wc_max))
-    n_steps = int(round(d_wc_max / layer_height)) + 1
-    best_cap = 0.0
-    best_de = float("inf")
-
-    for i in range(n_steps):
-        d_wc = round(i * layer_height, 6)
-        T_wc = predict_transmission(wc_profile, d_wc)
-        T_total = T_base * T_wc
-        oklab = to_oklab(T_total.reshape(1, 3))[0]
-        de = float(np.sqrt(((oklab - target_oklab) ** 2).sum()))
-        if de < best_de:
-            best_de = de
-            best_cap = d_wc
-
-    return best_cap, best_de
-
-
-def query_cap_fixed_color_batch(
-    luts: List[LUTEntry],
-    target_oklab: np.ndarray,
-    fixed_stack: Dict[str, float],
-    color_profiles: Dict[str, dict],
-    wb_profile: dict,
-    wc_profile: dict,
-    d_wb: float = 0.20,
-    layer_height: float = 0.08,
-    d_wc_max: float = 2.0,
-    *,
-    max_broadcast_floats: int = _LUT_SCORE_MAX_BROADCAST_FLOATS,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Vectorised version of query_cap_fixed_color for N pixels sharing the
-    same fixed color stack but different targets.
-
-    Parameters
-    ----------
-    luts            : joint LUTs (unused directly, accepted for API symmetry)
-    target_oklab    : (N, 3) OKLab targets
-    fixed_stack     : {filament_id: thickness_mm} color thicknesses (fixed)
-    color_profiles : filament_id -> loaded profile
-    wb_profile      : white base profile
-    wc_profile      : white cap profile
-    d_wb            : white base thickness (fixed)
-    layer_height    : cap grid step
-    d_wc_max        : maximum cap thickness to consider
-
-    Returns
-    -------
-    best_caps : (N,) float32, optimal cap per pixel
-    best_des  : (N,) float32, dE at optimal cap per pixel
-    """
-    n = len(target_oklab)
-
-    # Build base transmission once (shared across all pixels in this batch)
-    layers = [(wb_profile, d_wb)]
-    for fid, d in fixed_stack.items():
-        if d > 0 and fid in color_profiles:
-            layers.append((color_profiles[fid], d))
-    T_base = compose_stack(layers)  # (3,)
-
-    # Pre-compute OKLab for every candidate cap thickness using batch eval
-    d_wc_max = max(0.0, float(d_wc_max))
-    n_steps = int(round(d_wc_max / layer_height)) + 1
-    cap_values = np.array([round(i * layer_height, 6) for i in range(n_steps)], dtype=np.float32)
-
-    # Batch spline evaluation — single vectorized call instead of N scalar calls
-    from lib.transmission import _get_splines
-    spl = _get_splines(wc_profile)
-    d_max = wc_profile['knots_mm'][-1]
-    d_arr = cap_values.astype(np.float64)
-    interp_mask = (d_arr > 0) & (d_arr <= d_max)
-    T_wc_all = np.ones((n_steps, 3), dtype=np.float64)
-    if interp_mask.any():
-        d_interp = d_arr[interp_mask]
-        T_wc_all[interp_mask, 0] = np.clip(spl['r'](d_interp), 0.0, 1.0)
-        T_wc_all[interp_mask, 1] = np.clip(spl['g'](d_interp), 0.0, 1.0)
-        T_wc_all[interp_mask, 2] = np.clip(spl['b'](d_interp), 0.0, 1.0)
-
-    T_all = T_base[np.newaxis, :] * T_wc_all  # (n_steps, 3)
-    T_all = np.clip(T_all, 1e-9, 1.0)
-    cap_oklabs = to_oklab(T_all.astype(np.float32))  # (n_steps, 3)
-
-    # For each pixel, find the cap with minimum dE.  Chunk large print-scale
-    # batches so this never materializes an enormous (N, n_steps, 3) tensor.
-    best_idx = np.empty(n, dtype=np.int64)
-    best_des = np.empty(n, dtype=np.float32)
-    if n * n_steps * 3 <= int(max_broadcast_floats):
-        diffs = target_oklab[:, np.newaxis, :] - cap_oklabs[np.newaxis, :, :]
-        des = np.sqrt((diffs ** 2).sum(axis=2))  # (N, n_steps)
-        best_idx[:] = des.argmin(axis=1)
-        best_des[:] = des[np.arange(n), best_idx].astype(np.float32)
-    else:
-        chunk = max(1, int(max_broadcast_floats) // max(1, n_steps * 3))
-        for start in range(0, n, chunk):
-            stop = min(n, start + chunk)
-            diffs = target_oklab[start:stop, np.newaxis, :] - cap_oklabs[np.newaxis, :, :]
-            des = np.sqrt((diffs ** 2).sum(axis=2))
-            local_best = des.argmin(axis=1)
-            best_idx[start:stop] = local_best
-            best_des[start:stop] = des[np.arange(stop - start), local_best].astype(np.float32)
-
-    best_caps = cap_values[best_idx]
-    return best_caps, best_des
 
 
 def build_hull_from_luts(luts: List[LUTEntry]) -> 'scipy.spatial.ConvexHull':

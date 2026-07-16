@@ -30,7 +30,7 @@ def main() -> None:
     sqlite_path = workspace / "calibration.sqlite"
     asset_root = workspace / "assets"
     asset_root.mkdir()
-    schema = repo / "tools" / "migration_preflight" / "FINAL_SQLITE_SCHEMA.sql"
+    schema = repo / "Prisma" / "calibration" / "blank_calibration_schema.sql"
     with closing(sqlite3.connect(sqlite_path)) as conn:
         conn.executescript(schema.read_text(encoding="utf-8"))
         conn.commit()

@@ -17,12 +17,6 @@ Per the foundations design (R1+R2+R3+R4+R5):
   - After each `apply()` call, validate the output's shape, dtype, and
     finiteness (R3-E). Non-finite values raise with the offending
     operator's name attached.
-  - Emit `preprocess/<module_name>` preview frames via
-    `snapshot_publisher.publish_image_preview` per enabled operator
-    (R1 A3 + R3-F + R5-A). Preview is canonicalized to `srgb_u8` via
-    the shared `color_convert.py` helpers; the chain raster handed to
-    the NEXT operator stays in the operator's declared domain
-    (view-only conversion).
   - Zero enabled operators is a legal no-op pass-through (R4-B).
 """
 from __future__ import annotations
@@ -51,7 +45,6 @@ from .types import (
 
 if TYPE_CHECKING:
     from pipeline.base import PreprocessingModule
-    from pipeline.snapshot import SnapshotPublisher
 
 
 ProgressCallback = Callable[[dict], None] | None
@@ -90,20 +83,6 @@ def _convert(image: np.ndarray, src: ColorDomain, dst: ColorDomain) -> np.ndarra
         return oklab_f32_to_srgb_f32(image)
     # Two-hop: every other path bounces through srgb_f32.
     return _convert(_convert(image, src, "srgb_f32"), "srgb_f32", dst)
-
-
-def _to_srgb_u8_for_preview(image: np.ndarray, src: ColorDomain) -> np.ndarray:
-    """Canonicalize an operator's output to `srgb_u8` for the preview channel.
-
-    R5-A: routes through `color_convert.py` exclusively. Linear and OKLab
-    rasters two-hop via `srgb_f32`. View-only — the caller does NOT
-    overwrite the chain raster with this result.
-    """
-    if src == "srgb_u8":
-        return image
-    if src == "srgb_f32":
-        return srgb_f32_to_srgb_u8(image)
-    return srgb_f32_to_srgb_u8(_convert(image, src, "srgb_f32"))
 
 
 # ── Sorting + validation ─────────────────────────────────────────────────────
@@ -213,7 +192,6 @@ def run_preprocessing_pipeline(
     *,
     context: PreprocessingContext,
     progress: ProgressCallback = None,
-    snapshot_publisher: "SnapshotPublisher | None" = None,
 ) -> tuple[np.ndarray, list[PreprocessingTraceStep], dict[str, np.ndarray]]:
     """Execute the preprocessing slot.
 
@@ -264,25 +242,6 @@ def run_preprocessing_pipeline(
         )
         for key, dmap in result.debug_maps.items():
             debug[f"{op.name}:{key}"] = dmap
-
-        # Preview emission — view-only, raster handed forward stays in
-        # the declared domain. Per § B.6 / R6 C.4, the cache key
-        # incorporates the palette-metadata request fingerprint when
-        # this operator's output is palette-aware so the same module
-        # name on a different palette doesn't collide in browser cache.
-        if snapshot_publisher is not None:
-            preview_u8 = _to_srgb_u8_for_preview(result.image, result.output_domain)
-            req = getattr(op, "required_context", frozenset())
-            context_fp: str | None = None
-            if "palette_metadata" in req and context.palette_metadata is not None:
-                context_fp = getattr(
-                    context.palette_metadata, "request_fingerprint", None
-                )
-            snapshot_publisher.publish_image_preview(
-                preview_u8,
-                stage_key=f"preprocess/{op.name}",
-                context_fingerprint=context_fp,
-            )
 
         current = result.image
         current_domain = result.output_domain

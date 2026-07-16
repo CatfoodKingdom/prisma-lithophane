@@ -1,7 +1,7 @@
 """Phase 3 commit 5 — observation-grid / solve-grid target ownership.
 
-See docs/superpowers/specs/2026-04-11-resolution-parameter-separation-phase3-4-implementation-sequencing.md §4.5
-and docs/superpowers/specs/2026-04-11-resolution-parameter-separation-phase3-solved-material-plan-contract.md §6.
+See the current phase-3/4 observation-solve-grid and solved-material-plan
+contracts.
 
 These tests assert:
   - runner is the single computation site for observation-grid target data
@@ -18,10 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 from pipeline.state import PipelineState, PipelineConfig, ProfileSet, FULL_PRESET, PREVIEW_PRESET
 from pipeline.derived_views import project_observation_to_solve_grid

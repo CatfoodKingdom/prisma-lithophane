@@ -143,6 +143,7 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     assert start_resp.status_code == 200
 
     diagnostics = server.session["solve"]["result"]["solve_start_diagnostics"]
+    assert server.session["solve"]["result"]["diagnostic_palette_version"] == "inferno-v1"
     assert "solver" not in diagnostics["active_modules"]
     assert "grouping" not in diagnostics["active_modules"]
     assert "solver" not in diagnostics["resolved_settings"]
@@ -156,6 +157,7 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     )
     assert "solver" not in run_json["solve_start_diagnostics"]["active_modules"]
     assert "grouping" not in run_json["solve_start_diagnostics"]["active_modules"]
+    assert run_json["diagnostic_palette_version"] == "inferno-v1"
 
 
 def test_staged_backend_diagnostics_report_only_live_module_slots(solve_env):

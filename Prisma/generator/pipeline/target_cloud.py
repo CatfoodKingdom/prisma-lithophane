@@ -1,6 +1,6 @@
 """Shared source-image target cloud helpers.
 
-Palette suggestion, gamut preview, and the solve runner all need the same
+Palette suggestion and the solve runner both need the same
 source-image conditioning before comparing against filament gamuts:
 ``image_to_target()`` in the configured ingress mode, OKLab conversion, and
 observation-grid to solve-grid projection.  This module keeps that path in one

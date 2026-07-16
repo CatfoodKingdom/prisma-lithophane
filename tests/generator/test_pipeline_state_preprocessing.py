@@ -1,10 +1,9 @@
 """PipelineState/PipelineConfig F1 field tests.
 
-The runner threads four pieces through state/config for the
+The runner threads three pieces through state/config for the
 preprocessing slot:
 
   PipelineConfig.preprocessors        — ordered list of operator instances
-  PipelineConfig.preprocessing_params — full per-operator params dict
   PipelineState.source_image          — pre-preprocess raster (preserved
                                          for snapshot/audit; `state.image`
                                          is overwritten with the post-
@@ -39,7 +38,6 @@ def _make_config():
 def test_pipeline_config_has_empty_preprocessing_defaults():
     cfg = _make_config()
     assert cfg.preprocessors == []
-    assert cfg.preprocessing_params == {}
 
 
 def test_pipeline_config_preprocessors_overridable():
@@ -47,10 +45,8 @@ def test_pipeline_config_preprocessors_overridable():
         palette=["bambu-basic-yellow"],
         white_base="bambu-basic-white",
         preprocessors=["op_a", "op_b"],
-        preprocessing_params={"op_a": {"sigma": 1.0}},
     )
     assert cfg.preprocessors == ["op_a", "op_b"]
-    assert cfg.preprocessing_params == {"op_a": {"sigma": 1.0}}
 
 
 def test_pipeline_state_default_source_image_and_trace():

@@ -28,8 +28,8 @@ def srgb_f32_to_srgb_u8(image: np.ndarray) -> np.ndarray:
     """float32 sRGB → uint8 sRGB.
 
     R5-A quantization contract: clamp to [0, 1], scale by 255, round
-    half-to-even. This is the canonical hand-off used by the preview hook
-    when emitting `preprocess/<module>` snapshots.
+    half-to-even. This is the canonical conversion used when a preprocessing
+    operator hands an ``srgb_f32`` raster to an ``srgb_u8`` consumer.
     """
     arr = np.asarray(image, dtype=np.float32)
     clamped = np.clip(arr, 0.0, 1.0)

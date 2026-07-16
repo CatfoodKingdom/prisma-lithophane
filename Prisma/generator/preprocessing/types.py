@@ -69,7 +69,7 @@ class PreprocessingResult:
 
     `image` MUST match the operator's declared `output_domain` and have the
     same H/W as the input. `debug_maps` and `metrics` are optional diagnostics
-    surfaced via PipelineState and snapshot stream.
+    surfaced via PipelineState.
     """
     image: np.ndarray
     output_domain: ColorDomain

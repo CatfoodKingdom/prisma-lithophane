@@ -18,7 +18,7 @@ from Prisma.generator.lut import (
     _provider_cache_key,
     _save_luts_to_cache,
     build_luts_with_provider,
-    query_luts,
+    query_luts_batch,
 )
 from Prisma.generator.model import compose_stack, to_oklab
 from Prisma.lib.photo_stack_model.default_bundle import (
@@ -210,7 +210,13 @@ def test_provider_lut_builds_queryable_photo_stack_entries(tmp_path) -> None:
             )
         ]
     )[0]
-    thicknesses, de = query_luts(luts, to_oklab(target_rgb.reshape(1, 3))[0])
+    thickness_arrays, de_array = query_luts_batch(
+        luts,
+        to_oklab(target_rgb.reshape(1, 3)),
+        parallel=False,
+    )
+    thicknesses = {key: values[0] for key, values in thickness_arrays.items()}
+    de = de_array[0]
 
     assert abs(thicknesses["chrominal-deep-sea-blue"] - 0.2) < 1e-6
     assert abs(thicknesses["__white_cap__"] - 0.2) < 1e-6

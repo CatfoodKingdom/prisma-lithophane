@@ -16,8 +16,7 @@ from preprocessing.operators.b3_tv_flatten import B3TvFlatten
 from preprocessing.types import PreprocessingContext
 
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_PROFILES_DIR = _PROJECT_ROOT / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 def _make_context(

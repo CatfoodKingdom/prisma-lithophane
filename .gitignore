@@ -24,7 +24,6 @@ __pycache__/
 *.CR2
 
 # Generated caches
-lithophane_generator/cache/
 Prisma/data/thumbnails/
 
 # System backups (safety snapshots, too large for git)
@@ -40,14 +39,8 @@ Prisma/generator/.tmp/
 .codex-work/**/*.pid
 .codex-work/tmp_*/
 .codex-work/verify_*/
-.codex-work/migration_preflight_reports*/
-.codex-work/migration_rehearsal*/
-.codex-work/migration_final_import*/
-.codex-work/migration_materialized_images*/
-.codex-work/migration_model_payload*/
-.codex-work/migration_runtime_bridge_probe*/
-.codex-work/migration_sqlite_runtime_bridge*/
-.codex-work/migration_extraction_regeneration*/
+.codex-work/generator-wave-fixtures/
+.codex-work/generator-wave-captures/
 
 # Git worktree scaffolding (isolated working copies)
 .claude/worktrees/
@@ -60,7 +53,6 @@ Prisma/generator/.claude/
 .status/dashboard.html
 
 # Reference codebase (not version-tracked)
-PixeSTL_Java_Codebase/
 
 # Sandbox web app data (isolated copies, not canonical)
 unified_calibration/sandbox/thumbnails/
@@ -82,7 +74,6 @@ screenshots/
 Prisma/inbox/
 Prisma/photos/
 Prisma/output/
-Prisma/legacy_data/
 Prisma/generator/app/modules.local.json
 Prisma/generator/app/printers.local.json
 Prisma/generator/.data-root
@@ -137,12 +128,3 @@ Prisma/data/_system/image_metadata.json
 # gen-* dirs) published by the calibration build job; provisioned into
 # worktrees via a directory junction. Never version-controlled.
 Prisma/data/camera_transform/
-
-# Development archive (safety copy of source data)
-archive/
-
-# Local experimentation scratch space
-DevelopmentSandbox/
-
-#Retired code
-/deprecated/

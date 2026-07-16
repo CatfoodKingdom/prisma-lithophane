@@ -82,7 +82,7 @@ def _base_config() -> dict:
         "image_sample_pitch_mm": 0.20, "solver_fine_pitch_mm": 0.20,
         "color_region_target_mm": 0.60,
         "image_path": "test.jpg", "image_adjust": None, "max_dim_mm": 130.0,
-        "frame": None, "smooth_kernel": 15.0, "smooth_iters": 3,
+        "frame": None, "smooth_kernel": 15.0,
         "border": False, "border_width_mm": 3.0,
     }
 

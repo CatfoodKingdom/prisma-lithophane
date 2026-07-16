@@ -16,7 +16,7 @@ if str(_GEN_DIR) not in sys.path:
 if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
-_PROFILES_DIR = _PRISMA_DIR / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 def _reference_stack_hash(thickness_result, idx: int, palette: list, layer_height: float):
@@ -310,6 +310,28 @@ class TestBatchSplineEval:
         assert result.shape == (3, 3)
         assert np.all(result >= 0.0)
         assert np.all(result <= 1.0)
+
+    def test_non_banded_cap_grid_masks_steps_above_remaining_total_height(self):
+        """Non-banded spline pricing excludes cap steps above total-height headroom."""
+        from pipeline.staged_solver_helpers import _precompute_cap_oklabs
+
+        state = _make_state(img_size=2)
+        committed_stack = {"bambu-basic-cyan": 2.0}
+        cap_values, scoring_oklabs = _precompute_cap_oklabs(
+            {0: committed_stack},
+            state.profiles,
+            state.config,
+        )
+
+        remaining_headroom = (
+            float(state.config.t_max)
+            - float(state.config.d_wb)
+            - sum(committed_stack.values())
+        )
+        allowed = cap_values <= np.float32(remaining_headroom + 1e-9)
+
+        assert np.all(np.isfinite(scoring_oklabs[0, allowed]))
+        assert np.all(np.isinf(scoring_oklabs[0, ~allowed]))
 
 
 # -- Test 5: Microbenchmark (vectorized vs Python stack hashing) ---------------

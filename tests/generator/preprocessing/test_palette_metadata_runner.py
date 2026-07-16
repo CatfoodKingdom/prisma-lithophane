@@ -1,7 +1,6 @@
 """Shared Wing C tranche — runner threading + invalidation contract.
 
-Covers the F1/F2 integration requirements from
-`docs/superpowers/brainstorm/2026-04-21-image-preprocessing/wing-c/consensus.md`:
+Covers the current F1/F2 palette-metadata integration requirements:
 
   - § I.1 — one F2 resolution per solve, even when multiple palette-aware
             operators are enabled.
@@ -9,21 +8,18 @@ Covers the F1/F2 integration requirements from
             F1/F2-owned shared-context fingerprint path. Operators with no
             palette-metadata declaration see `context.palette_metadata` as
             `None` (existing behavior preserved).
-  - § B.6 — the `preprocess/<module_name>` preview emission key
-            incorporates the palette-metadata request fingerprint.
-
 These tests assert RUNNER WIRING and the SHARED-CONTEXT INVALIDATION
 contract — not Wing C operator algorithms.
 """
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 import numpy as np
 import pytest
 
 from pipeline.base import PreprocessingModule
-from pipeline.snapshot import SnapshotPublisher
 from pipeline.state import PipelineConfig, ProfileSet
 from preprocessing.palette_metadata import (
     PaletteMetadata,
@@ -38,10 +34,7 @@ from preprocessing.types import (
 )
 
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+_PROFILES_DIR = Path(os.environ["PRISMA_MODEL_LIBRARY_ROOT"]) / "filaments" / "profiles"
 
 
 def _make_config(**overrides) -> PipelineConfig:
@@ -203,67 +196,3 @@ class TestSingleResolutionPerSolve:
         )
         assert meta is None
         assert call_count["n"] == 0
-
-
-# ── § B.6 — preview cache key incorporates palette fingerprint ─────────────
-
-class TestPreviewCacheFingerprint:
-    def test_publish_image_preview_includes_context_fingerprint_in_url(
-        self, tmp_path,
-    ):
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="c1", progress_dict=progress)
-
-        img = np.zeros((4, 4, 3), dtype=np.uint8)
-        pub.publish_image_preview(
-            img,
-            stage_key="preprocess/c_stub",
-            context_fingerprint="abcdef0123456789",
-        )
-
-        url = progress["preview_url"]
-        # Per § B.6, the URL must vary with the palette fingerprint.
-        assert "abcdef01" in url, (
-            f"expected context_fingerprint prefix in URL, got {url!r}"
-        )
-
-    def test_palette_change_changes_preview_url(self, tmp_path):
-        """Two emissions with different `context_fingerprint` produce
-        different URLs even when stage_key is identical."""
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="c2", progress_dict=progress)
-
-        img = np.zeros((4, 4, 3), dtype=np.uint8)
-
-        pub.publish_image_preview(
-            img, stage_key="preprocess/c_stub",
-            context_fingerprint="palette-A-fingerprint-aaaaaaaa",
-        )
-        url_a = progress["preview_url"]
-
-        pub.publish_image_preview(
-            img, stage_key="preprocess/c_stub",
-            context_fingerprint="palette-B-fingerprint-bbbbbbbb",
-        )
-        url_b = progress["preview_url"]
-
-        # Strip the cache-busting timestamp that always changes per emit
-        # — the part of the URL that encodes WHICH content this is must differ.
-        def _strip_ts(u: str) -> str:
-            parts = [p for p in u.split("&") if not p.startswith("t=")
-                     and not p.startswith("?t=")]
-            return "&".join(parts)
-
-        assert _strip_ts(url_a) != _strip_ts(url_b)
-
-    def test_no_context_fingerprint_keeps_legacy_url_shape(self, tmp_path):
-        """Non-palette-aware previews (no context_fingerprint passed) emit
-        the existing URL shape unchanged — Wing A and Wing B operators
-        rely on this and must not regress."""
-        progress: dict = {}
-        pub = SnapshotPublisher(out_dir=tmp_path, card_id="c3", progress_dict=progress)
-        img = np.zeros((4, 4, 3), dtype=np.uint8)
-        pub.publish_image_preview(img, stage_key="preprocess/blind_stub")
-
-        url = progress["preview_url"]
-        assert "fp=" not in url

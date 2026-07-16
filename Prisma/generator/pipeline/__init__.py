@@ -2,7 +2,7 @@
 from .base import ParamDef, ProgressCallback
 from .state import (
     PipelineState, PipelineConfig, QualityPreset, ProfileSet,
-    PREVIEW_PRESET, FULL_PRESET, COMPARE_PRESET,
+    PREVIEW_PRESET, FULL_PRESET,
 )
 from .runner import run_pipeline, revalidate
 
@@ -11,7 +11,7 @@ __all__ = [
     "ParamDef", "ProgressCallback",
     # State
     "PipelineState", "PipelineConfig", "QualityPreset", "ProfileSet",
-    "PREVIEW_PRESET", "FULL_PRESET", "COMPARE_PRESET",
+    "PREVIEW_PRESET", "FULL_PRESET",
     # Runner
     "run_pipeline", "revalidate",
 ]

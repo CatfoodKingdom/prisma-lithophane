@@ -2,18 +2,18 @@
 
 Verifies that `Prisma/generator/facade.py` threads enabled preprocessing
 operators (resolved from `module_state`) through `_resolve_pipeline_slots`
-and `_to_pipeline_config`, and that all four public solve entry points
-(`solve_preview`, `solve_preview_progressive`, `solve_full`, `solve_compare`)
+and `_to_pipeline_config`, and that both public solve entry points
+(`solve_preview`, `solve_full`)
 honor that wiring end-to-end.
 
 Per the foundations design (R2-A / R2-G / R3-B):
   - Enablement lives in `module_state` alongside grouping toggles.
   - Per-operator params live in `SolveConfig.preprocessing_params` —
     a `dict[str, dict[str, Any]]` keyed by module name.
-  - The facade resolver builds an ordered list of ENABLED operator
-    instances (sorted by `(order, lex import path)`) and threads it
-    into `PipelineConfig.preprocessors`. Disabled modules contribute
-    neither enablement nor params to the runner.
+  - The facade resolver consumes those params while building an ordered list
+    of ENABLED operator instances (sorted by `(order, lex import path)`) and
+    threads the instances into `PipelineConfig.preprocessors`. Disabled
+    modules contribute neither enablement nor params to the runner.
 """
 from __future__ import annotations
 
@@ -30,10 +30,7 @@ from pipeline.registry import (
 from preprocessing.types import PreprocessingResult
 
 
-_PROFILES_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "Prisma" / "data" / "filaments" / "profiles"
-)
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -212,18 +209,12 @@ def test_resolve_pipeline_slots_sorts_preprocessors_by_order(registered_ops):
 
 # ── _to_pipeline_config threading ────────────────────────────────────────────
 
-def test_to_pipeline_config_passes_preprocessors_and_params(registered_ops):
-    """`_to_pipeline_config` propagates preprocessors and preprocessing_params
-    into the constructed `PipelineConfig`.
-    """
+def test_to_pipeline_config_passes_preprocessors(registered_ops):
+    """`_to_pipeline_config` passes instantiated preprocessors to the pipeline."""
     from facade import _to_pipeline_config
     from pipeline.state import PREVIEW_PRESET
 
-    cfg = _make_solve_config(
-        preprocessing_params={
-            "_facade_brighten": {"strength": 0.5},
-        },
-    )
+    cfg = _make_solve_config()
     op = _BrightenOp()
     pcfg = _to_pipeline_config(
         cfg,
@@ -231,9 +222,6 @@ def test_to_pipeline_config_passes_preprocessors_and_params(registered_ops):
         preprocessors=[op],
     )
     assert pcfg.preprocessors == [op]
-    assert pcfg.preprocessing_params == {
-        "_facade_brighten": {"strength": 0.5},
-    }
 
 
 def test_to_pipeline_config_defaults_preprocessing_to_empty(registered_ops):
@@ -247,7 +235,6 @@ def test_to_pipeline_config_defaults_preprocessing_to_empty(registered_ops):
         PREVIEW_PRESET,
     )
     assert pcfg.preprocessors == []
-    assert pcfg.preprocessing_params == {}
 
 
 # ── End-to-end through public solve entry points ─────────────────────────────
@@ -274,20 +261,6 @@ def test_solve_preview_with_enabled_op_runs_post_preprocess_image(
     assert result.thickness_maps[cfg.palette[0]].shape == (4, 4)
 
 
-def test_solve_preview_progressive_threads_preprocessors(
-    registered_ops, noop_solver_resolved,
-):
-    from facade import solve_preview_progressive
-
-    cfg = _make_solve_config()
-    img = np.full((4, 4, 3), 100, dtype=np.uint8)
-    result = solve_preview_progressive(
-        img, cfg,
-        module_state={"_facade_brighten": True},
-    )
-    assert result.thickness_maps is not None
-
-
 def test_solve_full_threads_preprocessors(
     registered_ops, noop_solver_resolved,
 ):
@@ -302,21 +275,3 @@ def test_solve_full_threads_preprocessors(
         },
     )
     assert result.thickness_maps is not None
-
-
-def test_solve_compare_threads_preprocessors(
-    registered_ops, noop_solver_resolved,
-):
-    from facade import solve_compare
-
-    cfg = _make_solve_config()
-    img = np.full((4, 4, 3), 100, dtype=np.uint8)
-    results = solve_compare(
-        img,
-        palettes=[["bambu-basic-cyan"]],
-        config=cfg,
-        module_state={"_facade_brighten": True},
-    )
-    assert len(results) == 1
-    # solve_compare returns either SolveResult or {"error": ...}; success.
-    assert hasattr(results[0], "thickness_maps")

@@ -13,12 +13,9 @@ import shutil
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial import KDTree
-
 from Prisma.generator.appearance_model import PhotoStackBundleAppearanceProvider, StackRequest
-from Prisma.generator.lut import LUTEntry, build_luts_with_provider, query_luts
+from Prisma.generator.lut import build_luts_with_provider, query_luts_batch
 from Prisma.generator.model import to_oklab
-from Prisma.generator.solve import gamut_map_batch
 from Prisma.lib.photo_stack_model.default_bundle import DEFAULT_PHOTO_STACK_BUNDLE_PATH
 from Prisma.lib.photo_stack_model.predictor import MODEL_NAME as PHOTO_STACK_MODEL_NAME, hex_from_linear
 
@@ -164,7 +161,13 @@ def test_photo_stack_small_lut_query_outputs_are_frozen(tmp_path: Path) -> None:
         ]
     )[0]
 
-    thicknesses, delta = query_luts(luts, to_oklab(target.reshape(1, 3))[0])
+    thickness_arrays, delta_array = query_luts_batch(
+        luts,
+        to_oklab(target.reshape(1, 3)),
+        parallel=False,
+    )
+    thicknesses = {key: values[0] for key, values in thickness_arrays.items()}
+    delta = delta_array[0]
 
     assert [(entry.filaments, len(entry.oklab)) for entry in luts] == [
         ((TRANS_CYAN,), 10),
@@ -178,45 +181,3 @@ def test_photo_stack_small_lut_query_outputs_are_frozen(tmp_path: Path) -> None:
     }
     assert float(delta) == np.float32(2.3283064e-08)
     assert hex_from_linear(target) == "#4f918a"
-
-
-def test_chroma_gamut_mapping_outputs_are_frozen() -> None:
-    points = np.asarray(
-        [
-            [0.55, 0.0, 0.0],
-            [0.55, 0.08, 0.0],
-            [0.55, 0.16, 0.0],
-        ],
-        dtype=np.float32,
-    )
-    entry = LUTEntry(
-        filaments=("unit-red",),
-        thicknesses=np.asarray([[0.0], [0.1], [0.2]], dtype=np.float32),
-        cap_thicknesses=np.asarray([0.2, 0.2, 0.2], dtype=np.float32),
-        oklab=points,
-        tree=KDTree(points),
-        chroma_weight=1.0,
-    )
-    targets = np.asarray(
-        [
-            [0.55, 0.50, 0.0],
-            [0.55, 0.08, 0.0],
-        ],
-        dtype=np.float32,
-    )
-
-    mapped, mask = gamut_map_batch(targets, [entry], de_threshold=0.02)
-
-    np.testing.assert_allclose(
-        mapped,
-        np.asarray(
-            [
-                [0.550000011920929, 0.09375, 0.0],
-                [0.550000011920929, 0.07999999821186066, 0.0],
-            ],
-            dtype=np.float32,
-        ),
-        rtol=0.0,
-        atol=1e-8,
-    )
-    np.testing.assert_array_equal(mask, np.asarray([True, False]))

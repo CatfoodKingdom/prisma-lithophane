@@ -1,6 +1,6 @@
 """White-point rescale: pure-helper and runner-stage tests.
 
-Spec: docs/superpowers/specs/2026-06-11-whitepoint-rescale-integration-design.md
+Tests for the current whitepoint-rescale integration contract.
 """
 import numpy as np
 import pytest

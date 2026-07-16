@@ -14,11 +14,18 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _GEN_DIR = _PROJECT_ROOT / "Prisma" / "generator"
 _PRISMA_DIR = _PROJECT_ROOT / "Prisma"
 
-# Make generator modules importable
-if str(_GEN_DIR) not in sys.path:
-    sys.path.insert(0, str(_GEN_DIR))
-if str(_PRISMA_DIR) not in sys.path:
-    sys.path.insert(0, str(_PRISMA_DIR))
+# Make generator modules importable and remove the other app's bare-import
+# path.  This keeps single-app selections deterministic as well as combined
+# runs.
+_CAL_DIR = _PROJECT_ROOT / "Prisma" / "calibration"
+for _path in (str(_GEN_DIR), str(_CAL_DIR), str(_PRISMA_DIR)):
+    while _path in sys.path:
+        sys.path.remove(_path)
+sys.path.insert(0, str(_PRISMA_DIR))
+sys.path.insert(0, str(_GEN_DIR))
+_server = sys.modules.get("server")
+if _server is not None and str(_CAL_DIR) in str(getattr(_server, "__file__", "")):
+    sys.modules.pop("server", None)
 
 _TEST_RUNTIME = tempfile.TemporaryDirectory(
     prefix="prisma-generator-tests-",
@@ -44,9 +51,21 @@ def _build_published_test_library() -> None:
         # knots.
         attenuation = curve[0]
         knots_mm = [round(0.08 * index, 2) for index in range(26)]
+        is_white = "white" in filament_id.lower()
+        white_coefficients = (1.0, 1.0, 1.4)
 
         def _transmission(channel: int, key: str) -> list[float]:
-            coefficient = max(float(attenuation[key]), 1e-6)
+            # Photo-stack model-white rows are baseline-relative and can carry
+            # near-zero optical density.  They cannot be copied directly into
+            # a standalone historical-spline profile, where that would make a
+            # nonzero white cap optically invisible.  Give generated white
+            # fixtures deterministic, plausible attenuation while continuing
+            # to derive color curves from the published deployment bundle.
+            coefficient = (
+                white_coefficients[channel]
+                if is_white
+                else max(float(attenuation[key]), 1e-6)
+            )
             return [
                 float(floor[channel] + (1.0 - floor[channel]) * math.exp(-coefficient * depth))
                 for depth in knots_mm
@@ -63,7 +82,6 @@ def _build_published_test_library() -> None:
         }
         (profiles / f"{filament_id}.json").write_text(json.dumps(profile), encoding="utf-8")
         digest = hashlib.sha256(filament_id.encode("utf-8")).hexdigest()[:6].upper()
-        is_white = "white" in filament_id.lower()
         registry[filament_id] = {
             "display_name": filament_id.replace("-", " ").title(),
             "manufacturer": filament_id.split("-", 1)[0].title(),
@@ -121,8 +139,7 @@ def _build_published_test_library() -> None:
         encoding="utf-8",
     )
 
-    project_root = _PRISMA_DIR.parent
-    transform_source = project_root / "DevelopmentSandbox" / "model_domain_conversion"
+    transform_source = _PROJECT_ROOT / "tests" / "fixtures" / "model_domain_conversion"
     transform_params = json.loads((transform_source / "transform_params.json").read_text(encoding="utf-8"))["v2"]
     camera_generation = "published-v2"
     (_TEST_LIBRARY / "camera_transform").mkdir()

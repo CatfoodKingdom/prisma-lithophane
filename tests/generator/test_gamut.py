@@ -6,13 +6,10 @@ from pathlib import Path
 from scipy.spatial import KDTree
 
 
-_PROFILES_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "data" / "filaments" / "profiles"
+from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 from model import load_profile, load_profiles
 from lut import build_luts
-from solve import gamut_map_batch
-
-
 def _make_luts():
     wb = load_profile("panchroma-matte-cotton-white", profiles_dir=_PROFILES_DIR)
     profiles = load_profiles(
@@ -26,47 +23,7 @@ def _make_luts():
     )
 
 
-def test_gamut_map_preserves_in_gamut():
-    luts = _make_luts()
-    targets = np.array([[0.5, 0.0, 0.0], [0.6, 0.01, 0.01]], dtype=np.float32)
-    mapped, mask = gamut_map_batch(targets, luts, de_threshold=0.05)
-    for i in range(len(targets)):
-        if not mask[i]:
-            np.testing.assert_array_almost_equal(mapped[i], targets[i])
-
-
-def test_gamut_map_reduces_chroma_for_oog():
-    luts = _make_luts()
-    targets = np.array([[0.5, 0.3, 0.3]], dtype=np.float32)
-    mapped, mask = gamut_map_batch(targets, luts, de_threshold=0.05)
-    if mask[0]:
-        orig_chroma = np.sqrt(targets[0, 1]**2 + targets[0, 2]**2)
-        mapped_chroma = np.sqrt(mapped[0, 1]**2 + mapped[0, 2]**2)
-        assert mapped_chroma <= orig_chroma + 1e-6
-
-
-def test_gamut_map_batch_shape():
-    luts = _make_luts()
-    targets = np.random.rand(50, 3).astype(np.float32) * 0.8
-    mapped, mask = gamut_map_batch(targets, luts, de_threshold=0.05)
-    assert mapped.shape == (50, 3)
-    assert mask.shape == (50,)
-    assert mask.dtype == bool
-
-
-def test_gamut_map_l_preserved():
-    luts = _make_luts()
-    targets = np.array([
-        [0.3, 0.2, 0.2],
-        [0.7, -0.2, 0.2],
-    ], dtype=np.float32)
-    mapped, mask = gamut_map_batch(targets, luts, de_threshold=0.05)
-    for i in range(len(targets)):
-        if mask[i]:
-            np.testing.assert_almost_equal(mapped[i, 0], targets[i, 0], decimal=3)
-
-
-from lut import LUTEntry, build_hull_from_luts, query_luts_batch, nearest_sample_de_unweighted
+from lut import LUTEntry, build_hull_from_luts, nearest_sample_de_unweighted
 from solve import gamut_map_hull_batch, gamut_map_hue_preserving_batch
 
 
@@ -105,20 +62,25 @@ def _oklab_hue(points: np.ndarray) -> np.ndarray:
     return (np.degrees(np.arctan2(arr[..., 2], arr[..., 1])) % 360.0).astype(np.float32)
 
 
-def test_hull_returns_in_gamut_results():
-    """Hull-projected points should have low dE against the LUT."""
-    luts = _make_luts()
+def test_hull_projects_outside_points_back_to_boundary():
+    """Points just outside known facets should project onto the hull boundary."""
+    luts = _sparse_tetrahedron_luts()
     hull = build_hull_from_luts(luts)
-    # Highly saturated OOG target
-    targets = np.array([
-        [0.5, 0.3, 0.3],
-        [0.3, -0.2, 0.2],
-    ], dtype=np.float32)
+
+    boundary_points = np.asarray(
+        [hull.points[simplex].mean(axis=0) for simplex in hull.simplices[:2]],
+        dtype=np.float32,
+    )
+    targets = (
+        boundary_points + 0.2 * hull.equations[:2, :3]
+    ).astype(np.float32)
+
     mapped, mask = gamut_map_hull_batch(targets, luts, hull)
-    # After projection, dE against LUT should be small
-    from lut import query_luts_batch
-    _, de = query_luts_batch(luts, mapped)
-    assert de.max() < 0.10, f"Max dE after hull projection: {de.max()}"
+
+    assert np.all(mask)
+    np.testing.assert_allclose(mapped, boundary_points, atol=1e-6, rtol=0.0)
+    signed_distances = mapped @ hull.equations[:, :3].T + hull.equations[:, 3]
+    assert float(signed_distances.max()) <= 1e-6
 
 
 def test_hull_preserves_in_gamut():
@@ -145,29 +107,6 @@ def test_hull_preserves_sparse_interior_points():
     np.testing.assert_allclose(mapped, target, atol=1e-6)
 
 
-def test_chroma_mapping_does_not_replace_with_worse_target():
-    """Chroma compression must not move a target farther from the nearest LUT color."""
-    points = np.asarray([[0.50, 0.11, 0.00]], dtype=np.float32)
-    luts = [
-        LUTEntry(
-            filaments=("unit",),
-            thicknesses=np.zeros((len(points), 1), dtype=np.float32),
-            cap_thicknesses=np.zeros(len(points), dtype=np.float32),
-            oklab=points,
-            tree=KDTree(points),
-        )
-    ]
-    target = np.asarray([[0.50, 0.10, 0.00]], dtype=np.float32)
-    _, before = query_luts_batch(luts, target)
-
-    mapped, mask = gamut_map_batch(target, luts, de_threshold=0.005)
-    _, after = query_luts_batch(luts, mapped)
-
-    assert bool(mask[0])
-    np.testing.assert_allclose(mapped, target, atol=1e-6)
-    assert float(after[0]) <= float(before[0]) + 1e-9
-
-
 def test_hull_shape():
     """Output shape matches input."""
     luts = _make_luts()
@@ -178,7 +117,7 @@ def test_hull_shape():
     assert mask.shape == (30,)
 
 
-def test_unified_masks_are_chroma_weight_invariant_for_chroma_and_hull():
+def test_unified_masks_are_chroma_weight_invariant_for_hue_and_hull():
     points = np.asarray(
         [
             [0.20, -0.20, -0.20],
@@ -201,9 +140,9 @@ def test_unified_masks_are_chroma_weight_invariant_for_chroma_and_hull():
     luts_w1 = _lut_from_points(points, chroma_weight=1.0)
     luts_w3 = _lut_from_points(points, chroma_weight=3.0)
 
-    _, chroma_mask_w1 = gamut_map_batch(targets, luts_w1, de_threshold=0.05)
-    _, chroma_mask_w3 = gamut_map_batch(targets, luts_w3, de_threshold=0.05)
-    np.testing.assert_array_equal(chroma_mask_w1, chroma_mask_w3)
+    _, hue_mask_w1 = gamut_map_hue_preserving_batch(targets, luts_w1, de_threshold=0.05)
+    _, hue_mask_w3 = gamut_map_hue_preserving_batch(targets, luts_w3, de_threshold=0.05)
+    np.testing.assert_array_equal(hue_mask_w1, hue_mask_w3)
 
     hull_w1 = build_hull_from_luts(luts_w1)
     hull_w3 = build_hull_from_luts(luts_w3)
@@ -236,9 +175,9 @@ def test_unified_out_of_gamut_masks_are_tolerance_monotonic():
         dtype=np.float32,
     )
 
-    _, chroma_low = gamut_map_batch(targets, luts, de_threshold=0.03)
-    _, chroma_high = gamut_map_batch(targets, luts, de_threshold=0.20)
-    assert np.all(chroma_high <= chroma_low)
+    _, hue_low = gamut_map_hue_preserving_batch(targets, luts, de_threshold=0.03)
+    _, hue_high = gamut_map_hue_preserving_batch(targets, luts, de_threshold=0.20)
+    assert np.all(hue_high <= hue_low)
 
     _, hull_low = gamut_map_hull_batch(targets, luts, hull, de_threshold=0.03)
     _, hull_high = gamut_map_hull_batch(targets, luts, hull, de_threshold=0.20)
@@ -302,7 +241,7 @@ def test_hue_preserving_mapping_keeps_hue_for_remapped_pixels():
     np.testing.assert_allclose(_oklab_hue(mapped)[0], _oklab_hue(targets)[0], atol=1e-5)
 
 
-def test_hue_preserving_degenerates_to_chroma_mapping_for_in_range_lightness():
+def test_hue_preserving_in_range_lightness_contract():
     points = np.asarray(
         [
             [0.50, 0.00, 0.00],
@@ -314,11 +253,15 @@ def test_hue_preserving_degenerates_to_chroma_mapping_for_in_range_lightness():
     luts = _lut_from_points(points)
     targets = np.asarray([[0.50, 0.30, 0.12]], dtype=np.float32)
 
-    chroma_mapped, chroma_mask = gamut_map_batch(targets, luts, de_threshold=0.03)
     hue_mapped, hue_mask = gamut_map_hue_preserving_batch(targets, luts, de_threshold=0.03)
 
-    np.testing.assert_array_equal(hue_mask, chroma_mask)
-    np.testing.assert_allclose(hue_mapped, chroma_mapped, atol=5e-5, rtol=0.0)
+    expected_mask = nearest_sample_de_unweighted(luts, targets) > 0.03
+    np.testing.assert_array_equal(hue_mask, expected_mask)
+    np.testing.assert_allclose(hue_mapped[:, 0], targets[:, 0], atol=1e-7, rtol=0.0)
+    np.testing.assert_allclose(_oklab_hue(hue_mapped), _oklab_hue(targets), atol=1e-5)
+    mapped_chroma = np.linalg.norm(hue_mapped[:, 1:], axis=1)
+    target_chroma = np.linalg.norm(targets[:, 1:], axis=1)
+    assert np.all(mapped_chroma <= target_chroma + 1e-7)
 
 
 def test_hue_preserving_bright_tint_descends_without_hue_shift_or_white_clip():

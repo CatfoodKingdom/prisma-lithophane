@@ -1363,8 +1363,8 @@ def build_color_pair_corrections_v1(
     into a darken, which improves knot-exactness aggregates on near-black
     stacks (T ~ 0.003-0.01) but measurably worsens the user-visible cool-hue
     objective (blue mean dH -8.37 -> -12.65 deg, cyan +1.99 -> +3.52 deg vs
-    the +/-5 deg criterion; see DevelopmentSandbox/model_domain_conversion/
-    pair_fix_review/REVIEW.md and pair_fix_rematch/REMATCH.md).  The summary's
+    the +/-5 deg criterion; see the historical pair-fix review and rematch
+    analysis.  The summary's
     ``identity_disabled_channel_curves`` diagnostic reports pair/channel
     curves whose every nonzero-thickness knot is identity, so a guard-induced
     silent disable of a calibrated pairing is visible in the artifact.
@@ -1476,7 +1476,7 @@ def build_color_pair_corrections_v1(
             "near_floor_threshold": "channel T_OD < predictor_floor * 2",
             "skip_condition": "near-floor channel and T_meas > T_OD",
             "interpolation_behavior": "invalid channel contributions are ignored; if a knot/channel has no valid contribution, store 1.0 so runtime falls back to OD-only for that channel",
-            "default_off_rationale": "guard worsens the user-visible cool-hue criterion (blue -8.37 -> -12.65 deg, cyan +1.99 -> +3.52 deg) to fix knots on near-black stacks; see pair_fix_review/REVIEW.md",
+            "default_off_rationale": "guard worsens the user-visible cool-hue criterion (blue -8.37 -> -12.65 deg, cyan +1.99 -> +3.52 deg) to fix knots on near-black stacks; historical pair-fix review retained this setting",
         },
         "pairs": pairs,
         "summary": {
@@ -2838,7 +2838,7 @@ class MulticolorInteractionModel:
         return best[1], descriptor, float(best[0])
 
     def color_pair_corrected_rgb(self, row: pd.Series, od_only: np.ndarray) -> tuple[np.ndarray, dict[str, float]] | None:
-        # See DevelopmentSandbox/model_domain_conversion/endpoint_lookup_probe/ENDPOINT_LOOKUP_REPORT.md:
+        # Historical model-domain endpoint probing established this evidence rule:
         # these pair rows are color-only evidence excluded from white-stack
         # context calibration, so calibrated matches use OD-only * C(d).
         match = self.color_pair_correction_match(row)

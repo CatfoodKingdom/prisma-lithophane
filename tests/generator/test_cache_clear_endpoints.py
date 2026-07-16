@@ -1,11 +1,10 @@
-"""Stage 9a Slice 3: /api/cache/clear-runs and /api/cache/clear-all endpoints.
+"""Safety and lifecycle coverage for the supported /api/cache/clear-all endpoint.
 
 Tests verify:
-- clear-runs empties RUN_CACHE_DIR + AUTO_RUNS_DIR, clears in-RAM solve_cache, keeps LUTs and output.
-- clear-all empties CACHE_DIR (runs + luts + auto_runs), clears in-RAM cache, keeps output.
-- Both spare the user-curated saved_runs/ (Stage 9c).
-- Both return HTTP 409 while a solve, export, or compare job is running.
-- Neither endpoint can reach outside CACHE_DIR (safe_clear_dir enforces the boundary).
+- clear-all empties CACHE_DIR (runs + luts + auto_runs), clears in-RAM caches, and keeps output.
+- It spares the user-curated saved_runs/ (Stage 9c).
+- It returns HTTP 409 while a solve, export, or palette-suggestion job is running.
+- It cannot reach outside CACHE_DIR (safe_clear_dir enforces the boundary).
 """
 from __future__ import annotations
 
@@ -104,58 +103,6 @@ def test_ensure_dirs_creates_auto_runs(tmp_path, monkeypatch):
     assert data_paths.AUTO_RUNS_DIR.is_dir()
 
 
-def test_clear_runs_keeps_luts_and_output(cache_dirs):
-    """clear-runs empties RUN_CACHE_DIR only; LUT_CACHE_DIR and OUTPUT_DIR survive."""
-    dirs = cache_dirs
-
-    # Seed some files
-    _write_file(dirs["runs"] / "card-1" / "run.json")
-    _write_file(dirs["runs"] / "card-2" / "de.png")
-    _write_file(dirs["luts"] / "some.lut")
-    _write_file(dirs["output"] / "out.3mf")
-
-    # Also put something in in-RAM solve_cache
-    server.session["solve_cache"]["card-1"] = {"solve": {}, "config": {}}
-    with server._PALETTE_BACKEND_CACHE_LOCK:
-        server._PALETTE_BACKEND_CACHE[("unit",)] = object()
-
-    resp = client.post("/api/cache/clear-runs")
-    assert resp.status_code == 200, resp.text
-
-    body = resp.json()
-    assert body["cleared"] == "runs"
-    # run-cache dir was emptied
-    assert not any(dirs["runs"].iterdir()), "runs/ should be empty after clear-runs"
-    # luts and output untouched
-    assert (dirs["luts"] / "some.lut").exists(), "LUT file must survive clear-runs"
-    assert (dirs["output"] / "out.3mf").exists(), "output file must survive clear-runs"
-    # in-RAM cache cleared
-    assert server.session["solve_cache"] == {}, "in-RAM solve_cache must be cleared"
-    assert len(server._PALETTE_BACKEND_CACHE) == 1, "clear-runs must keep reusable gamut data"
-
-
-def test_clear_runs_wipes_auto_runs_but_keeps_luts_and_saved(cache_dirs, tmp_path, monkeypatch):
-    """Stage 9c: clear-runs sweeps the auto_runs/ cache tier; LUTs + saved_runs/ survive."""
-    dirs = cache_dirs
-    saved = tmp_path / "saved_runs"
-    saved.mkdir()
-    monkeypatch.setattr(data_paths, "SAVED_RUNS_DIR", saved)
-
-    _write_file(dirs["runs"] / "card-1" / "run.json")
-    _write_file(dirs["auto_runs"] / "auto-1.zip")
-    _write_file(dirs["auto_runs"] / "auto-1.json")
-    _write_file(dirs["luts"] / "keep.lut")
-    _write_file(saved / "save-1.zip")
-
-    resp = client.post("/api/cache/clear-runs")
-    assert resp.status_code == 200, resp.text
-
-    assert not any(dirs["runs"].iterdir()), "runs/ should be empty after clear-runs"
-    assert not any(dirs["auto_runs"].iterdir()), "auto_runs/ should be empty after clear-runs"
-    assert (dirs["luts"] / "keep.lut").exists(), "LUT file must survive clear-runs"
-    assert (saved / "save-1.zip").exists(), "saved_runs/ must survive clear-runs"
-
-
 def test_clear_all_wipes_auto_runs_but_keeps_saved(cache_dirs, tmp_path, monkeypatch):
     """Stage 9c: clear-all sweeps auto_runs/ too; saved_runs/ survives."""
     dirs = cache_dirs
@@ -201,17 +148,6 @@ def test_clear_all_clears_luts_too(cache_dirs):
     assert server._PALETTE_BACKEND_CACHE == {}
 
 
-def test_clear_runs_removed_count(cache_dirs):
-    """The 'removed' field reflects the number of top-level entries deleted."""
-    dirs = cache_dirs
-    _write_file(dirs["runs"] / "a" / "f.json")
-    _write_file(dirs["runs"] / "b" / "g.json")
-
-    resp = client.post("/api/cache/clear-runs")
-    assert resp.status_code == 200
-    assert resp.json()["removed"] == 2
-
-
 def test_clear_all_removed_count(cache_dirs):
     """'removed' is the sum across the cleared cache subdirs."""
     dirs = cache_dirs
@@ -225,13 +161,6 @@ def test_clear_all_removed_count(cache_dirs):
     assert resp.json()["removed"] == 3
 
 
-def test_clear_runs_on_empty_dir_is_ok(cache_dirs):
-    """Clearing an already-empty runs dir returns 200 with removed=0."""
-    resp = client.post("/api/cache/clear-runs")
-    assert resp.status_code == 200
-    assert resp.json()["removed"] == 0
-
-
 def test_clear_all_on_empty_dirs_is_ok(cache_dirs):
     """Clearing already-empty dirs returns 200 with removed=0."""
     resp = client.post("/api/cache/clear-all")
@@ -240,76 +169,63 @@ def test_clear_all_on_empty_dirs_is_ok(cache_dirs):
 
 
 # ---------------------------------------------------------------------------
-# Tests: 409 guard — all three job types
+# Tests: 409 guard — all three living job types
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("endpoint", ["/api/cache/clear-runs", "/api/cache/clear-all"])
-def test_clear_refused_while_solve_running(cache_dirs, endpoint):
-    """Both endpoints return 409 when a solve job is active."""
+def test_clear_refused_while_solve_running(cache_dirs):
+    """The endpoint returns 409 when a solve job is active."""
     server.session["solve"]["status"] = "running"
-    resp = client.post(endpoint)
-    assert resp.status_code == 409, f"{endpoint} should be refused while solve is running"
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 409
 
 
-@pytest.mark.parametrize("endpoint", ["/api/cache/clear-runs", "/api/cache/clear-all"])
-def test_clear_refused_while_export_running(cache_dirs, endpoint):
-    """Both endpoints return 409 when an export job is active."""
+def test_clear_refused_while_export_running(cache_dirs):
+    """The endpoint returns 409 when an export job is active."""
     server.session["export"]["status"] = "running"
-    resp = client.post(endpoint)
-    assert resp.status_code == 409, f"{endpoint} should be refused while export is running"
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 409
 
 
-@pytest.mark.parametrize("endpoint", ["/api/cache/clear-runs", "/api/cache/clear-all"])
-def test_clear_refused_while_compare_running(cache_dirs, endpoint):
-    """Both endpoints return 409 when a compare job is active."""
-    server.session["compare"]["status"] = "running"
-    resp = client.post(endpoint)
-    assert resp.status_code == 409, f"{endpoint} should be refused while compare is running"
+def test_clear_refused_while_suggest_running(cache_dirs):
+    """The endpoint returns 409 when a palette-suggestion job is active."""
+    server.session["suggest"]["status"] = "running"
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 409
 
 
-@pytest.mark.parametrize("endpoint", ["/api/cache/clear-runs", "/api/cache/clear-all"])
 @pytest.mark.parametrize("status", ["idle", "complete", "error", "cancelled"])
-def test_clear_allowed_when_jobs_not_running(cache_dirs, endpoint, status):
-    """Endpoints succeed for every non-running status value."""
+def test_clear_allowed_when_jobs_not_running(cache_dirs, status):
+    """The endpoint succeeds for every non-running status value."""
     server.session["solve"]["status"] = status
     server.session["export"]["status"] = status
-    server.session["compare"]["status"] = status
-    resp = client.post(endpoint)
-    assert resp.status_code == 200, (
-        f"{endpoint} should be allowed when all jobs are '{status}'"
-    )
+    server.session["suggest"]["status"] = status
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
 # Tests: synchronous status assignment (TOCTOU fix)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("endpoint", ["/api/cache/clear-runs", "/api/cache/clear-all"])
-@pytest.mark.parametrize("job", ["solve", "export", "compare"])
-def test_assert_no_active_job_blocks_when_status_is_running(cache_dirs, endpoint, job):
+@pytest.mark.parametrize("job", ["solve", "export", "suggest"])
+def test_assert_no_active_job_blocks_when_status_is_running(cache_dirs, job):
     """_assert_no_active_job raises 409 as soon as status is 'running'.
 
-    The solve-start and compare-start handlers now set status='running'
+    The solve, export, and palette-suggestion start handlers set status='running'
     synchronously (before spawning the background thread), so the clear
     endpoints see the guard correctly without a race.  This test confirms the
     mechanism: setting session[job][status]='running' by hand (which is exactly
     what the synchronous assignment does) is enough to block the clear.
     """
     server.session[job]["status"] = "running"
-    resp = client.post(endpoint)
-    assert resp.status_code == 409, (
-        f"{endpoint} must return 409 immediately once {job} status='running'"
-    )
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 409
 
 
-def test_sync_export_endpoint_is_409_guarded_against_concurrent_run(cache_dirs):
-    """The synchronous /api/export/files endpoint must mark export 'running' for
-    its duration so a concurrent cache-clear is blocked. We exercise the guard's
-    409 branch: an export already in flight rejects a second synchronous export.
-    Previously this endpoint ran with no status guard, so a clear could race it.
-    """
+def test_background_export_start_is_409_guarded_against_concurrent_run(cache_dirs):
+    """The living start route rejects a second export while one is running."""
     server.session["export"]["status"] = "running"
-    resp = client.post("/api/export/files", json={})
+    resp = client.post("/api/export/files/start", json={})
     assert resp.status_code == 409, (
-        "synchronous /api/export/files must 409 when an export is already running"
+        "background /api/export/files/start must 409 when an export is already running"
     )
