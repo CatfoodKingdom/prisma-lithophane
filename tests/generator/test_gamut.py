@@ -111,7 +111,7 @@ def test_hull_shape():
     """Output shape matches input."""
     luts = _make_luts()
     hull = build_hull_from_luts(luts)
-    targets = np.random.rand(30, 3).astype(np.float32) * 0.8
+    targets = np.random.default_rng(0).random((30, 3), dtype=np.float32) * 0.8
     mapped, mask = gamut_map_hull_batch(targets, luts, hull)
     assert mapped.shape == (30, 3)
     assert mask.shape == (30,)

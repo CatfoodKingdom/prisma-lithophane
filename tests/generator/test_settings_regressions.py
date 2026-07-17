@@ -31,11 +31,11 @@ def test_retired_luminance_tiebreak_has_no_active_configuration_surface():
     active_paths = [
         generator_root / "server.py",
         generator_root / "facade.py",
-        generator_root / "app" / "app.js",
         generator_root / "pipeline" / "state.py",
         generator_root / "pipeline" / "staged_runner.py",
         generator_root / "pipeline" / "luminance_handler.py",
     ]
+    active_paths.extend((generator_root / "app").rglob("*.js"))
 
     for path in active_paths:
         assert "luminance_tiebreak" not in path.read_text(encoding="utf-8"), path
@@ -125,10 +125,10 @@ def test_white_cap_output_settings_are_profile_owned():
 def test_frontend_and_server_settings_profile_keys_match():
     import server
 
-    source = (Path(server.__file__).parent / "app" / "app.js").read_text(
+    source = (Path(server.__file__).parent / "app" / "core" / "application-context.js").read_text(
         encoding="utf-8"
     )
-    start = source.index("const SETTINGS_PROFILE_KEYS = [")
+    start = source.index("app.state.settings.SETTINGS_PROFILE_KEYS = [")
     end = source.index("];", start)
     frontend_keys = set(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', source[start:end]))
 

@@ -1,0 +1,299 @@
+/* ── Settings — Accordion layout ───────────────────────────────────────────── */
+
+.settings-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.accordion-group {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.accordion-header:hover { background: var(--control-hover); }
+
+.accordion-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid var(--muted);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  flex-shrink: 0;
+}
+.accordion-group.is-open .accordion-icon {
+  transform: rotate(90deg);
+}
+
+.accordion-summary {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.accordion-body {
+  padding: 0 16px 14px;
+  display: none;
+}
+.accordion-group.is-open .accordion-body {
+  display: block;
+}
+
+.settings-fields { display: flex; flex-direction: column; }
+.settings-fields .control-row { margin-bottom: 6px; gap: 8px; }
+.settings-fields .control-row:last-child { margin-bottom: 0; }
+.settings-fields .control-label { min-width: 140px; }
+.settings-fields .control-input { width: 100px; }
+.settings-fields select.control-input { width: auto; min-width: 100px; }
+
+/* ── Settings: Multi-column layout ─────────────────────────────────────────── */
+
+.settings-grid {
+  display: flex;
+  gap: 0 24px;
+  height: 100%;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+.settings-column {
+  flex: 0 0 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-group {
+  /* no fixed width — column container handles it */
+}
+
+.settings-section-head {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 0 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--line);
+}
+.settings-subsection-head {
+  margin: 12px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  padding-top: 5px;
+  padding-bottom: 3px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.settings-subsection-head:first-of-type {
+  margin-top: 4px;
+}
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.settings-table td {
+  padding: 3px 0;
+  vertical-align: middle;
+}
+.settings-table td:first-child {
+  color: var(--ink);
+  padding-right: 10px;
+  white-space: nowrap;
+}
+.settings-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+.settings-grid:not(.show-advanced-settings) .advanced-setting {
+  display: none !important;
+}
+.segmented-control {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--control-bg);
+  vertical-align: middle;
+}
+.segmented-btn {
+  min-width: 68px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.segmented-btn:last-child {
+  border-right: 0;
+}
+.segmented-btn:hover {
+  background: var(--control-hover);
+}
+.segmented-btn.is-active {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+.settings-section-copy {
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.stg-hint { font-size: 10px; color: var(--muted); padding: 0 0 2px; font-style: italic; }
+.stg-footnote {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.stg-range { font-size: 10px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
+.range-row {
+  display: inline-grid;
+  grid-template-columns: auto minmax(96px, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 230px;
+}
+.range-row input[type="range"] {
+  width: 100%;
+  min-width: 96px;
+}
+.range-end-label,
+.range-value {
+  font-size: 10px;
+  color: var(--muted);
+}
+.range-value {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Settings table reuses .input-with-unit from the Image tab */
+.stg-iwu { width: 72px; }
+.stg-iwu .unit-input { width: 42px; }
+.luminance-limit-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.luminance-limit-range {
+  grid-template-columns: auto minmax(88px, 1fr) auto;
+  min-width: 180px;
+}
+.chroma-weight-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 172px;
+  max-width: 100%;
+  min-width: 0;
+}
+.chroma-weight-track {
+  flex: 1 1 110px;
+  min-width: 0;
+}
+.chroma-weight-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: -3px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.chroma-weight-track .control-slider {
+  width: 100%;
+  min-width: 80px;
+}
+.chroma-weight-control .range-value {
+  flex: 0 0 34px;
+}
+
+/* Superpixel fields: visible but disabled when per-pixel mode */
+.stg-range-note { font-size: 10px; color: var(--muted); font-style: italic; }
+.stg-select {
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--panel);
+  max-width: 100%;
+}
+/* Filament dropdowns can hold long "Manufacturer Name" values (e.g. "Bambu
+   Bambu Tough White"). Without a cap the <select> auto-widens its table cell
+   and pushes the settings group past its fixed column width; cap it and
+   ellipsize so the column geometry stays fixed. */
+.stg-filament-select {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#cfgBaseFilament { text-align-last: right; }
+.stg-check { font-size: 13px; cursor: pointer; }
+.stg-check input { margin-right: 4px; vertical-align: middle; }
+
+.settings-derived {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.settings-derived:empty {
+  margin-top: 3px;
+  padding-top: 0;
+  line-height: 0;
+}
+.settings-derived strong { color: var(--ink); }
+.settings-summary {
+  margin-top: 7px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.settings-summary strong { color: var(--ink); }
+
+.border-sub { padding-left: 20px; }
+.border-sub.is-hidden { display: none; }
+
+.ams-derived {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 0 0 0;
+}

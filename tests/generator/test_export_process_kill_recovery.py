@@ -9,6 +9,9 @@ import pytest
 from Prisma.lib.export_stage_recovery import reconcile_interrupted_export_stages
 
 
+pytestmark = [pytest.mark.process, pytest.mark.slow]
+
+
 @pytest.mark.parametrize(
     ("boundary", "published"),
     [

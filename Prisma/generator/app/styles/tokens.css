@@ -1,0 +1,88 @@
+/* ── Prisma Generator — Stylesheet ─────────────────────────────────────────── */
+/* Utilitarian technical tool. Shares visual language with unified_calibration. */
+
+:root {
+  --bg: #f5f5f3;
+  --panel: #ffffff;
+  --surface-inset: #fbfbfa;
+  --surface-raised: #f7f7f5;
+  --drawer-bg: #f8f8f6;
+  --header-bg: #e6e6e0;
+  --control-bg: #ffffff;
+  --control-hover: #f7f7f5;
+  --checker-light: #fafaf8;
+  --checker-dark: #f1f1ee;
+  --line: #d7d7d2;
+  --line-strong: #bdbdb6;
+  --ink: #1f1f1b;
+  --muted: #62625c;
+  --table-head: #37474f;
+  --table-head-ink: #ffffff;
+  --selected: #eef5f8;
+  --ok-bg: #e9f4ea;
+  --ok-ink: #2e7d32;
+  --warn-bg: #fff4de;
+  --warn-ink: #b26a00;
+  --idle-bg: #eceff1;
+  --idle-ink: #546e7a;
+  --error-bg: #fce4ec;
+  --error-ink: #c62828;
+  --accent: #22577a;
+  --accent-hover: #1b4563;
+  --accent-fill: #22577a;
+  --accent-fill-hover: #1b4563;
+  --on-accent: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.35);
+  --drawer-scrim: rgba(0, 0, 0, 0.2);
+  --subtle-hover: rgba(0, 0, 0, 0.04);
+  --inverse-bg: #2c2c2c;
+  --inverse-ink: #ffffff;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  --window-header-control-height: 30px;
+  --window-header-pad-x: 10px;
+  --window-header-pad-y: 3px;
+  --z-persistent-overlay: 90;
+  --z-modal-overlay: 200;
+  --z-lightbox: 1000;
+  --z-interrupt-dialog: 5000;
+  --z-toast: 9999;
+}
+
+:root[data-theme="dark"] {
+  --bg: #171918;
+  --panel: #222522;
+  --surface-inset: #1d201e;
+  --surface-raised: #292d2a;
+  --drawer-bg: #1b1e1c;
+  --header-bg: #2c312d;
+  --control-bg: #292d2a;
+  --control-hover: #303531;
+  --checker-light: #272b28;
+  --checker-dark: #202320;
+  --line: #3b413c;
+  --line-strong: #535b54;
+  --ink: #eceeea;
+  --muted: #aeb5ae;
+  --table-head: #303632;
+  --table-head-ink: #f4f6f3;
+  --selected: #293a40;
+  --ok-bg: #1f2c21;
+  --ok-ink: #6fbd79;
+  --warn-bg: #302719;
+  --warn-ink: #efb35f;
+  --idle-bg: #242a2d;
+  --idle-ink: #a9bac4;
+  --error-bg: #321f20;
+  --error-ink: #ef7770;
+  --accent: #68a6c8;
+  --accent-hover: #8bc2de;
+  --accent-fill: #2f6f96;
+  --accent-fill-hover: #285f80;
+  --on-accent: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.58);
+  --drawer-scrim: rgba(0, 0, 0, 0.42);
+  --subtle-hover: rgba(255, 255, 255, 0.06);
+  --inverse-bg: #eceeea;
+  --inverse-ink: #1f2320;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}

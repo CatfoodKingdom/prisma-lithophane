@@ -8,7 +8,7 @@
 
 These are static guards over tracked source; the behavioral guarantee that a
 solved result never contains ``__translucent_underfill__`` is pinned separately
-by ``test_staged_backend.py``.
+by the focused suites under ``tests/generator/solver``.
 """
 from __future__ import annotations
 

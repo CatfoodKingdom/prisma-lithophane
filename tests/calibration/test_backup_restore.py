@@ -34,7 +34,7 @@ from backup_restore import (
     validate_backup_package,
 )
 from sqlite_data_access import SQLiteDataStore
-from tests.calibration.test_backend_selector import (
+from tests.calibration.support.backend_fixtures import (
     _materialize_stage2c_fixture_assets,
     _seed_stage2a_projection_fixture,
     _sqlite_with_final_schema,

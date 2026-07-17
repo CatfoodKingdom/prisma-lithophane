@@ -173,15 +173,24 @@ def _build_published_test_library() -> None:
 
 _build_published_test_library()
 PROFILES_DIR = _TEST_LIBRARY / "filaments" / "profiles"
-os.environ.setdefault("PRISMA_MODEL_LIBRARY_ROOT", str(_TEST_LIBRARY))
-os.environ.setdefault("PRISMA_MODEL_LIBRARIES_ROOT", str(_TEST_RUNTIME_ROOT / "Model Libraries"))
-os.environ.setdefault("PRISMA_USER_DATA_ROOT", str(_TEST_RUNTIME_ROOT / "Workspace"))
-os.environ.setdefault("PRISMA_IMAGE_ROOT", str(_TEST_RUNTIME_ROOT / "Images"))
-os.environ.setdefault("PRISMA_EXPORT_ROOT", str(_TEST_RUNTIME_ROOT / "Exports"))
+_ISOLATED_ENVIRONMENT = {
+    "PRISMA_MODEL_LIBRARY_ROOT": _TEST_LIBRARY,
+    "PRISMA_MODEL_LIBRARIES_ROOT": _TEST_RUNTIME_ROOT / "Model Libraries",
+    "PRISMA_USER_DATA_ROOT": _TEST_RUNTIME_ROOT / "Workspace",
+    "PRISMA_IMAGE_ROOT": _TEST_RUNTIME_ROOT / "Images",
+    "PRISMA_EXPORT_ROOT": _TEST_RUNTIME_ROOT / "Exports",
+}
+for _name, _path in _ISOLATED_ENVIRONMENT.items():
+    resolved = _path.resolve()
+    if not resolved.is_relative_to(_TEST_RUNTIME_ROOT.resolve()):
+        raise RuntimeError(f"Refusing non-temporary test path for {_name}: {resolved}")
+    os.environ[_name] = str(resolved)
+os.environ["PRISMA_PUBLISHED_LIBRARY_MODE"] = "1"
+os.environ["PRISMA_TEST_ACTIVE_PRODUCT"] = "generator"
 
 
-@pytest.fixture(autouse=True)
-def _supply_default_photo_stack_bundle(monkeypatch):
+@pytest.fixture(scope="session", autouse=True)
+def _supply_default_photo_stack_bundle():
     """Give solve tests a resolvable photo-stack bundle.
 
     The default appearance provider is ``photo_stack_bundle``, which requires an
@@ -192,11 +201,11 @@ def _supply_default_photo_stack_bundle(monkeypatch):
     no path is supplied. Tests that set their own ``photo_stack_bundle_path`` are
     unaffected.
     """
-    monkeypatch.setenv("PRISMA_PUBLISHED_LIBRARY_MODE", "1")
     try:
         import appearance_model as am
         from lib.photo_stack_model.default_bundle import DEFAULT_PHOTO_STACK_BUNDLE_PATH
     except Exception:
+        yield
         return  # generator/lib not importable in this context; nothing to patch
 
     orig_init = am.PhotoStackBundleAppearanceProvider.__init__
@@ -207,4 +216,8 @@ def _supply_default_photo_stack_bundle(monkeypatch):
             use_corrections = False
         orig_init(self, bundle_path=bundle_path, use_corrections=use_corrections)
 
-    monkeypatch.setattr(am.PhotoStackBundleAppearanceProvider, "__init__", _init)
+    am.PhotoStackBundleAppearanceProvider.__init__ = _init
+    try:
+        yield
+    finally:
+        am.PhotoStackBundleAppearanceProvider.__init__ = orig_init

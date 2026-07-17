@@ -15,7 +15,10 @@ from image_import_custody import (
     reconcile_transactions,
     transaction_root,
 )
-from tests.calibration.test_sqlite_stage3b_image_custody import _conn, _store
+from tests.calibration.support.datastore_fixtures import (
+    connect_rows as _conn,
+    make_seeded_store as _store,
+)
 
 
 def _new_plan(store, filename: str, payload: bytes, image_asset_id: str = "img-journal"):

@@ -186,3 +186,5 @@ const STATIC_FILAMENTS = [
     "has_profile": true
   }
 ];
+
+export { STATIC_FILAMENTS };

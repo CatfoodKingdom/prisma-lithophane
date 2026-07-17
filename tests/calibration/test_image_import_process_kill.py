@@ -13,6 +13,9 @@ from image_import_custody import reconcile_transactions, transaction_root
 from sqlite_data_access import SQLiteDataStore
 
 
+pytestmark = [pytest.mark.process, pytest.mark.slow]
+
+
 @pytest.mark.parametrize(
     ("boundary", "committed", "duplicate"),
     [

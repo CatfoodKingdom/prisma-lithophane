@@ -70,3 +70,9 @@ packaging = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "browser: browser-driven characterization or end-to-end coverage",
+    "platform: behavior that only applies to selected operating systems",
+    "process: subprocess termination, recovery, or process-boundary behavior",
+    "slow: deterministic tests excluded from the contributor fast tier",
+]

@@ -16,13 +16,15 @@ from Prisma.calibration.fitting.camera_transform.fit import assign_validation_fo
 from Prisma.calibration.fitting.camera_transform.job import run_camera_transform_build_job
 from Prisma.calibration.fitting.camera_transform.lut import bake_inverse_lut
 from Prisma.lib.camera_transform import CAMERA_TRANSFORM_CURRENT, apply_forward, load_camera_transform, load_inverse_lut
+from tests.calibration.support.model_artifact_fixtures import (
+    camera_validation_metrics as _validation_metrics,
+    identity_camera_params as _identity_params,
+)
 
 
-def _identity_params() -> np.ndarray:
-    params = np.zeros(48, dtype=float)
-    params[0] = params[7] = params[14] = 1.0
-    params[18:] = np.tile(np.array([-10.0] + [float(np.log(np.e - 1.0))] * 9), 3)
-    return params
+pytestmark = pytest.mark.slow
+
+
 
 
 def _synthetic_df(n: int = 240) -> pd.DataFrame:
@@ -66,22 +68,6 @@ def test_sparse_synthetic_fit_recovers_identity_and_validation_folds_are_determi
     assert result.metrics["n_censored_from_loss"] == 1
 
 
-def _validation_metrics(mean: float = 1.0) -> dict:
-    return {
-        "validation": {
-            "method": "sample_grouped_5_fold_oof_v1",
-            "fold_count": 5,
-            "dE76_CIELAB": {"mean": mean, "median": mean, "p90": mean, "n": 40},
-            "OKLab": {"mean": 0.01, "median": 0.01, "p90": 0.01, "n": 40},
-            "folds": [],
-        },
-        "final_fit": {
-            "sample_count": 5,
-            "row_count": 40,
-            "uncensored_row_count": 40,
-            "training_dE76_CIELAB": {"mean": 1.0, "median": 1.0, "p90": 1.0, "n": 40},
-        },
-    }
 
 
 def _payload(created_by: str, params: np.ndarray | None = None) -> dict:

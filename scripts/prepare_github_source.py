@@ -66,6 +66,7 @@ EXCLUDED_ASSETS = (
     "Prisma/data/",
     "Prisma/calibration/docs/",
     "Prisma/generator/docs/",
+    "Prisma/generator/.tmp/",
     "Prisma/lib/photo_stack_model/bundles/runtime_bundle.json",
     "tests/generator/preprocessing/fixtures/wing_d/",
 )

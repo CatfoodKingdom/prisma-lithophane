@@ -20,13 +20,15 @@ import processing.extraction as extraction
 import server
 import sqlite_data_access
 from sqlite_data_access import SQLiteDataStore
-from tests.calibration.test_backend_selector import (
+from tests.calibration.support.backend_fixtures import (
     _materialize_stage2c_fixture_assets,
     _seed_stage2a_projection_fixture,
     _sqlite_with_final_schema,
 )
-from tests.calibration.test_sqlite_stage4_extraction_writes import _result as _extraction_result
-from tests.calibration.test_sqlite_stage3b_image_custody import _add_image_asset
+from tests.calibration.support.datastore_fixtures import add_image_asset as _add_image_asset
+from tests.calibration.support.extraction_fixtures import (
+    make_extraction_result as _extraction_result,
+)
 
 
 def _store(tmp_path: Path) -> SQLiteDataStore:

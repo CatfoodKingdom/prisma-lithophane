@@ -4,7 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Prisma — Color Lithophane Generator</title>
-  <link rel="stylesheet" href="style.css?v=2026-07-14-ui31">
+  <script data-prisma-theme-bootstrap>
+    (() => {
+      const key = "prisma_generator_theme";
+      const allowed = new Set(["system", "light", "dark"]);
+      let preference = "system";
+      try { preference = localStorage.getItem(key) || "system"; } catch { /* use system */ }
+      if (!allowed.has(preference)) preference = "system";
+      const resolved = preference === "system"
+        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : preference;
+      document.documentElement.dataset.themePreference = preference;
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css?v=2026-07-17-dark1">
 </head>
 <body>
   <div class="app-shell">
@@ -99,6 +114,11 @@
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
             </svg>
             <span class="settings-gear-label">Settings</span>
+          </button>
+          <button class="topbar-utility-button theme-menu-button" id="themeMenuBtn" type="button"
+                  aria-haspopup="menu" aria-expanded="false" aria-controls="themeMenu" aria-label="Theme: System" title="Theme: System">
+            <span class="theme-button-prefix">Theme:</span>
+            <span id="themeCurrentValue">System</span>
           </button>
           <span class="mode-utility-spacer" aria-hidden="true"></span>
           <button class="topbar-utility-button top-temp-clear-btn" id="clearAllTempBtn"
@@ -1433,8 +1453,18 @@
     <div class="comp-lightbox-content" id="compLightboxContent"></div>
   </div>
 
-  <script src="data.js?v=2026-04-14-ui22"></script>
-  <script src="api.js?v=2026-07-14-ui31"></script>
-  <script src="app.js?v=2026-07-14-ui31"></script>
+  <div class="theme-menu" id="themeMenu" role="menu" aria-label="Theme" hidden>
+    <button type="button" role="menuitemradio" data-theme-preference="system" aria-checked="true">
+      <span>System</span><small>Follow this device</small>
+    </button>
+    <button type="button" role="menuitemradio" data-theme-preference="light" aria-checked="false">
+      <span>Light</span><small>Always use light mode</small>
+    </button>
+    <button type="button" role="menuitemradio" data-theme-preference="dark" aria-checked="false">
+      <span>Dark</span><small>Always use dark mode</small>
+    </button>
+  </div>
+
+  <script type="module" src="bootstrap.js?v=2026-07-17-dark1"></script>
 </body>
 </html>

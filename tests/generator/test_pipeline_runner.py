@@ -158,7 +158,7 @@ def test_run_pipeline_full():
         preset=FULL_PRESET,
     )
 
-    img = np.random.randint(0, 256, (8, 8, 3), dtype=np.uint8)
+    img = np.random.default_rng(0).integers(0, 256, (8, 8, 3), dtype=np.uint8)
     state = run_pipeline(img, cfg)
 
     assert state.profiles is not None
@@ -187,7 +187,7 @@ def test_run_pipeline_preview():
         preset=PREVIEW_PRESET,
     )
 
-    img = np.random.randint(0, 256, (8, 8, 3), dtype=np.uint8)
+    img = np.random.default_rng(1).integers(0, 256, (8, 8, 3), dtype=np.uint8)
     state = run_pipeline(img, cfg)
 
     assert state.thickness_maps is not None
@@ -213,7 +213,7 @@ def test_run_pipeline_progress_callback():
         preset=FULL_PRESET,
     )
 
-    img = np.random.randint(0, 256, (4, 4, 3), dtype=np.uint8)
+    img = np.random.default_rng(2).integers(0, 256, (4, 4, 3), dtype=np.uint8)
     run_pipeline(img, cfg, progress=on_progress)
 
     assert len(progress_calls) > 0
@@ -237,7 +237,7 @@ def test_run_pipeline_populates_diagnostics():
         model_domain_ingress=False,
         preset=FULL_PRESET,
     )
-    img = np.random.randint(0, 256, (4, 4, 3), dtype=np.uint8)
+    img = np.random.default_rng(3).integers(0, 256, (4, 4, 3), dtype=np.uint8)
     state = run_pipeline(img, cfg)
 
     assert "__de__" in state.diagnostics

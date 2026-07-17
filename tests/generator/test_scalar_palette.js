@@ -1,79 +1,55 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+"use strict";
 
-const APP_JS = fs.readFileSync(
-  path.resolve(__dirname, '../../Prisma/generator/app/app.js'),
-  'utf8',
-);
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { createFeatureHarness } = require("./support/application_harness.cjs");
 
-function paletteRuntime() {
-  const start = APP_JS.indexOf('const DIAGNOSTIC_PALETTE_INFERNO');
-  const end = APP_JS.indexOf('const SURFACE_CONTOUR_SCALE', start);
-  const legendStart = APP_JS.indexOf('function getDiagnosticPaletteLegendState');
-  const legendEnd = APP_JS.indexOf('function updateSolveLegend', legendStart);
-  assert.ok(start >= 0 && end > start && legendStart >= 0 && legendEnd > legendStart);
-  return Function(
-    'esc',
-    `${APP_JS.slice(start, end)}
-     ${APP_JS.slice(legendStart, legendEnd)}
-     return {
-       DIAGNOSTIC_PALETTE_INFERNO,
-       DIAGNOSTIC_PALETTE_LEGACY,
-       inferno,
-       legacyScalarPalette,
-       sampleScalarPalette,
-       getRunDiagnosticPaletteVersion,
-       getDiagnosticPaletteLegendState,
-       diagnosticPaletteLegendHtml,
-     };`,
-  )(value => String(value));
-}
+let app;
+test.before(async () => { ({ app } = await createFeatureHarness()); });
 
-test('frontend samples the canonical Inferno vector with documented half-up interpolation', () => {
-  const runtime = paletteRuntime();
-  assert.deepEqual(runtime.inferno(0), [0, 0, 4]);
-  assert.deepEqual(runtime.inferno(1 / 255), [1, 0, 5]);
-  assert.deepEqual(runtime.inferno(64 / 255), [87, 16, 110]);
-  assert.deepEqual(runtime.inferno(0.5), [187, 55, 85]);
-  assert.deepEqual(runtime.inferno(128 / 255), [188, 55, 84]);
-  assert.deepEqual(runtime.inferno(192 / 255), [249, 142, 9]);
-  assert.deepEqual(runtime.inferno(1), [252, 255, 164]);
+test("frontend samples the canonical Inferno vector with half-up interpolation", () => {
+  const inferno = (value) => app.commands.sampleScalarPalette(value, "inferno-v1");
+  assert.deepEqual(inferno(0), [0, 0, 4]);
+  assert.deepEqual(inferno(1 / 255), [1, 0, 5]);
+  assert.deepEqual(inferno(64 / 255), [87, 16, 110]);
+  assert.deepEqual(inferno(0.5), [187, 55, 85]);
+  assert.deepEqual(inferno(128 / 255), [188, 55, 84]);
+  assert.deepEqual(inferno(192 / 255), [249, 142, 9]);
+  assert.deepEqual(inferno(1), [252, 255, 164]);
 });
 
-test('unmarked runs use the exact legacy renderer and marked runs use Inferno', () => {
-  const runtime = paletteRuntime();
+test("run provenance selects legacy or Inferno diagnostic rendering", () => {
   const legacyRun = { results: {} };
-  const newRun = { results: { diagnostic_palette_version: 'inferno-v1' } };
-  assert.equal(runtime.getRunDiagnosticPaletteVersion(legacyRun), 'legacy-approximate');
-  assert.equal(runtime.getRunDiagnosticPaletteVersion(newRun), 'inferno-v1');
-  assert.deepEqual(runtime.sampleScalarPalette(0, 'legacy-approximate'), [68, 0, 83]);
-  assert.deepEqual(runtime.sampleScalarPalette(0, 'inferno-v1'), [0, 0, 4]);
+  const currentRun = { results: { diagnostic_palette_version: "inferno-v1" } };
+  assert.equal(app.commands.getRunDiagnosticPaletteVersion(legacyRun), "legacy-approximate");
+  assert.equal(app.commands.getRunDiagnosticPaletteVersion(currentRun), "inferno-v1");
+  assert.deepEqual(app.commands.sampleScalarPalette(0, "legacy-approximate"), [68, 0, 83]);
+  assert.deepEqual(app.commands.sampleScalarPalette(0, "inferno-v1"), [0, 0, 4]);
 });
 
-test('legends dispatch by provenance and mixed selections show a warning instead of one gradient', () => {
-  const runtime = paletteRuntime();
+test("mixed diagnostic provenance produces a warning instead of one gradient", () => {
+  app.commands.esc = (value) => String(value);
   const legacy = { results: {} };
-  const current = { results: { diagnostic_palette_version: 'inferno-v1' } };
-  const infernoState = runtime.getDiagnosticPaletteLegendState([current]);
+  const current = { results: { diagnostic_palette_version: "inferno-v1" } };
+  const infernoState = app.commands.getDiagnosticPaletteLegendState([current]);
   assert.equal(infernoState.mixed, false);
   assert.match(infernoState.gradient, /#000004/);
-  assert.match(runtime.diagnosticPaletteLegendHtml(infernoState), /data-diagnostic-palette="inferno-v1"/);
+  assert.match(app.commands.diagnosticPaletteLegendHtml(infernoState), /data-diagnostic-palette="inferno-v1"/);
 
-  const mixed = runtime.getDiagnosticPaletteLegendState([legacy, current]);
+  const mixed = app.commands.getDiagnosticPaletteLegendState([legacy, current]);
   assert.equal(mixed.mixed, true);
-  const html = runtime.diagnosticPaletteLegendHtml(mixed);
+  const html = app.commands.diagnosticPaletteLegendHtml(mixed);
   assert.match(html, /Mixed diagnostic palettes/);
   assert.doesNotMatch(html, /legend-bar/);
 });
 
-test('categorical and appearance views retain their existing color semantics', () => {
-  const richStart = APP_JS.indexOf('function renderExplorerRich');
-  const richBody = APP_JS.slice(richStart, APP_JS.indexOf('function initExplorerControls', richStart));
-  const recipeStart = APP_JS.indexOf('async function openRecipeLightbox');
-  const recipeBody = APP_JS.slice(recipeStart, APP_JS.indexOf('// Map a filament id', recipeStart));
-  assert.ok(!richBody.includes('sampleScalarPalette'));
-  assert.ok(!recipeBody.includes('sampleScalarPalette'));
-  assert.match(APP_JS, /case "predicted"[\s\S]*?return result\.predicted_appearance_url/);
+test("appearance and recipe views retain distinct result semantics", () => {
+  const run = {
+    results: {
+      predicted_appearance_url: "/appearance.png",
+      color_ceiling_url: "/regions.png",
+    },
+  };
+  assert.equal(app.commands._getSolveRunResultUrl(run.results, "predicted"), "/appearance.png");
+  assert.equal(app.commands.getSolveContourUrl(run, "recipe_regions"), "");
 });

@@ -21,8 +21,10 @@ def test_canonical_inferno_samples_and_frontend_lut_match() -> None:
     np.testing.assert_array_equal(sample_inferno(indices / 255.0), expected)
     np.testing.assert_array_equal(sample_inferno(np.array([0.5]))[0], [187, 55, 85])
 
-    app_js = (Path(__file__).parents[2] / "Prisma/generator/app/app.js").read_text(encoding="utf-8")
-    match = re.search(r'const INFERNO_RGB8_HEX = "([0-9a-f]+)";', app_js)
+    state_module = (
+        Path(__file__).parents[2] / "Prisma/generator/app/core/application-context.js"
+    ).read_text(encoding="utf-8")
+    match = re.search(r'INFERNO_RGB8_HEX\s*=\s*"([0-9a-f]+)";', state_module)
     assert match is not None
     assert match.group(1) == INFERNO_RGB8.tobytes().hex()
 

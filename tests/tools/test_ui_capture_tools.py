@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from tools.ui_diff import diff_images
-from tools.ui_screenshot import APP_REGISTRY, main as screenshot_main
+from tools.ui_screenshot import APP_REGISTRY, _parser, main as screenshot_main
 
 
 def _image(path: Path, color: tuple[int, int, int], size: tuple[int, int] = (4, 3)) -> None:
@@ -65,6 +65,10 @@ def test_generator_screenshot_recipes_match_current_navigation(capsys) -> None:
         "saved-runs",
         "loaded-run",
         "loaded-export",
+        "theme-menu",
+        "printers",
+        "model-libraries",
+        "active-filaments",
     } <= set(recipes)
     assert "comparison" not in recipes
     assert any(
@@ -76,3 +80,13 @@ def test_generator_screenshot_recipes_match_current_navigation(capsys) -> None:
     )
     assert screenshot_main(["--app", "generator", "--list-views"]) == 0
     assert "saved-runs" in capsys.readouterr().out
+
+
+def test_screenshot_cli_accepts_dark_color_scheme_without_changing_the_default() -> None:
+    parser = _parser()
+    default_args = parser.parse_args(["--app", "generator", "--view", "image"])
+    dark_args = parser.parse_args(
+        ["--app", "generator", "--view", "image", "--color-scheme", "dark"]
+    )
+    assert default_args.color_scheme == "light"
+    assert dark_args.color_scheme == "dark"

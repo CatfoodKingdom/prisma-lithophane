@@ -1,0 +1,290 @@
+/* ── Printer Configuration Page ─────────────────────────────────────────────── */
+
+/* Overlay that dims the tab content behind the config card */
+.printer-config-page {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--scrim);
+  overflow-y: auto;
+}
+
+.pc-card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: 680px;
+  width: min(92vw, 680px);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.pc-toolbar {
+  margin: 0 0 8px;
+}
+.pc-printer-select { width: 160px; font-size: 13px; padding: 4px 8px; }
+
+.pc-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pc-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 18px 14px;
+}
+
+.pc-section { margin-bottom: 14px; }
+
+.pc-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  border-radius: 0 0 6px 6px;
+}
+
+.pc-fields {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 4px 10px;
+  align-items: center;
+}
+.pc-fields .ctrl-lbl { font-size: 12px; color: var(--muted); text-align: right; }
+.pc-fields .control-input { font-size: 13px; padding: 4px 8px; width: 100%; max-width: 160px; }
+
+.pc-nozzle-table { border-collapse: collapse; font-size: 12px; }
+.pc-nozzle-table th {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 2px solid var(--line-strong);
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pc-nozzle-table td { padding: 3px 6px; border-bottom: 1px solid var(--line); }
+.pc-nozzle-table input {
+  width: 56px;
+  font-size: 12px;
+  padding: 3px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  text-align: right;
+}
+.ghost-button.danger { color: var(--error-ink); border-color: var(--error-ink); }
+.ghost-button.danger:hover { background: var(--error-bg); }
+
+@media print {
+  .left-rail, .topbar, .mode-panel, .toast, .detail-drawer,
+  .settings-drawer, .drawer-overlay, .modal-overlay { display: none; }
+  .app-shell { grid-template-columns: 1fr; }
+  .tab-content { padding: 0; }
+  .primary-button, .ghost-button { display: none; }
+}
+
+/* ── Module Panel ──────────────────────────────────────────────────────── */
+
+.module-toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 16px;
+  padding: 2px 4px 8px;
+}
+
+.module-toggle-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.module-slot-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.module-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  min-width: 0;
+}
+.module-toggle-row .module-toggle-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+.module-toggle-row .module-toggle-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.module-toggle-row input {
+  margin: 0;
+}
+
+.module-toggle-label {
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.module-posture-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.module-posture-badge.is-recommended {
+  background: color-mix(in srgb, var(--ok-bg) 82%, var(--panel));
+  border-color: color-mix(in srgb, var(--ok-ink) 18%, transparent);
+  color: var(--ok-ink);
+}
+.module-posture-badge.is-baseline {
+  background: color-mix(in srgb, var(--idle-bg) 72%, var(--panel));
+  border-color: color-mix(in srgb, var(--idle-ink) 16%, transparent);
+  color: var(--idle-ink);
+}
+.module-posture-badge.is-experimental {
+  background: color-mix(in srgb, var(--warn-bg) 82%, var(--panel));
+  border-color: color-mix(in srgb, var(--warn-ink) 18%, transparent);
+  color: var(--warn-ink);
+}
+.module-posture-badge.is-legacy {
+  background: color-mix(in srgb, var(--line) 76%, var(--panel));
+  border-color: color-mix(in srgb, var(--muted) 18%, transparent);
+  color: var(--muted);
+}
+
+/* ── Collapsible Settings Sections ─────────────────────────────────────── */
+
+.section-collapse-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 2px;
+  background: color-mix(in srgb, var(--selected) 62%, var(--panel));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+}
+.section-collapse-header:hover { background: var(--selected); }
+
+.section-collapse-arrow {
+  width: 0;
+  height: 0;
+  color: var(--muted);
+  flex: 0 0 auto;
+  margin: 0 4px;
+}
+
+.settings-group.is-expanded .section-collapse-header .section-collapse-arrow {
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+}
+
+.settings-group:not(.is-expanded) .section-collapse-header .section-collapse-arrow {
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+}
+
+.section-collapse-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+
+.section-collapse-body {
+  padding: 6px 0;
+}
+
+/* Hide the old h4 section heads once converted to collapsible */
+.settings-group.is-collapsible > .settings-section-head { display: none; }
+
+/* ── Dynamic Module Settings ───────────────────────────────────────────── */
+
+.module-settings-slot {
+  /* Block, not display:contents — algorithm needs measurable height for column distribution */
+}
+
+.module-settings-section {
+  /* sized by parent column */
+}
+
+.preprocessing-flow-unit {
+  min-width: 0;
+  padding-bottom: 2px;
+}
+.preprocessing-flow-unit .settings-subsection-head {
+  margin-top: 0;
+}
+.preprocessing-flow-unit .settings-subsection-head::before {
+  content: "Preprocessing · ";
+  color: color-mix(in srgb, var(--muted) 78%, var(--accent));
+  font-weight: 600;
+}
+
+.module-preset-table {
+  margin-bottom: 4px;
+}
+
+.module-preset-row td:first-child {
+  font-weight: 600;
+}
+
+.module-preset-select {
+  display: block;
+  width: 8rem;
+  max-width: 100%;
+  margin-left: auto;
+}
+.settings-profile-source {
+  max-width: min(100%, 520px);
+  padding: 3px 14px 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.module-advanced-param-row td:first-child {
+  color: var(--muted);
+}

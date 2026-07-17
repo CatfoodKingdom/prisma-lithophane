@@ -20,7 +20,8 @@ from processing import manual as manual_module
 from processing import processor
 from models import EvidenceBinding, MethodProvenance, ProcessingConfidence, ProcessingResult, SwatchMeasurement
 from sqlite_data_access import SQLiteDataStore
-from tests.calibration.test_sqlite_stage4_extraction_writes import _result, _store
+from tests.calibration.support.datastore_fixtures import make_seeded_store as _store
+from tests.calibration.support.extraction_fixtures import make_extraction_result as _result
 
 
 def _wait_reextract_job(client: TestClient, job_id: str, *, timeout: float = 3.0) -> dict:

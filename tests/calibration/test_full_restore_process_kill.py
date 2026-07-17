@@ -13,6 +13,9 @@ from restore_recovery import paths_for, reconcile
 from sqlite_data_access import SQLiteDataStore
 
 
+pytestmark = [pytest.mark.process, pytest.mark.slow]
+
+
 RESTORE_BOUNDARIES = [
     "after_journal",
     "after_asset_identity",

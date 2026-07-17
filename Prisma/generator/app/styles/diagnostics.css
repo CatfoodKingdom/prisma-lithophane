@@ -1,0 +1,522 @@
+/* ── Surface diagnostic views ─────────────────────────── */
+:root {
+  --diagnostic-controls-bg: rgba(30, 30, 30, 0.9);
+  --diagnostic-controls-ink: #eeeeee;
+  --diagnostic-controls-line: #555555;
+  --diagnostic-controls-strong: #ffffff;
+  --diagnostic-controls-muted: #aaaaaa;
+  --recipe-topbar-bg: rgba(18, 22, 26, 0.92);
+  --recipe-panel-bg: rgba(24, 28, 32, 0.96);
+  --recipe-panel-strong-bg: rgba(24, 28, 32, 0.98);
+  --recipe-readout-bg: rgba(20, 24, 28, 0.94);
+  --recipe-ink: #eef0f2;
+  --recipe-ink-strong: #ffffff;
+  --recipe-ink-90: rgba(255, 255, 255, 0.9);
+  --recipe-ink-82: rgba(255, 255, 255, 0.82);
+  --recipe-ink-70: rgba(255, 255, 255, 0.7);
+  --recipe-ink-68: rgba(255, 255, 255, 0.68);
+  --recipe-ink-55: rgba(255, 255, 255, 0.55);
+  --recipe-ink-50: rgba(255, 255, 255, 0.5);
+  --recipe-ink-40: rgba(255, 255, 255, 0.4);
+  --recipe-line-30: rgba(255, 255, 255, 0.3);
+  --recipe-line-20: rgba(255, 255, 255, 0.2);
+  --recipe-line-16: rgba(255, 255, 255, 0.16);
+  --recipe-line-12: rgba(255, 255, 255, 0.12);
+  --recipe-line-10: rgba(255, 255, 255, 0.1);
+  --recipe-fill-08: rgba(255, 255, 255, 0.08);
+  --recipe-fill-07: rgba(255, 255, 255, 0.07);
+  --recipe-fill-06: rgba(255, 255, 255, 0.06);
+  --recipe-selection-bg: rgba(0, 200, 255, 0.16);
+  --recipe-selection-line: rgb(0, 200, 255);
+  --recipe-focus: #4aa3ff;
+  --recipe-shadow: rgba(0, 0, 0, 0.25);
+  --diagnostic-empty-mat: #000000;
+}
+.surface-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: var(--surface-inset);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.surface-control-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  user-select: none;
+}
+.surface-control-value {
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.surface-control-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+.surface-slider {
+  flex: 1;
+  min-width: 120px;
+  max-width: 300px;
+}
+.surface-canvas-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+}
+.surface-canvas-wrap canvas {
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+/* Surface lightbox (fullscreen interactive) */
+.surface-lightbox-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+}
+.surface-lightbox-wrap > .comp-lightbox-topbar { align-self: stretch; }
+.surface-lightbox-controls {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: calc(100vw - 48px);
+  background: var(--diagnostic-controls-bg);
+  color: var(--diagnostic-controls-ink);
+  border-bottom: 1px solid var(--diagnostic-controls-line);
+}
+.surface-lightbox-controls .surface-control-value { color: var(--diagnostic-controls-strong); }
+.surface-lightbox-controls .surface-control-hint { color: var(--diagnostic-controls-muted); }
+.surface-lightbox-frame {
+  position: relative;
+  display: inline-block;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.comp-lightbox-content .surface-lightbox-canvas {
+  position: static;
+  display: block;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: auto;
+  height: auto;
+  pointer-events: auto;
+  image-rendering: pixelated;
+}
+.comp-lightbox-content .surface-lightbox-contour-canvas,
+.comp-lightbox-content .solve-lightbox-contour-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
+/* ── Recipe viewer lightbox (Color Regions) ─────────────────────────── */
+/* Let the recipe lightbox use more of the screen than the default comparison
+   lightbox, so the enlarged image AND the (wide) side panel both get room. */
+.comp-lightbox-content:has(.recipe-lightbox-wrap) {
+  max-width: 96vw;
+  max-height: 94vh;
+}
+.recipe-lightbox-wrap {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
+  width: 96vw;
+  height: 94vh;
+  max-width: 96vw;
+  max-height: 94vh;
+  overflow: hidden;
+}
+.recipe-lightbox-media {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+/* Control strip below the title bar (e.g. the Contours toggle). */
+.recipe-lightbox-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--recipe-topbar-bg);
+  border-bottom: 1px solid var(--recipe-line-10);
+}
+.recipe-lightbox-toolbar .sub-toggle-btn {
+  background: var(--recipe-fill-08);
+  color: var(--recipe-ink);
+  border-color: var(--recipe-line-20);
+}
+.recipe-lightbox-toolbar .sub-toggle-btn.is-active {
+  background: var(--accent-fill);
+  color: var(--recipe-ink-strong);
+  border-color: var(--accent-fill);
+}
+/* The frame fills the space left of the panel and centres the image; the image
+   itself is sized in JS (fitImage) to the contain-fit of this frame, so the
+   panel can never crunch it and the highlight canvas overlays it exactly. */
+.recipe-lightbox-frame {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+.comp-lightbox-content .recipe-lightbox-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: auto;
+  position: static;
+  image-rendering: pixelated;
+}
+.comp-lightbox-content .recipe-lightbox-highlight-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+.recipe-lightbox-panel {
+  flex: 0 0 680px;
+  width: 680px;
+  display: flex;
+  flex-direction: column;
+  background: var(--recipe-panel-bg);
+  color: var(--recipe-ink);
+  border: 1px solid var(--recipe-line-12);
+  border-radius: 4px;
+  overflow: hidden;
+  max-height: 94vh;
+}
+.recipe-panel-title {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  background: var(--recipe-fill-06);
+  border-bottom: 1px solid var(--recipe-line-10);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.recipe-panel-hint {
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--recipe-ink-50);
+}
+.recipe-tree {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 2px 0;
+  min-height: 0;
+}
+.recipe-tree-empty { padding: 10px; }
+
+/* Master-detail: hierarchy (family -> combo) on the left, the selected node's
+   specific recipes in the attached bucket on the right. */
+.recipe-panel-cols {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+.recipe-panel-col {
+  flex: 1 1 50%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.recipe-hierarchy-col {
+  flex: 1.35 1 0;
+}
+.recipe-bucket-col {
+  flex: 1 1 0;
+  border-left: 1px solid var(--recipe-line-10);
+}
+.recipe-bucket {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 2px 0;
+  min-height: 0;
+}
+.recipe-bucket-empty {
+  padding: 10px;
+  font-size: 11px;
+}
+/* Recipe bucket as a compact table: filament names appear once as the header
+   chips, each row lists only thicknesses (mm), aligned in columns. */
+.recipe-bucket-table { padding: 2px 0; }
+.recipe-bucket-caption {
+  padding: 3px 10px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--recipe-ink-40);
+}
+.recipe-bucket-head,
+.recipe-bucket-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+}
+.recipe-bucket-head {
+  position: sticky;
+  top: 0;
+  background: var(--recipe-panel-strong-bg);
+  border-bottom: 1px solid var(--recipe-line-12);
+  z-index: 1;
+}
+.recipe-bucket-row {
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+/* The sub-0.1% long tail collapses behind one expandable summary row. Scope the
+   hide rule under .recipe-bucket-table so it out-specifies .recipe-node
+   (display:flex), which these rows also carry and which is defined later. */
+.recipe-bucket-table .recipe-bucket-tail-row { display: none; }
+.recipe-bucket-table.tail-expanded .recipe-bucket-tail-row { display: flex; }
+.recipe-bucket-tail-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  color: var(--recipe-ink-55);
+  font-size: 11px;
+  font-style: italic;
+  border-top: 1px dashed var(--recipe-line-12);
+}
+.recipe-bucket-tail-toggle:hover { color: var(--recipe-ink-90); }
+.recipe-bucket-tail-chev {
+  flex: 0 0 auto;
+  font-style: normal;
+  transition: transform 0.12s ease;
+}
+.recipe-bucket-table.tail-expanded .recipe-bucket-tail-chev { transform: rotate(90deg); }
+.recipe-bucket-tail-label { flex: 1 1 auto; text-align: left; }
+.recipe-bucket-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.recipe-bucket-hcell { display: flex; justify-content: flex-end; }
+.recipe-bucket-cell-name { flex: 1 1 auto; text-align: left; }
+.recipe-bucket-pct {
+  flex: 0 0 46px;
+  color: var(--recipe-ink-70);
+  font-size: 11px;
+}
+/* Recipe-count badge on combo rows: tells you how many recipes the bucket holds. */
+.recipe-node-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--recipe-ink-55);
+  background: var(--recipe-fill-08);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.recipe-node {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.recipe-node:hover { background: var(--recipe-fill-07); }
+.recipe-node:focus-visible { outline: 1px solid var(--recipe-focus); outline-offset: -1px; }
+.recipe-node.is-active {
+  background: var(--recipe-selection-bg);
+  border-left-color: var(--recipe-selection-line);
+}
+.recipe-node-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 5px;
+  min-width: 0;
+}
+.recipe-node-name { white-space: normal; overflow-wrap: anywhere; }
+.recipe-node-pct {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--recipe-ink-70);
+  font-size: 11px;
+}
+.recipe-node-family { font-weight: 700; padding-left: 10px; }
+.recipe-node-combo { padding-left: 22px; }
+.recipe-node-recipe { padding-left: 34px; color: var(--recipe-ink-82); }
+.recipe-fil-chip {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  border: 1px solid var(--recipe-line-30);
+  flex: 0 0 auto;
+}
+.recipe-region-readout {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: min(320px, calc(100% - 24px));
+  max-height: min(36%, 210px);
+  overflow-y: auto;
+  padding: 0;
+  border: 1px solid var(--recipe-line-16);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--recipe-readout-bg);
+  color: var(--recipe-ink-90);
+  box-shadow: 0 8px 18px var(--recipe-shadow);
+  transition: left 0.12s ease, right 0.12s ease, opacity 0.12s ease;
+  z-index: 4;
+}
+.recipe-region-readout[data-anchor="top-left"] {
+  left: 12px;
+  right: auto;
+}
+.recipe-region-readout-title {
+  padding: 6px 9px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--recipe-ink-68);
+  background: var(--recipe-fill-06);
+  border-bottom: 1px solid var(--recipe-line-12);
+}
+.recipe-region-readout-body {
+  padding: 6px 9px;
+}
+.recipe-region-readout-empty { color: var(--recipe-ink-50); font-style: italic; }
+.recipe-readout-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.recipe-readout-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recipe-readout-th { flex: 0 0 auto; font-variant-numeric: tabular-nums; color: var(--recipe-ink-strong); }
+
+/* ── Drawer mode: module panel stays collapsible ─────────────────────── */
+
+/* ── Solve Inspector Card ───────────────────────────────────────────── */
+.solve-inspector-card { margin-top: 4px; }
+.solve-inspector-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+.solve-inspector-block {
+  flex: 0 0 auto;
+  min-width: 220px;
+  max-width: 360px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 6px 8px;
+}
+.solve-inspector-title {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+  opacity: 0.75;
+}
+.solve-inspector-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11px;
+}
+.solve-inspector-item {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  column-gap: 10px;
+  align-items: baseline;
+}
+.solve-inspector-item span { opacity: 0.75; }
+.solve-inspector-item strong { font-weight: 600; }
+/* ── Diff column (Cap Diff / Color Diff) ────────────────────────────── */
+.solve-grid-column.is-diff { cursor: default; }
+.solve-grid-capdiff-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.solve-grid-capdiff-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  background: var(--diagnostic-empty-mat);
+}
+.solve-grid-empty-map {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-raised);
+}
+
+/* ── Inline diff summary (under canvas in the diff column) ───────────── */
+.solve-diff-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  padding: 6px;
+}
+.solve-diff-stat {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 6px 8px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.solve-diff-stat-label { opacity: 0.7; }
+.solve-diff-stat-value { font-weight: 600; }
+
+/* Filament Diff filament select sizing */
+#solveFilamentDiffSelect { min-width: 180px; }

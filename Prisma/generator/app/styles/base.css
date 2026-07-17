@@ -1,0 +1,29 @@
+/* ── Reset & base ──────────────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+}
+
+p { margin: 0; }
+button { font: inherit; cursor: pointer; }
+input, select, textarea {
+  font: inherit;
+  color: var(--ink);
+  accent-color: var(--accent-fill);
+}

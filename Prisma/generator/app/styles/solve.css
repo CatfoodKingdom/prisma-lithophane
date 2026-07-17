@@ -1,0 +1,922 @@
+/* ── Solve tab ─────────────────────────────────────────────────────────────── */
+
+/* Palette chips inside an inspector / Summary-flyout block. */
+.solve-inspector-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.solve-experimental-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 6px;
+}
+.solve-experimental-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.solve-progress-panel { text-align: center; padding: 28px; }
+
+.solve-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.solve-progress-stage {
+  color: var(--muted);
+}
+.solve-progress-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 4px;
+}
+.solve-progress-eta {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.solve-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--idle-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.solve-progress-fill {
+  height: 100%;
+  background: var(--accent-fill);
+  border-radius: 4px;
+  width: 0%;
+}
+.solve-progress-fill.indeterminate {
+  width: 30%;
+  animation: indeterminate 1.5s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.solve-progress-text { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.solve-elapsed { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Solve tab layout with deck sidebar */
+.solve-layout {
+  display: flex;
+  gap: 12px;
+  height: 100%;
+}
+.solve-main {
+  flex: 1;
+  min-width: 0;
+}
+.solve-deck-sidebar {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+  max-height: calc(100vh - 100px);
+}
+.solve-deck-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+
+.solve-view-card {
+  padding: 12px 14px;
+}
+.solve-view-card + .solve-view-card {
+  margin-top: 10px;
+}
+.solve-card-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+.solve-comparison {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 10px;
+  align-items: flex-start;
+}
+.solve-image-col {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.solve-image-frame {
+  position: relative;
+  background: var(--surface-inset);
+  min-width: 200px;
+  min-height: 200px;
+  max-height: 50vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-in;
+}
+.solve-image-frame img { min-width: 200px; min-height: 200px; max-height: 50vh; object-fit: contain; display: block; image-rendering: pixelated; }
+.modal-dialog {
+  background: var(--panel);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 24px 28px;
+  max-width: 400px;
+  width: 90vw;
+}
+.modal-dialog-window,
+.surface-window {
+  padding: 0 0 16px;
+  overflow: hidden;
+}
+.modal-dialog-header { margin: 0 0 8px; }
+.window-header,
+.surface-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: var(--window-header-pad-y) var(--window-header-pad-x);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  background: var(--header-bg);
+  box-sizing: border-box;
+}
+.window-header__title-slot,
+.window-header__actions,
+.surface-header-actions {
+  height: var(--window-header-control-height);
+  display: flex;
+  align-items: center;
+}
+.window-header__title-slot {
+  min-width: 0;
+}
+.window-header__title,
+.surface-title {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1;
+}
+.window-header__actions,
+.surface-header-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+.surface-window-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: var(--window-header-control-height);
+  padding-left: 8px;
+  border-left: 1px solid color-mix(in srgb, var(--muted) 22%, transparent);
+  box-sizing: border-box;
+}
+.surface-window-controls .surface-header-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  box-shadow: none;
+}
+.surface-window-controls .surface-header-button:hover {
+  background: var(--subtle-hover);
+  border-color: transparent;
+  color: var(--accent);
+}
+.window-header__button,
+.surface-header-button {
+  height: var(--window-header-control-height);
+  min-height: var(--window-header-control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  font-size: 13px;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.surface-close {
+  width: var(--window-header-control-height);
+  min-width: var(--window-header-control-height);
+  padding: 0;
+  flex: 0 0 var(--window-header-control-height);
+  color: var(--muted);
+}
+.surface-close svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.surface-close path {
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.modal-dialog-body {
+  padding: 2px 20px 0;
+}
+.modal-dialog-footer {
+  padding: 0 20px;
+}
+.surface-body {
+  overflow-y: auto;
+}
+.surface-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.surface-drawer {
+  display: flex;
+  flex-direction: column;
+}
+.surface-menu {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  overflow-y: auto;
+}
+.surface-menu-item:hover {
+  background: var(--selected);
+}
+.ratio-dialog-window {
+  max-width: 300px;
+}
+.ratio-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+.ratio-dialog-footer {
+  padding-top: 4px;
+}
+/* Saved Runs browser (Stage 9b) */
+.saved-runs-modal { max-width: 660px; }
+.saved-run-upload-button {
+  height: 24px;
+  min-height: 24px;
+  padding: 0 9px;
+  font-size: 11px;
+  line-height: 1;
+}
+.saved-run-rows {
+  padding: 10px 16px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.saved-run-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.saved-run-preview {
+  position: relative;
+  grid-row: span 2;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+}
+.saved-run-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.saved-run-preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.saved-run-preview:not(.is-unavailable) img + .saved-run-preview-placeholder { display: none; }
+.saved-run-preview.is-unavailable img { display: none; }
+.saved-run-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+}
+.saved-run-row.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.saved-run-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  outline-offset: 1px;
+}
+.saved-run-main,
+.saved-run-meta {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+}
+.saved-run-label {
+  font-weight: 600;
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.saved-run-tier {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+  color: var(--muted);
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, var(--line));
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+}
+.saved-run-meta {
+  color: var(--muted);
+  font-size: 11px;
+}
+.saved-run-source,
+.saved-run-date {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.saved-run-source { flex: 1 1 auto; }
+.saved-run-date {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+.saved-run-empty {
+  margin: 8px 0;
+}
+.saved-runs-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 12px;
+}
+.saved-runs-context-actions,
+.saved-runs-static-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.saved-runs-context-actions {
+  margin-right: 2px;
+}
+/* Delete button armed "click to confirm" state — mirrors .rail-deck-remove. */
+.saved-run-delete.confirm-pending {
+  color: var(--error-ink);
+  border-color: color-mix(in srgb, var(--error-ink) 35%, var(--line));
+}
+
+.deck-header .ghost-button.confirm-pending {
+  color: var(--error-ink);
+  border-color: color-mix(in srgb, var(--error-ink) 35%, var(--line));
+}
+
+/* Saved-run rename dialog — sized so both labeled fields fit without clipping. */
+.rename-saved-run-modal { max-width: 420px; }
+.rename-saved-run-body {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.rename-saved-run-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rename-saved-run-label {
+  font-size: 11px;
+  font-weight: 600;
+}
+.rename-saved-run-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.rename-saved-run-input[readonly] { color: var(--muted); }
+.rename-saved-run-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.rename-saved-run-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal-dialog-body h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+.modal-dialog-body p {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+.solve-stats-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
+.solve-stat-box { white-space: nowrap; }
+.solve-stat-box span { margin-right: 3px; }
+.solve-stat-box strong { color: var(--ink); font-weight: 600; }
+.solve-stat-box.good strong { color: var(--ok-ink); }
+.solve-stat-box.warn strong { color: var(--warn-ink); }
+.solve-stat-box.bad strong { color: var(--error-ink); }
+
+/* ── Solve comparison grid (column layout) ────────────────────────────── */
+.solve-comparison-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 10px 0 8px;
+  flex: 1;
+  align-items: flex-start;
+  align-content: flex-start;
+}
+.solve-grid-column {
+  flex: 1 1 200px;
+  min-width: 150px;
+  max-width: 500px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+.solve-grid-column.is-source {
+  flex: 1 1 200px;
+}
+.solve-grid-column-header {
+  padding: 5px 6px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+.solve-grid-column-header h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Lock the shared card header to a fixed height: one title row, one chip row, one
+   stats line, none of which may wrap or grow the header (UI-stability rule, S4b
+   §6.5). Long filament labels truncate with an ellipsis; overflowing palette chips
+   are clipped to a single row rather than wrapping to a second. */
+.solve-grid-column-header .comparison-column-chips {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.solve-grid-column-header .comparison-column-stats {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.solve-grid-img-wrapper {
+  width: 100%;
+  position: relative;
+  padding: 4px;
+  aspect-ratio: var(--img-aspect, auto);
+  overflow: hidden;
+}
+.solve-grid-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  display: block;
+}
+.solve-grid-overlay-container { position: relative; }
+.solve-grid-contour-canvas {
+  position: absolute;
+  display: none;
+  image-rendering: auto;
+  pointer-events: none;
+}
+/* Reserved per-card colour-scale slot. Fixed height so card chrome never resizes
+   between views (UI-stability rule). Empty for now; TM-SCALE will fill per-card scale
+   bars here without reflow. */
+.solve-card-scalebar {
+  flex: 0 0 auto;
+  height: 24px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.solve-card-run-meta {
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+  padding: 6px 8px 7px;
+}
+.solve-card-meta-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 12px;
+  align-items: baseline;
+  min-width: 0;
+}
+.solve-card-meta-item {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.solve-card-meta-item span {
+  color: var(--muted);
+}
+.solve-card-meta-item strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+/* ── Solve run sidebar cards ──────────────────────────────────────────── */
+.solve-run-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+}
+.solve-run-card {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  background: var(--panel);
+  transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
+}
+.solve-run-card:hover { background: var(--control-hover); }
+.solve-run-card.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.solve-run-card-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.solve-run-card-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.solve-run-delete-btn {
+  width: 48px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.solve-run-delete-btn svg {
+  width: 12px;
+  height: 12px;
+}
+.solve-run-delete-btn.confirm-pending {
+  border: 1px solid color-mix(in srgb, var(--error-ink) 65%, var(--line));
+  background: color-mix(in srgb, var(--error-ink) 8%, var(--panel));
+  color: var(--error-ink);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.solve-run-delete-btn:hover {
+  background: color-mix(in srgb, var(--error-ink) 20%, transparent);
+  color: var(--error-ink);
+}
+.solve-run-delete-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.solve-run-delete-btn:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+.solve-run-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.solve-run-card-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 3px;
+}
+.solve-run-card-rmse {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.solve-run-card-rmse.is-pending {
+  color: var(--muted);
+}
+.solve-run-settings-btn {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.solve-run-loaded-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.solve-run-stale-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--error-ink) 55%, var(--line));
+  border-radius: 999px;
+  color: var(--error-ink);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+.solve-run-settings-btn:hover,
+.solve-run-settings-btn:focus-visible { text-decoration: underline; }
+
+/* Shared card hover/focus preview. Fixed positioning escapes both sidebar scrollers. */
+.solve-run-hover-preview {
+  position: fixed;
+  width: 260px;
+  max-width: calc(100vw - 20px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  z-index: 40;
+  cursor: default;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.solve-run-hover-preview.is-visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Frozen, display-only settings for a solved run. This deliberately does not reuse
+   editable Settings Drawer tables or controls. */
+.run-settings-panel {
+  position: fixed;
+  z-index: var(--z-modal-overlay);
+  width: min(640px, calc(100vw - 20px));
+  max-height: min(82vh, 760px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.run-settings-header {
+  flex: 0 0 auto;
+}
+.run-settings-title-slot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.run-settings-run-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-settings-advanced-toggle {
+  white-space: nowrap;
+}
+.run-settings-load-btn {
+  white-space: nowrap;
+}
+.run-settings-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 12px;
+  padding: 10px 12px 14px;
+  background: var(--bg);
+}
+.run-settings-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.run-settings-section + .run-settings-section {
+  margin-top: 0;
+}
+.run-settings-section-cap {
+  margin: 0 0 4px;
+}
+.run-settings-rows {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.run-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.run-settings-row + .run-settings-row {
+  border-top: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+.run-settings-row.is-advanced {
+  display: none;
+}
+.run-settings-panel.show-advanced-settings .run-settings-row.is-advanced {
+  display: grid;
+}
+.run-settings-label {
+  min-width: 0;
+  color: var(--muted);
+}
+.run-settings-value {
+  min-width: 0;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: right;
+}
+@media (max-width: 520px) {
+  .run-settings-panel {
+    width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+  }
+  .run-settings-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .run-settings-note {
+    grid-column: auto;
+  }
+  .run-settings-row {
+    grid-template-columns: minmax(0, 1fr) minmax(96px, 46%);
+    gap: 8px;
+  }
+}
+
+/* ── Solve legend row ─────────────────────────────────────────────────── */
+.solve-legend-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 10px;
+}
+.solve-legend-content {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: center;
+}
+.solve-legend-content .sub-legend-block {
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+}
+
+/* ── Read-only drawer overlay ─────────────────────────────────────────── */
+/* (.settings-drawer.is-read-only removed in Task 6 S5 — the read-only run-settings drawer is gone.) */
+
+/* ── Filament maps ─────────────────────────────────────────────────────────── */
+
+.filament-maps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+.filament-maps-label {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--accent);
+  padding: 4px 0 0;
+  border-top: 1px solid var(--line);
+}
+.filament-maps-label:first-child { border-top: none; padding-top: 0; }
+.filament-map-card {
+  border: 1px solid var(--line);
+}
+.filament-map-card:hover { box-shadow: var(--shadow); }
+.filament-map-card.is-clickable { cursor: zoom-in; }
+.filament-map-card.is-unavailable { opacity: 0.72; }
+.filament-map-card img { width: 100%; display: block; image-rendering: pixelated; }
+.comp-lightbox-caption {
+  margin-top: 8px;
+  text-align: center;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+/* Thickness cards now use the shared .solve-grid-column-header chrome (top title +
+   chip + stats) like every other result card; the old bottom .filament-map-info block
+   was removed in S4b. */

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import server
 from sqlite_data_access import SQLiteDataStore
-from tests.calibration.test_backend_selector import (
+from tests.calibration.support.backend_fixtures import (
     _seed_stage2a_projection_fixture,
     _sqlite_with_final_schema,
 )

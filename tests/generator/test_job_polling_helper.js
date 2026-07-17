@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..", "..");
 const appPaths = {
@@ -21,7 +22,11 @@ function pollingSource(source, appName) {
   return source.slice(start, end);
 }
 
-function loadPolling(appName) {
+async function loadPolling(appName) {
+  if (appName === "generator") {
+    const modulePath = path.join(root, "Prisma", "generator", "app", "core", "polling.js");
+    return import(pathToFileURL(modulePath));
+  }
   const source = fs.readFileSync(appPaths[appName], "utf8");
   const context = { setTimeout, Promise, Error, String, Math };
   vm.createContext(context);
@@ -31,7 +36,7 @@ function loadPolling(appName) {
 
 for (const appName of Object.keys(appPaths)) {
   test(`${appName} polling is sequential and recovers after one transient failure`, async () => {
-    const context = loadPolling(appName);
+    const context = await loadPolling(appName);
     const statuses = [];
     const retryEvents = [];
     const recovered = [];
@@ -72,7 +77,7 @@ for (const appName of Object.keys(appPaths)) {
   });
 
   test(`${appName} polling rejects a mismatched job before applying status`, async () => {
-    const context = loadPolling(appName);
+    const context = await loadPolling(appName);
     let applied = 0;
     await assert.rejects(
       context.pollJobUntilTerminal({
@@ -88,7 +93,7 @@ for (const appName of Object.keys(appPaths)) {
   });
 
   test(`${appName} delayed response cannot update an obsolete polling owner`, async () => {
-    const context = loadPolling(appName);
+    const context = await loadPolling(appName);
     let resolveStatus;
     let current = true;
     let applied = 0;
@@ -109,7 +114,7 @@ for (const appName of Object.keys(appPaths)) {
   });
 
   test(`${appName} authoritative failed status is returned as terminal`, async () => {
-    const context = loadPolling(appName);
+    const context = await loadPolling(appName);
     const result = await context.pollJobUntilTerminal({
       jobId: "job-1",
       fetchStatus: async () => ({ job_id: "job-1", status: "failed", error: { message: "boom" } }),

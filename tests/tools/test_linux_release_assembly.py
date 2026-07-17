@@ -11,7 +11,10 @@ import scripts.assemble_linux_release as release
 from tests.tools.release_license_fixture import make_license_bundle
 
 
-pytestmark = pytest.mark.skipif(os.name != "posix", reason="Linux assembler requires POSIX semantics")
+pytestmark = [
+    pytest.mark.platform,
+    pytest.mark.skipif(os.name != "posix", reason="Linux assembler requires POSIX semantics"),
+]
 
 
 def _sources(tmp_path: Path, *, product: release.Product) -> tuple[Path, Path]:

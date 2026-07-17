@@ -21,6 +21,9 @@ from Prisma.calibration.fitting.camera_transform.fit import (
 )
 
 
+pytestmark = pytest.mark.slow
+
+
 def _rows(*, sample_count: int = 10, swatches_per_sample: int = 8) -> pd.DataFrame:
     return pd.DataFrame(
         [

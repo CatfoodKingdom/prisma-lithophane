@@ -1,0 +1,858 @@
+/* ── Image tab ─────────────────────────────────────────────────────────────── */
+
+:root {
+  --image-preview-mat: #3a3a3a;
+  --image-preview-muted: #666666;
+  --image-preview-border: #ffffff;
+  --frame-canvas-mat: #1a1a1a;
+  --frame-placeholder-ink: #999999;
+  --frame-mask: rgba(26, 26, 26, 0.7);
+  --frame-guide-strong: rgba(255, 255, 255, 0.8);
+  --frame-guide: rgba(255, 255, 255, 0.15);
+  --frame-handle: rgba(255, 255, 255, 0.9);
+  --frame-handle-line: rgba(0, 0, 0, 0.3);
+  --hue-thumb-line: #ffffff;
+  --hue-thumb-shadow: rgba(0, 0, 0, 0.3);
+  --hue-red: hsl(0, 100%, 50%);
+  --hue-yellow: hsl(60, 100%, 50%);
+  --hue-green: hsl(120, 100%, 50%);
+  --hue-cyan: hsl(180, 100%, 50%);
+  --hue-blue: hsl(240, 100%, 50%);
+  --hue-magenta: hsl(300, 100%, 50%);
+  --hue-red-wrap: hsl(360, 100%, 50%);
+}
+
+.image-tab-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+#tabImage {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+#tabImage .image-tab-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Left pane: Preview + Library stacked ─────────────────────────────────── */
+
+.image-left-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Pane title bars — distinct background, flush to edges */
+.pane-title-bar, .library-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  box-sizing: border-box;
+  padding: 3px 8px;
+  flex-shrink: 0;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--line);
+}
+.pane-title-bar { justify-content: space-between; }
+.library-title-bar { position: relative; }
+.library-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.library-window-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 0 0 6px;
+  background: var(--line);
+}
+.library-refresh-btn,
+.library-resize-btn {
+  width: 24px;
+  min-width: 24px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.library-refresh-btn svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+.library-resize-btn svg {
+  display: block;
+  width: 13.5px;
+  height: 13.5px;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  fill: none;
+}
+.library-refresh-btn:hover,
+.library-resize-btn:hover {
+  background: var(--subtle-hover);
+  color: var(--accent);
+}
+.library-refresh-btn:disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.panel-resize-icon {
+  display: block;
+  width: 13.5px;
+  height: 13.5px;
+  stroke: currentColor;
+  stroke-width: 1.45;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  fill: none;
+}
+.pane-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+/* Remove panel padding so title bars sit flush */
+.image-preview-pane.panel,
+.image-library.panel {
+  padding: 0;
+  border-radius: 4px;
+}
+
+/* Preview pane — dark mat, fills remaining space */
+.image-preview-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  transition: flex 0.15s ease;
+}
+.preview-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--image-preview-mat);
+  border-radius: 0 0 4px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.preview-mat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.preview-mat img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+.preview-viewport .muted-line { color: var(--image-preview-muted); }
+
+/* Border overlay in preview */
+.preview-border {
+  position: absolute;
+  inset: 0;
+  border: 0 solid var(--image-preview-border);
+  pointer-events: none;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+/* Dimension annotations in preview */
+.preview-dimensions {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* ── Image Library (2 states via data-state) ──────────────────────────────── */
+
+.image-library {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  transition: flex-basis 0.15s ease;
+}
+
+/* Thumbnail area */
+.library-thumbs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  scrollbar-width: thin;
+}
+
+/* STATE: contracted — 1 horizontal row */
+.image-library[data-state="contracted"] .library-thumbs {
+  flex-wrap: nowrap;
+}
+
+/* STATE: expanded — wrapping rows, borrows a portion of preview space */
+.image-library[data-state="expanded"] {
+  flex: 0 0 clamp(190px, 32%, 290px);
+}
+.image-library[data-state="expanded"] .library-thumbs {
+  flex-wrap: wrap;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex: 1;
+  min-height: 0;
+  align-content: flex-start;
+}
+
+/* Image cards */
+.image-card {
+  border: 2px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface-inset);
+  flex-shrink: 0;
+  width: 110px;
+}
+.image-card:hover { border-color: var(--line-strong); }
+.image-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.image-card-thumb {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: contain;
+  display: block;
+  background: var(--surface-raised);
+}
+.image-card-info {
+  padding: 4px 6px 5px;
+  font-size: 9px;
+  color: var(--muted);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 12%, var(--line));
+  background: color-mix(in srgb, var(--selected) 28%, var(--panel));
+  text-align: center;
+  line-height: 1.15;
+}
+.image-card-info strong {
+  color: var(--ink);
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.image-card-info span,
+.image-card-info .image-card-meta {
+  display: block;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.image-card:hover .image-card-info {
+  background: color-mix(in srgb, var(--selected) 38%, var(--panel));
+}
+.image-card.is-selected .image-card-info {
+  background: color-mix(in srgb, var(--accent) 10%, var(--selected));
+  border-top-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+}
+
+.upload-btn {
+  cursor: pointer;
+  padding-top: 1px;
+  padding-bottom: 1px;
+  line-height: 1.1;
+}
+
+.image-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* ── Frame canvas ─────────────────────────────────────────────────────────── */
+
+/* Framing editor: fills its grid column, scrolls internally if needed */
+.framing-editor {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.framing-editor-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 12px 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.frame-editor-tab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.frame-editor-tabs {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.frame-tab {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-right: 1px solid var(--line-strong);
+  background: var(--control-bg);
+  cursor: pointer;
+  color: var(--ink);
+}
+.frame-tab:last-child { border-right: none; }
+.frame-tab:hover { background: var(--control-hover); }
+.frame-tab.is-active {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+}
+
+.frame-canvas-wrap {
+  position: relative;
+  height: 290px;
+}
+
+.frame-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 200px;
+  background: var(--frame-canvas-mat);
+  overflow: hidden;
+  user-select: none;
+  cursor: grab;
+}
+.frame-canvas:active { cursor: grabbing; }
+
+.frame-canvas img {
+  position: absolute;
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.frame-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  color: var(--frame-placeholder-ink);
+}
+
+/* The mask covers everything outside the selected content crop. */
+.frame-mask {
+  position: absolute;
+  inset: 0;
+  background: var(--frame-mask);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* The frame window — clear, shows the image */
+.frame-window {
+  position: absolute;
+  border: 2px solid var(--frame-guide-strong);
+  pointer-events: none;
+  z-index: 4;
+  background:
+    linear-gradient(to right, var(--frame-guide) 1px, transparent 1px) 33.33% 0 / 33.33% 100% no-repeat,
+    linear-gradient(to right, var(--frame-guide) 1px, transparent 1px) 66.66% 0 / 33.33% 100% no-repeat,
+    linear-gradient(to bottom, var(--frame-guide) 1px, transparent 1px) 0 33.33% / 100% 33.33% no-repeat,
+    linear-gradient(to bottom, var(--frame-guide) 1px, transparent 1px) 0 66.66% / 100% 33.33% no-repeat;
+}
+
+/* Edge handles — visible square handles */
+.frame-edge {
+  position: absolute;
+  z-index: 5;
+  display: none;
+}
+/* Corner handles — square */
+.frame-edge-nw, .frame-edge-ne, .frame-edge-sw, .frame-edge-se {
+  width: 10px;
+  height: 10px;
+  background: var(--frame-handle);
+  border: 1px solid var(--frame-handle-line);
+}
+.frame-edge-nw { cursor: nwse-resize; }
+.frame-edge-ne { cursor: nesw-resize; }
+.frame-edge-sw { cursor: nesw-resize; }
+.frame-edge-se { cursor: nwse-resize; }
+
+/* Edge midpoint handles — square */
+.frame-edge-n, .frame-edge-s {
+  width: 10px;
+  height: 10px;
+  background: var(--frame-handle);
+  border: 1px solid var(--frame-handle-line);
+  cursor: ns-resize;
+}
+.frame-edge-e, .frame-edge-w {
+  width: 10px;
+  height: 10px;
+  background: var(--frame-handle);
+  border: 1px solid var(--frame-handle-line);
+  cursor: ew-resize;
+}
+
+.frame-canvas.specified-mode .frame-edge { display: block; }
+
+/* Toggle group (Direction, B/W|Color, etc.) */
+.toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.toggle-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-right: 1px solid var(--line-strong);
+  background: var(--control-bg);
+  cursor: pointer;
+  color: var(--ink);
+}
+.toggle-btn:last-child { border-right: none; }
+.toggle-btn:hover { background: var(--control-hover); }
+.toggle-btn.is-active {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+.btn-sm {
+  padding: 2px 10px;
+  font-size: 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--control-bg);
+  cursor: pointer;
+  color: var(--ink);
+}
+.btn-sm:hover { background: var(--control-hover); }
+
+/* Icon button group (rotation buttons with labels) */
+.icon-button-group {
+  display: flex;
+  gap: 8px;
+}
+.icon-button-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.icon-button-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Dimension icons and units in control rows */
+.dim-icon { font-size: 14px; margin-right: 2px; }
+.dim-unit { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+/* Controls divider (between exposure group and color group) */
+.controls-divider {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 8px 0;
+}
+
+/* Slider center tick mark via background gradient */
+.has-center-tick {
+  background-image: linear-gradient(
+    to right,
+    transparent calc(var(--center-pct) - 1px),
+    color-mix(in srgb, var(--accent) 55%, transparent) calc(var(--center-pct) - 1px),
+    color-mix(in srgb, var(--accent) 55%, transparent) calc(var(--center-pct) + 1px),
+    transparent calc(var(--center-pct) + 1px)
+  );
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* Hue slider — rainbow gradient track */
+.slider-hue {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right,
+    var(--hue-red),
+    var(--hue-yellow),
+    var(--hue-green),
+    var(--hue-cyan),
+    var(--hue-blue),
+    var(--hue-magenta),
+    var(--hue-red-wrap)
+  );
+}
+.slider-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--hue-thumb-line);
+  box-shadow: 0 1px 3px var(--hue-thumb-shadow);
+  cursor: pointer;
+}
+
+/* Scale-to-fill toggle switch with LED */
+.toggle-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.toggle-switch-track {
+  width: 36px;
+  height: 18px;
+  border-radius: 9px;
+  background: var(--line-strong);
+  position: relative;
+  transition: background 0.15s;
+}
+.toggle-switch.is-on .toggle-switch-track {
+  background: var(--accent-fill);
+}
+.toggle-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--on-accent);
+  transition: left 0.15s;
+}
+.toggle-switch.is-on .toggle-switch-thumb {
+  left: 20px;
+}
+.toggle-switch-led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.toggle-switch.is-on .toggle-switch-led {
+  background: var(--ok-ink);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--ok-ink) 55%, transparent);
+}
+.toggle-switch-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.toggle-switch.is-on .toggle-switch-label {
+  color: var(--ink);
+}
+
+/* Inline label (no fixed width, flows with content) */
+.control-label-inline {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Border row: fields visible but inactive when toggle is off */
+.border-row .border-field {
+  transition: opacity 0.15s;
+}
+.border-row:not(:has(.toggle-switch.is-on)) .border-field {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Canvas interaction locked in Image adjustment mode */
+.frame-canvas.interaction-locked {
+  cursor: default;
+}
+.frame-canvas.interaction-locked:active {
+  cursor: default;
+}
+
+/* Dimension annotations SVG overlay */
+.frame-dimensions {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 6;
+}
+
+/* Canvas drag-drop target */
+.frame-canvas.drag-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+/* ── AR button group ──────────────────────────────────────────────────────── */
+
+.ar-button-group {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+.ar-button {
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  text-align: center;
+  font-weight: 600;
+  border: none;
+  border-right: 1px solid var(--line-strong);
+  background: var(--control-bg);
+  cursor: pointer;
+  color: var(--ink);
+  grid-column: span 3;      /* bottom row: 4 items × 3 = 12 */
+}
+/* Top row: first 3 buttons span 4 columns each */
+.ar-button:nth-child(-n+3) {
+  grid-column: span 4;
+  border-bottom: 1px solid var(--line-strong);
+}
+.ar-button:nth-child(3) { border-right: none; }
+.ar-button:last-child { border-right: none; }
+.ar-button:hover { background: var(--control-hover); }
+.ar-button.is-active {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+.ar-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Input with fixed unit suffix — 1x2 table: [right-aligned number | unit] */
+.input-with-unit {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--control-bg);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.unit-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 11px;
+  font-family: inherit;
+  width: 46px;
+  padding: 3px 2px 3px 4px;
+  text-align: right;
+}
+.unit-suffix {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 3px 6px 3px 2px;
+  flex-shrink: 0;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── Slider + input combos ────────────────────────────────────────────────── */
+
+.control-slider {
+  flex: 1;
+  min-width: 80px;
+  cursor: pointer;
+}
+.control-input-narrow {
+  width: 75px;
+  text-align: right;
+}
+
+/* Frame controls container — section-based layout */
+.frame-controls { margin-top: 4px; }
+
+/* Sections with spacing between them */
+.ctrl-section {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.ctrl-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+/* Section 1: 2-column grid (label | buttons centered) */
+.ctrl-section-grid2 {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+/* Section 2/3/4: 3-column grid (label | input fixed width | slider) */
+.ctrl-section-grid3 {
+  display: grid;
+  grid-template-columns: auto 70px 1fr;
+  gap: 4px 8px;
+  align-items: center;
+}
+.ctrl-section-grid3 .input-with-unit {
+  width: 70px;
+}
+
+/* Labels */
+.ctrl-lbl {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  text-align: left;
+}
+.ctrl-lbl-inline {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ctrl-note {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 0 2px;
+}
+.border-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: normal;
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  padding: 2px 4px;
+  line-height: 1.4;
+}
+
+/* Value cells */
+.ctrl-val-center { justify-self: center; }
+.ctrl-val-right { justify-self: end; }
+
+/* Toggle buttons within sections — match AR button size */
+.frame-controls .toggle-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+/* Border fields: visible but inactive when toggle off */
+.ctrl-section-grid3:not(:has(#borderToggle.is-on)) .border-field {
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* Section dividers spanning all 3 columns */
+.ctrl-divider {
+  grid-column: 1 / -1;
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 2px 0;
+}
+
+/* Icon buttons — square, 1:1 aspect */
+.icon-btn {
+  width: 35px;
+  height: 35px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--control-bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+.icon-btn:hover { background: var(--control-hover); border-color: var(--ink); }
+.icon-btn svg { width: 100%; height: 100%; transform: scale(1.2); }
+
+.icon-btn-sm {
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+}
+.icon-btn-sm svg { transform: none; }
+
+.frame-controls .icon-button-label { font-size: 8px; }
+.frame-controls .icon-button-group { gap: 5px; }
+
+/* ── Dimension lock buttons (inline with label) ──────────────────────── */
+.dim-lbl-with-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.dim-lock-btn {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s;
+  vertical-align: middle;
+}
+.dim-lock-btn:hover { opacity: 1; }
+.dim-lock-btn .lock-closed { display: none; }
+.dim-lock-btn.is-locked .lock-open { display: none; }
+.dim-lock-btn.is-locked .lock-closed { display: inline; }
+.dim-lock-btn.is-locked { color: var(--ink); opacity: 0.85; }
