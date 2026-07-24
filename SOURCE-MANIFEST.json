@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-07-24T05:12:06.061572+00:00",
+  "created_at": "2026-07-24T05:47:07.172158+00:00",
   "documentation_repository": "https://github.com/CatfoodKingdom/prisma-docs",
   "excluded_assets": [
     "Prisma/data/",
@@ -1541,9 +1541,9 @@
       "sha256": "b441c1dcf1d666680e5ec472ed9fb7d5eb60233543dcdb52a438efa8816db02b"
     },
     {
-      "byte_size": 6851,
+      "byte_size": 7468,
       "path": "README.md",
-      "sha256": "06e4007c590c4a3761344fbf7daefc2ba60f4a6db35033109c2e683f57bc96d2"
+      "sha256": "5473f79ef34d4362e56ca7d12f04acc4545ee6519c8dc5afd455d06163ca11b5"
     },
     {
       "byte_size": 2177,

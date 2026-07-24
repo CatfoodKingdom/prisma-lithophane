@@ -9,8 +9,11 @@ Prisma has two applications:
 
 - **Prisma Generator** converts an image into printable 3MF/STL files, color
   layers, and filament-swap instructions using a published color-model bundle.
+  Its **Theme** control supports System, Light, and Dark appearances; System
+  follows the operating-system preference.
 - **Prisma Calibration** measures printed filament samples, fits private
   working models, and publishes complete immutable model bundles for Generator.
+  Calibration currently uses a light interface only.
 
 The applications do not share live working data. Generator only consumes a
 published bundle selected through its Model Library control.
@@ -59,6 +62,11 @@ Portable releases keep visible data beside the executable:
 Install or update a color-model bundle through **Model Library → Manage** in
 Generator. Selecting a different valid bundle takes effect after the restart
 shown by the application. Never merge model files from different bundles.
+
+Generator stores its Theme choice in the current browser. The control is in
+the right-side utility group beside **Clear Temp Files**. Choosing **System**
+updates the interface when the operating-system color scheme changes; explicit
+Light or Dark choices remain fixed.
 
 Use Calibration's **Backup / Restore** workflow to migrate its workspace. Keep
 important backups outside the live Prisma folder, and do not copy individual
