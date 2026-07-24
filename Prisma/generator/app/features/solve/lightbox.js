@@ -276,7 +276,6 @@ function setupStaticLightboxZoom(content, lifecycle, onLayout = null) {
       const intrinsicWidth = image.naturalWidth;
       const intrinsicHeight = image.naturalHeight;
       if (!intrinsicWidth || !intrinsicHeight) return;
-      pane.style.width = "auto";
       const bounds = app.commands.computeLightboxScaleBounds({
         intrinsicWidth,
         intrinsicHeight,
@@ -290,9 +289,6 @@ function setupStaticLightboxZoom(content, lifecycle, onLayout = null) {
       const scale = bounds.minScale + (bounds.maxScale - bounds.minScale) * normalized;
       const width = Math.max(1, Math.floor(intrinsicWidth * scale));
       const height = Math.max(1, Math.floor(intrinsicHeight * scale));
-      pane.style.width = `${Math.ceil(Math.max(width, bounds.headerWidth))}px`;
-      media.style.width = `${width}px`;
-      media.style.height = `${height}px`;
       image.style.width = `${width}px`;
       image.style.height = `${height}px`;
       updateAccessibleValue();

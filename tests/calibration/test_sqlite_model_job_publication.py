@@ -388,6 +388,10 @@ def _write_camera_generation(store: SQLiteDataStore, label: str, *, activate: bo
 
 
 def test_camera_transform_replacement_removes_old_rows_and_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The stale-currentness assertion below is specific to the SQLite-backed
+    # development path. Published-library mode intentionally resolves the
+    # filesystem CURRENT pointer instead and must not leak in from the shell.
+    monkeypatch.delenv("PRISMA_PUBLISHED_LIBRARY_MODE", raising=False)
     store = _store(tmp_path)
     monkeypatch.setenv("PRISMA_CALIBRATION_SQLITE_PATH", str(store.sqlite_path))
     old_dir = _write_camera_generation(store, "old", activate=True)

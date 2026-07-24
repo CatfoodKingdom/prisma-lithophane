@@ -354,8 +354,23 @@ def test_image_palette_solve_and_diagnostic_lightbox_workflow(
     assert page.locator("#tabSolve").is_visible()
     result_card.click()
     page.locator("#compLightbox").wait_for(state="visible")
-    assert page.locator("#compLightbox .comp-lightbox-topbar").is_visible()
-    assert page.locator("#compLightbox .comp-lightbox-zoom-slider").get_attribute("aria-label") == "Zoom"
+    header = page.locator("#compLightbox .comp-lightbox-topbar")
+    slider = page.locator("#compLightbox .comp-lightbox-zoom-slider")
+    assert header.is_visible()
+    assert slider.get_attribute("aria-label") == "Zoom"
+    header_bounds = header.bounding_box()
+    slider_bounds = slider.bounding_box()
+    assert header_bounds is not None
+    assert slider_bounds is not None
+
+    slider.press("Home")
+    minimum_header_bounds = header.bounding_box()
+    minimum_slider_bounds = slider.bounding_box()
+    assert minimum_header_bounds is not None
+    assert minimum_slider_bounds is not None
+    for key in ("x", "y", "width"):
+        assert abs(minimum_header_bounds[key] - header_bounds[key]) <= 1
+        assert abs(minimum_slider_bounds[key] - slider_bounds[key]) <= 1
 
 
 def test_saved_run_load_and_export_initiation_workflow(page: Page):
@@ -567,6 +582,17 @@ def test_theme_system_override_reload_and_cross_tab_sync(browser: Browser, gener
         assert errors == []
     finally:
         context.close()
+
+
+def test_theme_control_is_grouped_with_right_side_utilities(page: Page):
+    settings_bounds = page.locator("#settingsDrawerBtn").bounding_box()
+    theme_bounds = page.locator("#themeMenuBtn").bounding_box()
+    clear_bounds = page.locator("#clearAllTempBtn").bounding_box()
+    assert settings_bounds is not None
+    assert theme_bounds is not None
+    assert clear_bounds is not None
+    assert theme_bounds["x"] > settings_bounds["x"] + settings_bounds["width"] + 12
+    assert 0 <= clear_bounds["x"] - (theme_bounds["x"] + theme_bounds["width"]) <= 8
 
 
 def test_theme_popover_keyboard_and_narrow_viewport_geometry(browser: Browser, generator_url: str):

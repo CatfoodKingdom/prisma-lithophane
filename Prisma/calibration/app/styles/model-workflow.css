@@ -1,0 +1,433 @@
+/* ── Model fitting: filament list & profile dot ───────────────────────────── */
+
+.fi-filament-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.fi-filament-item:hover {
+  background: var(--selected);
+}
+
+.fi-filament-item.is-selected {
+  background: var(--selected);
+  border-left: 3px solid var(--table-head);
+  padding-left: 7px;
+}
+
+.fi-filament-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fi-sample-count {
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--idle-bg);
+  border-radius: 8px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.mf-profile-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.mf-profile-dot.mf-has-profile {
+  background: #27ae60;
+}
+
+/* ── Model Fitting: sample cards + mock strips ─────────────────────────── */
+
+.mf-right-content {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.mf-section {
+  margin-bottom: 16px;
+}
+
+.mf-section-header {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--fg);
+}
+
+.mf-section-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mf-sample-card {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.mf-sample-card:hover {
+  border-color: var(--line-strong);
+}
+
+.mf-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.mf-card-id {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mf-card-desc {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.mf-strip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.mf-strip-label {
+  font-size: 10px;
+  color: var(--muted);
+  width: 30px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.mf-mock-strip {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mf-mock-swatch {
+  height: 16px;
+  border-radius: 2px;
+}
+
+.mf-de-chart {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mf-de-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: right;
+}
+
+.mf-de-tick {
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.mf-de-bar-row {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  align-items: end;
+}
+
+.mf-de-bar {
+  border-radius: 1px;
+  min-height: 1px;
+}
+
+.mf-bar-good { background: #27ae60; }
+.mf-bar-ok   { background: #f39c12; }
+.mf-bar-bad  { background: #e74c3c; }
+
+.mf-placeholder {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 12px 0;
+}
+
+.mf-loading-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mf-diagram {
+  flex: 1;
+}
+
+/* ── Model Fitting: detail view ──────────────────────────────────────── */
+
+.mf-detail-view {
+  padding: 4px 0;
+}
+
+.mf-detail-back {
+  margin-bottom: 8px;
+}
+
+.mf-detail-back a {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.mf-detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mf-detail-fixed-block {
+  margin-bottom: 8px;
+}
+
+.mf-detail-fixed {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.mf-detail-strip-img {
+  margin-bottom: 8px;
+}
+
+.mf-detail-strip-img img {
+  max-width: 100%;
+  border-radius: 3px;
+}
+
+/* ── Photo stack candidate review ───────────────────────────────── */
+
+.nm-panel {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px 10px;
+  background: #f6fbf9;
+}
+
+.nm-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.nm-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #124337;
+}
+
+.nm-head-actions,
+.nm-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.nm-controls {
+  margin-bottom: 8px;
+}
+
+.nm-search,
+.nm-filter {
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.nm-search {
+  min-width: 230px;
+  padding: 3px 7px;
+}
+
+.nm-filter {
+  padding: 3px 5px;
+}
+
+.nm-progress-panel {
+  border: 1px solid #b9d7cd;
+  border-radius: 6px;
+  background: #eef8f4;
+  padding: 7px 8px;
+  margin-bottom: 8px;
+}
+
+.nm-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.nm-review-row {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(240px, 0.45fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #cfe1dc;
+  border-radius: 4px;
+  background: #fff;
+  padding: 5px 6px;
+}
+
+.nm-review-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+  font-size: 12px;
+}
+
+.nm-review-head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.nm-chip-row,
+.nm-delta-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.nm-chip-label {
+  width: 54px;
+  flex: 0 0 54px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.nm-chip-strip,
+.nm-delta-strip {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.nm-chip {
+  height: 18px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+
+.nm-delta-pill {
+  min-width: 0;
+  text-align: center;
+  border-radius: 4px;
+  padding: 2px 3px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 10px;
+  background: #edf3f9;
+  color: #15537a;
+}
+
+.nm-delta-pill.is-good {
+  background: #d7f4de;
+  color: #086b28;
+}
+
+.nm-delta-pill.is-ok {
+  background: #fff0bd;
+  color: #8c4c00;
+}
+
+.nm-delta-pill.is-bad {
+  background: #f9d7d7;
+  color: #a00f16;
+  font-weight: 700;
+}
+
+.nm-diagram-cell {
+  justify-self: end;
+}
+
+.nm-diagram-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.nm-stack-diagram td {
+  min-width: 26px;
+  font-size: 9px;
+  padding: 0 1px;
+  line-height: 1.1;
+}
+
+.nm-stack-diagram .nm-diagram-header td,
+.nm-diagram-header td {
+  background: #f5f9fc;
+  color: #001a33;
+  font-weight: 700;
+}
+
+.nm-diagram-empty {
+  background: #f3f3f3;
+}
+
+.nm-diagram-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 120px;
+}
+
+.nm-diagram-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  line-height: 1.15;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.nm-error-text {
+  color: #a00f16;
+}
+
+@media (max-width: 1180px) {
+  .nm-review-row {
+    grid-template-columns: 1fr;
+  }
+  .nm-diagram-cell {
+    justify-self: start;
+  }
+}

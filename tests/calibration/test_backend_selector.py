@@ -101,6 +101,10 @@ def test_auto_init_can_use_local_sqlite_activation_files(tmp_path: Path, monkeyp
 def test_camera_transform_data_root_pointer_resolves_relative_to_pointer_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # This test exercises the development data-root pointer. Published-library
+    # mode intentionally bypasses that pointer and may be set in a caller's
+    # ambient shell, so make the mode under test explicit.
+    monkeypatch.delenv("PRISMA_PUBLISHED_LIBRARY_MODE", raising=False)
     prisma_dir = tmp_path / "Prisma"
     calibration_dir = prisma_dir / "calibration"
     legacy_camera_root = prisma_dir / "data" / "camera_transform"

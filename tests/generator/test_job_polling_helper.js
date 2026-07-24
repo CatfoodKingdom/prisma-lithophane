@@ -2,39 +2,34 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
-const vm = require("node:vm");
 const { pathToFileURL } = require("node:url");
 
 const root = path.resolve(__dirname, "..", "..");
-const appPaths = {
-  generator: path.join(root, "Prisma", "generator", "app", "app.js"),
-  calibration: path.join(root, "Prisma", "calibration", "app", "app.js"),
+const modulePaths = {
+  generator: path.join(
+    root,
+    "Prisma",
+    "generator",
+    "app",
+    "core",
+    "polling.js",
+  ),
+  calibration: path.join(
+    root,
+    "Prisma",
+    "calibration",
+    "app",
+    "core",
+    "polling.js",
+  ),
 };
 
-function pollingSource(source, appName) {
-  const start = source.indexOf("function assertPolledJobIdentity");
-  const endMarker = appName === "generator" ? "// ── State" : "const data =";
-  const end = source.indexOf(endMarker, start);
-  assert.notEqual(start, -1, `${appName} polling identity helper must exist`);
-  assert.notEqual(end, -1, `${appName} polling helper must have a stable boundary`);
-  return source.slice(start, end);
-}
-
 async function loadPolling(appName) {
-  if (appName === "generator") {
-    const modulePath = path.join(root, "Prisma", "generator", "app", "core", "polling.js");
-    return import(pathToFileURL(modulePath));
-  }
-  const source = fs.readFileSync(appPaths[appName], "utf8");
-  const context = { setTimeout, Promise, Error, String, Math };
-  vm.createContext(context);
-  vm.runInContext(pollingSource(source, appName), context);
-  return context;
+  return import(pathToFileURL(modulePaths[appName]));
 }
 
-for (const appName of Object.keys(appPaths)) {
+for (const appName of Object.keys(modulePaths)) {
   test(`${appName} polling is sequential and recovers after one transient failure`, async () => {
     const context = await loadPolling(appName);
     const statuses = [];
@@ -63,12 +58,17 @@ for (const appName of Object.keys(appPaths)) {
       onRecovered: (meta) => recovered.push(meta),
       intervalMs: 10,
       maxRetryDelayMs: 25,
-      wait: async (delay) => { waits.push(delay); },
+      wait: async (delay) => {
+        waits.push(delay);
+      },
     });
 
     assert.equal(result.status, "succeeded");
     assert.equal(maxActiveRequests, 1);
-    assert.deepEqual(statuses, [["running", 1], ["succeeded", 2]]);
+    assert.deepEqual(statuses, [
+      ["running", 1],
+      ["succeeded", 2],
+    ]);
     assert.deepEqual(waits, [10, 10]);
     assert.equal(retryEvents.length, 1);
     assert.equal(retryEvents[0].consecutiveFailures, 1);
@@ -84,10 +84,14 @@ for (const appName of Object.keys(appPaths)) {
         jobId: "job-1",
         fetchStatus: async () => ({ job_id: "job-2", status: "succeeded" }),
         isTerminal: () => true,
-        onStatus: () => { applied += 1; },
+        onStatus: () => {
+          applied += 1;
+        },
         wait: async () => {},
       }),
-      (error) => error.name === "JobPollingIdentityError" && error.expectedJobId === "job-1",
+      (error) =>
+        error.name === "JobPollingIdentityError" &&
+        error.expectedJobId === "job-1",
     );
     assert.equal(applied, 0);
   });
@@ -99,10 +103,15 @@ for (const appName of Object.keys(appPaths)) {
     let applied = 0;
     const pending = context.pollJobUntilTerminal({
       jobId: "job-1",
-      fetchStatus: () => new Promise((resolve) => { resolveStatus = resolve; }),
+      fetchStatus: () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        }),
       isTerminal: () => true,
       shouldContinue: () => current,
-      onStatus: () => { applied += 1; },
+      onStatus: () => {
+        applied += 1;
+      },
       wait: async () => {},
     });
     await Promise.resolve();
@@ -117,8 +126,13 @@ for (const appName of Object.keys(appPaths)) {
     const context = await loadPolling(appName);
     const result = await context.pollJobUntilTerminal({
       jobId: "job-1",
-      fetchStatus: async () => ({ job_id: "job-1", status: "failed", error: { message: "boom" } }),
-      isTerminal: (status) => ["succeeded", "failed", "cancelled"].includes(status.status),
+      fetchStatus: async () => ({
+        job_id: "job-1",
+        status: "failed",
+        error: { message: "boom" },
+      }),
+      isTerminal: (status) =>
+        ["succeeded", "failed", "cancelled"].includes(status.status),
       wait: async () => {},
     });
     assert.equal(result.status, "failed");

@@ -1,0 +1,215 @@
+/* ── Filament drawer ───────────────────────────────────────────────────── */
+
+.filament-drawer-chip {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
+}
+
+.filament-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filament-header-row.filament-header-row-edit {
+  gap: 10px;
+}
+
+.filament-header-row strong {
+  font-size: 12.5px;
+}
+
+.filament-inline-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.filament-color-labeled {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  font-size: 12px;
+  align-items: baseline;
+}
+
+.filament-color-labeled .sidebar-label {
+  font-size: 11px;
+  margin: 0;
+}
+
+.filament-color-labeled .mono {
+  font-size: 12px;
+}
+
+.filament-edit-field {
+  display: grid;
+  gap: 3px;
+}
+
+.filament-inline-field {
+  gap: 0;
+}
+
+.filament-edit-field input[type="text"] {
+  width: 100%;
+}
+
+.filament-hex-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.filament-hex-row input[type="color"] {
+  width: 32px;
+  height: 26px;
+  padding: 1px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+
+.filament-hex-row input[type="text"] {
+  flex: 1;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.sidebar-block .filament-drawer-input,
+.filament-drawer-input {
+  box-sizing: border-box;
+  min-height: 24px;
+  margin-top: 0;
+  padding: 3px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.sidebar-block .filament-inline-name-input.filament-drawer-input,
+.filament-inline-name-input.filament-drawer-input {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sidebar-block .filament-hex-row .filament-drawer-input {
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.filament-field-invalid {
+  border-color: #d66a55 !important;
+  background: #fff7f4 !important;
+  box-shadow: 0 0 0 1px rgba(214, 106, 85, 0.18);
+}
+
+.filament-policy-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 9px;
+  align-items: baseline;
+}
+
+.filament-policy-grid .sidebar-label {
+  margin: 0;
+}
+
+.filament-option-stack {
+  display: grid;
+  gap: 4px;
+}
+
+.drawer-form-module.filament-policy-module {
+  min-height: 126px;
+}
+
+.filament-option-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 22px;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filament-option-row input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.filament-option-row-warning {
+  color: #7b463b;
+}
+
+.filament-notes-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.sample-notes-display {
+  white-space: pre-wrap;
+}
+
+.sample-notes-input {
+  width: 100%;
+  resize: vertical;
+}
+
+.sample-fit-status.is-included {
+  color: #315d45;
+}
+
+.sample-fit-status.is-excluded {
+  color: #7b463b;
+  font-weight: 600;
+}
+
+.sample-fit-option-row {
+  align-items: flex-start;
+}
+
+.filament-validation {
+  min-height: 14px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.filament-validation:empty {
+  display: none;
+  min-height: 0;
+}
+
+.filament-validation.is-error {
+  color: #c62828;
+}
+
+.filament-slug-preview {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.record-drawer.narrow-drawer {
+  width: min(520px, calc(100vw - 40px));
+}
+
+.record-drawer.sample-set-drawer {
+  width: min(980px, calc(100vw - 24px));
+  height: min(840px, calc(100vh - var(--record-drawer-top, 86px) - 26px));
+}
+
+.record-drawer.sample-set-drawer .detail-sidebar-content {
+  min-height: 0;
+  overflow: hidden;
+}

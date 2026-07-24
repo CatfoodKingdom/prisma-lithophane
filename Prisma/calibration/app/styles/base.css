@@ -1,0 +1,145 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 600;
+}
+
+p {
+  margin: 0;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.app-shell {
+  padding: 10px 14px 14px;
+}
+
+
+.workspace {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  align-content: start;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.panel {
+  padding: 14px 16px;
+}
+
+.compact-panel {
+  padding: 12px 14px;
+}
+
+.eyebrow,
+.panel-kicker,
+.sidebar-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.lede,
+.small-copy,
+.legend-list,
+.check-list,
+.muted-line {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.screen-reader-context {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.legend-list,
+.check-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 12px;
+}
+
+.utilitarian-topbar {
+  padding: 10px 12px;
+  border: 1px solid #d6d8da;
+  border-radius: 8px;
+  background: #e7eaed;
+}
+
+.utilitarian-topbar .ghost-button,
+.utilitarian-topbar .close-button {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: #c4c9ce;
+}
+
+.utilitarian-topbar .ghost-button:hover,
+.utilitarian-topbar .close-button:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.profile-fit-progress-panel {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfbfa;
+  display: grid;
+  gap: 6px;
+}
+
+.profile-fit-progress-head,
+.profile-fit-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-light, #666);
+}
+
+.profile-fit-progress-summary {
+  justify-content: flex-start;
+  gap: 12px;
+}
+
+.profile-fit-progress-panel.is-complete .profile-fit-progress-fill {
+  background: var(--ok-ink);
+}
+
+.profile-fit-progress-panel.is-failed .profile-fit-progress-fill {
+  background: var(--danger, #b84a4a);
+}

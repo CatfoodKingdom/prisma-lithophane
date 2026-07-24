@@ -1,0 +1,386 @@
+/* ── Processing Dashboard ─────────────────────────────────────────────── */
+
+.proc-split-layout {
+  display: flex;
+  gap: 0;
+  align-items: start;
+}
+
+.proc-split-pane {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+.proc-split-pane:first-child {
+  width: 500px;
+  flex: 0 0 500px;
+}
+
+.proc-split-pane:last-child {
+  flex: 0 0 762px;
+}
+
+.proc-split-divider {
+  width: 5px;
+  align-self: stretch;
+  background: #b0b0b0;
+  border-radius: 2px;
+  flex-shrink: 0;
+  margin: 0 10px;
+}
+
+.proc-pane-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg);
+  padding: 0 0 6px 2px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+/* ── Post-processing card: extracted+mock strip pair ── */
+.ppr-body {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.ppr-thumbs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.ppr-thumbs .pq-thumb {
+  width: 96px;
+  height: 66px;
+}
+
+.ppr-strip-stack {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ppr-strip-pair {
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+  align-items: start;
+}
+
+.ppr-extracted-stack {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ppr-extracted-strip {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.ppr-extracted-strip img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: fill;
+}
+
+.ppr-mock-strip {
+  flex: 1;
+  display: grid;
+  gap: 0;
+  padding-left: 1.5%;
+  padding-right: 1.5%;
+  box-sizing: border-box;
+}
+
+.ppr-strip-pair .ppr-mock-strip {
+  flex: 1;
+  min-width: 0;
+}
+
+.ppr-mock-swatch {
+  aspect-ratio: 1 / 1.6;
+}
+
+.ppr-thickness-row {
+  display: grid;
+  gap: 0;
+  box-sizing: border-box;
+}
+
+.ppr-thickness-label {
+  min-width: 0;
+  font-size: 9px;
+  color: var(--muted);
+  text-align: center;
+  padding-top: 1px;
+}
+
+.ppr-thickness-spacer {
+  min-width: 0;
+}
+
+/* Processing Queue info row: strip + thumbnails + orientation */
+.pq-empty-section {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pq-section-action {
+  padding: 6px 8px;
+  text-align: right;
+}
+
+.pq-batch-status {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8f8f5;
+}
+
+.pq-batch-status.is-complete {
+  background: #f3f8f1;
+  border-color: #b7cfb2;
+}
+
+.pq-batch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.pq-batch-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e6e6df;
+  overflow: hidden;
+}
+
+.pq-batch-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4f8fd6 0%, #5fb18a 100%);
+  transition: width 160ms ease;
+}
+
+.pq-batch-meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pq-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.pq-header-actions .proc-flag-btn {
+  color: #e65100;
+  border-color: #e6510066;
+}
+
+.pq-header-actions .proc-unflag-btn {
+  color: #2e7d32;
+  border-color: #2e7d3266;
+}
+
+.pq-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pq-strip-col {
+  flex-shrink: 0;
+}
+
+.pq-thumb {
+  width: 64px;
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+  background: #fafafa;
+}
+
+.pq-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fafafa;
+}
+
+.pq-thumb-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  font-size: 9px;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  padding: 1px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pq-thumb-wide {
+  width: 140px;
+  height: 36px;
+}
+
+.pq-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef3f6;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pq-orient-arrow {
+  font-size: 20px;
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+}
+
+.proc-card-filament {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.proc-card-filament-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.proc-filament-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.proc-filament-token {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Two-column processing card body: photos left, evidence right. */
+.proc-card-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+/* Photo column stacked vertically in the compact processing cards. */
+.proc-card-photos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 160px;
+}
+
+.proc-photo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+}
+
+.proc-photo-frame {
+  background: #eef3f6;
+  border: 1px solid var(--accent-soft-line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.proc-photo-frame img {
+  width: 100%;
+  display: block;
+}
+
+.proc-photo-empty {
+  width: 140px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Evidence column — strip image + swatch tiles */
+.proc-card-evidence {
+  display: grid;
+  gap: 12px;
+  max-width: 560px;
+}
+
+.proc-evidence-section {
+  display: grid;
+  gap: 4px;
+}
+
+.proc-strip-frame {
+  border: 1px solid #d5d5d0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.proc-strip-frame img {
+  width: 100%;
+  display: block;
+}
+
+.proc-strip-empty {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+  background: #eef3f6;
+}
+
+/* Swatch strips inside processing cards:
+   reuse the global .swatch-strip / .swatch-tile classes.
+   Override max-width and padding to fit the card context. */
+.proc-card-evidence .swatch-strip,
+.proc-card-grid .swatch-strip {
+  max-width: none;
+  margin-inline: 0;
+  padding-left: 0;
+  padding-right: 0;
+}

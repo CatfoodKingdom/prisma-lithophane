@@ -1,0 +1,315 @@
+/* ── Published model libraries ──────────────────────────────────────────── */
+
+.model-publication-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, calc(100vw - 36px));
+  max-width: 920px;
+  max-height: calc(100vh - 36px);
+}
+
+.model-publication-body {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+  overflow: auto;
+  background: #f8f8f6;
+}
+
+.model-publication-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.model-publication-panel {
+  min-width: 0;
+}
+
+.model-publication-panel .drawer-module-cap {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.model-publication-panel-cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-publication-loading {
+  padding: 18px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.model-publication-readiness-summary {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8f8f6;
+}
+
+.model-publication-readiness-summary strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.model-publication-readiness-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.model-publication-readiness-summary.is-ready {
+  border-color: #9ec4a5;
+  background: #f5fbf6;
+}
+
+.model-publication-readiness-summary.is-ready strong {
+  color: #2e7d32;
+}
+
+.model-publication-readiness-summary.is-blocked {
+  border-color: #dfc27a;
+  background: #fffaf0;
+}
+
+.model-publication-readiness-summary.is-blocked strong {
+  color: #8a6416;
+}
+
+.model-publication-components {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.model-publication-component {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 9px;
+  background: #ffffff;
+}
+
+.model-publication-component + .model-publication-component {
+  border-top: 1px solid var(--line);
+}
+
+.model-publication-component-main {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.model-publication-component-main strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.model-publication-component-main span,
+.model-publication-component-meta {
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.model-publication-component-status {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.model-publication-blockers {
+  display: grid;
+  gap: 3px;
+}
+
+.model-publication-form {
+  align-content: start;
+}
+
+.model-publication-required-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.42fr);
+  gap: 9px;
+}
+
+.model-publication-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-publication-field > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.model-publication-field em,
+.model-publication-field small {
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.model-publication-field input,
+.model-publication-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.model-publication-field textarea {
+  min-height: 58px;
+  line-height: 1.35;
+  resize: vertical;
+}
+
+.model-publication-field input:focus,
+.model-publication-field textarea:focus {
+  border-color: #7193aa;
+  outline: 2px solid rgba(73, 107, 130, 0.14);
+  outline-offset: 0;
+}
+
+.model-publication-field input:disabled,
+.model-publication-field textarea:disabled {
+  background: #f2f3f2;
+  color: var(--muted);
+}
+
+.model-publication-form-note,
+.model-publication-action-help {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.model-publication-actions-panel {
+  grid-column: 1 / -1;
+}
+
+.model-publication-actions-panel .backup-restore-panel-body {
+  align-content: start;
+}
+
+.model-publication-actions-panel .backup-restore-message {
+  align-self: start;
+}
+
+.model-publication-dialog .window-close-button:disabled {
+  opacity: 0.42;
+  cursor: wait;
+}
+
+.model-publication-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.model-publication-primary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.model-publication-result .mono {
+  font-size: 10.5px;
+}
+
+.model-publication-progress-fill {
+  width: 38%;
+  animation: modelPublicationProgress 1.15s ease-in-out infinite alternate;
+}
+
+@keyframes modelPublicationProgress {
+  from { transform: translateX(-25%); }
+  to { transform: translateX(185%); }
+}
+
+@media (max-width: 760px) {
+  .model-publication-dialog {
+    width: min(680px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+  }
+
+  .model-publication-layout,
+  .model-publication-required-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .model-publication-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .model-publication-primary-actions,
+  .model-publication-primary-actions > button,
+  .model-publication-actions > button {
+    width: 100%;
+  }
+}
+
+.prof-stale-count {
+  color: var(--warn-ink);
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.prof-sidebar-header {
+  padding: 2px 8px 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+
+.prof-sidebar-count {
+  font-size: 10px;
+  color: var(--muted);
+  background: #eee;
+  border-radius: 3px;
+  padding: 0 4px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.profile-icon-stale {
+  color: var(--warn-ink);
+}
+
+.profile-icon-strips {
+  color: var(--idle-ink);
+  font-size: 8px;
+}

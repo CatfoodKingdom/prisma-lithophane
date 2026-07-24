@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = (ROOT / "packaging" / "PrismaCalibration.spec").read_text(encoding="utf-8")
 PROJECT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 EXTRACTION = (ROOT / "Prisma" / "calibration" / "processing" / "extraction.py").read_text(encoding="utf-8")
+APP = ROOT / "Prisma" / "calibration" / "app"
 
 
 def test_calibration_runtime_group_contains_its_non_generator_dependencies() -> None:
@@ -23,6 +24,16 @@ def test_calibration_spec_bundles_first_run_and_frontend_assets() -> None:
     assert 'CALIBRATION / "app"' in SPEC
     assert 'CALIBRATION / "blank_calibration_schema.sql"' in SPEC
     assert '"Prisma.generator"' in SPEC
+
+
+def test_calibration_frontend_asset_tree_contains_modules_and_no_retired_monoliths() -> None:
+    assert (APP / "bootstrap.js").is_file()
+    assert (APP / "api" / "index.js").is_file()
+    assert (APP / "core" / "application-context.js").is_file()
+    assert (APP / "features" / "application.js").is_file()
+    assert (APP / "styles" / "tokens.css").is_file()
+    for retired in ("app.js", "api.js", "data.js"):
+        assert not (APP / retired).exists()
 
 
 def test_calibration_spec_preserves_path_loaded_fitter_without_cad_kernel() -> None:
