@@ -27,6 +27,17 @@ def test_suite_collects_both_frontends_schema_and_path_loaded_fitter() -> None:
     assert 'excludes=["__pycache__", "*.pyc"]' in SPEC
 
 
+def test_suite_generator_collects_heif_decoder_without_adding_it_to_calibration() -> None:
+    generator = SPEC.split("generator_analysis = Analysis(", 1)[1].split(")\nremove_asserted", 1)[0]
+    calibration = SPEC.split("calibration_analysis = Analysis(", 1)[1].split(")\nremove_asserted", 1)[0]
+    assert 'collect_dynamic_libs("pi_heif")' in SPEC
+    assert 'collect_submodules("pi_heif")' in SPEC
+    assert "binaries=pi_heif_binaries" in generator
+    assert "*pi_heif_hiddenimports" in generator
+    assert "pi_heif_datas" not in generator
+    assert "pi_heif" not in calibration
+
+
 def test_generator_frontend_directory_contains_nested_module_and_style_assets() -> None:
     app = ROOT / "Prisma" / "generator" / "app"
     required = [

@@ -63,6 +63,10 @@ export function initializeApplicationState(app) {
   app.state.palette.enabledFilamentPersistenceReady = false;
   app.state.image.availableImages = [];
   app.state.image.selectedImage = null;
+  app.state.image.pendingSelectedFilename = null;
+  app.state.image.activeImportBatchId = null;
+  app.state.image.importBatch = null;
+  app.state.image.importPollingError = "";
   app.state.image.frameState = {
   arMode: "specified",       // "specified" | "ratio" | "image" | "3:2" | "4:3" | "5:4" | "1:1"
   customRatio: { x: 1, y: 1 },

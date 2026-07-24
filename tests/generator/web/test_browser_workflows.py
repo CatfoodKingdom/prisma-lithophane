@@ -11,7 +11,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from PIL import Image
-from playwright.sync_api import Browser, Page, Route, sync_playwright
+from playwright.sync_api import Browser, Page, Route, TimeoutError as PlaywrightTimeoutError, sync_playwright
 import pytest
 
 
@@ -99,7 +99,13 @@ def page(browser: Browser, generator_url: str) -> Page:
     page_errors: list[str] = []
     instance.on("pageerror", lambda error: page_errors.append(getattr(error, "stack", str(error))))
     instance.goto(generator_url, wait_until="domcontentloaded")
-    instance.locator("#dataSourceBadge.connected").wait_for(state="visible")
+    try:
+        instance.locator("#dataSourceBadge.connected").wait_for(state="visible")
+    except PlaywrightTimeoutError as exc:
+        badge = instance.locator("#dataSourceBadge").text_content()
+        raise AssertionError(
+            f"Generator did not connect; badge={badge!r}; page_errors={page_errors!r}"
+        ) from exc
     recovery_modal = instance.locator("#modelLibrariesModal")
     if recovery_modal.get_attribute("aria-hidden") == "false":
         instance.locator("#modelLibrariesCloseBtn").click()
@@ -294,6 +300,43 @@ def test_palette_modes_keep_their_own_controls(page: Page):
     assert manual.get_attribute("aria-selected") == "true"
     assert page.locator("#panelManualBuilder").is_visible()
     assert not page.locator("#panelAutoSuggest").is_visible()
+
+
+def test_batch_phone_image_import_reports_partial_success(
+    page: Page,
+    tmp_path: Path,
+):
+    fixture = (
+        _ROOT / "tests" / "fixtures" / "heif" / "RGB_8__29x100.heif.b64"
+    )
+    phone_image = tmp_path / "browser-phone.heic"
+    phone_image.write_bytes(base64.b64decode(fixture.read_text(encoding="ascii")))
+    jpeg_alias = tmp_path / "browser-alias.jfif"
+    Image.new("RGB", (7, 5), (120, 80, 40)).save(jpeg_alias, format="JPEG")
+    corrupt = tmp_path / "browser-corrupt.heic"
+    corrupt.write_bytes(b"not an image")
+
+    page.locator("#imageUploadInput").set_input_files(
+        [phone_image, jpeg_alias, corrupt]
+    )
+    page.locator('.image-card[data-filename="browser-phone.heic"]').wait_for(
+        state="visible"
+    )
+    page.locator('.image-card[data-filename="browser-alias.jfif"]').wait_for(
+        state="visible"
+    )
+    notice = page.locator("#imageImportNotice")
+    notice.get_by_text("1 image could not be prepared").wait_for(state="visible")
+    assert page.locator('.image-card[data-filename="browser-corrupt.heic"]').count() == 0
+    assert page.locator("#previewImg").is_visible()
+
+    page.locator("#imageImportDetailsBtn").click()
+    modal = page.locator("#imageImportIssuesModal")
+    modal.wait_for(state="visible")
+    assert modal.get_by_text("browser-corrupt.heic", exact=True).is_visible()
+    assert modal.get_by_text("Cannot decode", exact=False).is_visible()
+    page.locator("#imageImportIssuesDone").click()
+    modal.wait_for(state="hidden")
 
 
 def test_image_palette_solve_and_diagnostic_lightbox_workflow(

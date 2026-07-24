@@ -146,7 +146,9 @@
                 <div class="library-title-actions">
                   <label class="ghost-button xxs upload-btn" title="Add a source image from your computer">
                     Add Image
-                    <input type="file" id="imageUploadInput" accept="image/*" hidden>
+                    <input type="file" id="imageUploadInput"
+                           accept=".png,.jpg,.jpeg,.jfif,.jpe,.tif,.tiff,.bmp,.webp,.heic,.heif,.hif,.avif"
+                           multiple hidden>
                   </label>
                   <button class="ghost-button xxs" id="imageLibraryOpenFolderBtn" type="button" title="Open the Images folder">Open Folder</button>
                   <button class="library-refresh-btn" id="imageLibraryRefreshBtn" type="button" title="Refresh image library" aria-label="Refresh image library">
@@ -159,6 +161,15 @@
                   </button>
                   <span class="library-window-divider" aria-hidden="true"></span>
                   <button class="library-resize-btn" id="libraryResizeBtn" type="button" title="Expand image library" aria-label="Expand image library"></button>
+                </div>
+              </div>
+              <div class="image-import-notice is-hidden" id="imageImportNotice" role="status" aria-live="polite">
+                <div class="image-import-notice-row">
+                  <span id="imageImportNoticeText"></span>
+                  <button class="ghost-button xxs" id="imageImportDetailsBtn" type="button" hidden>Details</button>
+                </div>
+                <div class="image-import-progress" id="imageImportProgress" aria-hidden="true">
+                  <span id="imageImportProgressFill"></span>
                 </div>
               </div>
               <div class="library-thumbs" id="imageGrid">
@@ -1244,6 +1255,36 @@
       </div>
       <div class="modal-dialog-footer surface-footer model-libraries-footer">
         <span class="model-libraries-footer-status" id="modelLibrariesFooterStatus" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Image import issue details -->
+  <div class="modal-overlay surface-overlay is-hidden" id="imageImportIssuesModal"
+       aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="imageImportIssuesTitle">
+    <div class="modal-dialog modal-dialog-window surface-window image-import-issues-dialog">
+      <div class="modal-dialog-header window-header surface-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="imageImportIssuesTitle">Image Import Details</h3>
+        </div>
+        <div class="window-header__actions surface-header-actions">
+          <div class="surface-window-controls">
+            <button class="close-button window-header__button surface-header-button surface-close"
+                    id="imageImportIssuesClose" aria-label="Close image import details"
+                    title="Close image import details">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2L2 10"></path></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-dialog-body surface-body image-import-issues-body">
+        <p class="muted-line">Your original files were not changed. Export problem images as SDR sRGB JPEG or PNG when the decoder or color profile is unsupported.</p>
+        <ul class="image-import-issues-list" id="imageImportIssuesList"></ul>
+      </div>
+      <div class="modal-dialog-footer surface-footer image-import-issues-actions">
+        <button class="ghost-button small" id="imageImportOpenFolderBtn" type="button">Open Folder</button>
+        <button class="ghost-button small" id="imageImportRetryBtn" type="button">Retry Failed</button>
+        <button class="primary-button small" id="imageImportIssuesDone" type="button">Done</button>
       </div>
     </div>
   </div>

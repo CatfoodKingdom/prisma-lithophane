@@ -1,5 +1,8 @@
 export { API_BASE, apiFetch, apiPost, createApiClient } from "./client.js";
-export { fetchImages, imagePreviewUrl, openImagesFolder, uploadImage } from "./images.js";
+export {
+  fetchImages, getImageImportStatus, imagePreviewUrl, importImages,
+  openImagesFolder, refreshImages, uploadImage,
+} from "./images.js";
 export {
   cancelExport, cancelSolve, exportFileUrl, getExportStatus, getSolveStatus,
   openExportFolder, startExportPrintFiles, startSolve,

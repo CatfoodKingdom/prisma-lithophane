@@ -48,6 +48,9 @@ export function installFeaturesApplication(app) {
           // Saved palettes can be loaded via the Load button.
           if (session.config.image_path) {
             app.state.image.selectedImage = app.state.image.availableImages.find((i) => i.filename === session.config.image_path);
+            if (!app.state.image.selectedImage) {
+              app.state.image.pendingSelectedFilename = session.config.image_path;
+            }
           }
           if (session.config.frame) {
             const f = session.config.frame;
@@ -89,6 +92,12 @@ export function installFeaturesApplication(app) {
     // its library grid now that availableImages is populated (otherwise it stays empty until the
     // first upload/tab-switch).
     app.commands.renderImageTab();
+    if (app.state.session.apiConnected) {
+      void app.commands.startFolderImageRefresh({ announce: false }).catch((error) => {
+        app.state.image.importPollingError = error?.message || "Image preparation could not start";
+        app.commands.renderImageImportNotice();
+      });
+    }
 
     app.commands.showToast(app.state.session.apiConnected ? "Connected to Prisma server" : "Offline mode \u2014 start server to enable full features", app.state.session.apiConnected ? "success" : "");
   }

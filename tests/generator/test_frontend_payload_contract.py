@@ -28,6 +28,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import server
 from thickness_maps import MapKey, ThicknessMaps
@@ -217,7 +218,7 @@ def solve_env(tmp_path, monkeypatch):
     modules_path.write_text("{}", encoding="utf-8")
 
     image_path = images_dir / "solve-input.png"
-    image_path.write_bytes(b"not-a-real-png-but-it-exists")
+    Image.new("RGB", (4, 4), "white").save(image_path)
 
     monkeypatch.setattr(server, "_IMAGES_DIR", images_dir)
     monkeypatch.setattr(server, "_OUTPUT_DIR", output_dir)

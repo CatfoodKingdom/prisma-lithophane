@@ -23,6 +23,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -33,7 +34,7 @@ from urllib.parse import quote
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from PIL import Image, ImageOps
@@ -68,6 +69,16 @@ from progress import ProgressCancelled, ProgressReporter  # noqa: E402
 from image_ingress import (  # noqa: E402
     load_image,
     apply_adjustments,
+)
+from source_images import (  # noqa: E402
+    ImageImportManager,
+    NATIVE_EXTENSIONS,
+    NORMALIZED_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    ResolvedSource,
+    SourceImageError,
+    SourceImageService,
+    normalize_to_srgb,
 )
 from model import (  # noqa: E402
     load_profile as _load_profile,
@@ -372,10 +383,19 @@ logging.getLogger("prisma").addHandler(_file_handler)
 # App
 # ---------------------------------------------------------------------------
 
+
+@asynccontextmanager
+async def _app_lifespan(_app):
+    yield
+    manager = globals().get("_IMAGE_IMPORTS")
+    if manager is not None:
+        manager.stop()
+
 app = FastAPI(
     title="Prisma — Lithophane Generator API",
     version="0.1.0",
     description="Backend for the unified lithophane generator web UI.",
+    lifespan=_app_lifespan,
 )
 
 # CORS — wide open during development
@@ -386,6 +406,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(SourceImageError)
+async def source_image_error_handler(_request, exc: SourceImageError):
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
 @app.get("/api/system/health")
@@ -528,6 +553,7 @@ session: Dict[str, Any] = {
         "solved_plan": None,             # SolvedMaterialPlan (populated by the solve path)
         "export_maps": None,             # product/export contract arrays
         "export_metadata": None,         # product/export contract metadata
+        "source_asset": None,            # exact source provenance used by this solve
         "solve_owned_fingerprint": None, # hash of solve-owned config at solve time
         "cancel_requested": False,
     },
@@ -556,6 +582,29 @@ _ACTIVE_MODEL_JOB_STATUSES = {"running", "cancelling"}
 _PALETTE_BACKEND_CACHE_MAX_SIZE = 2
 _PALETTE_BACKEND_CACHE_LOCK = threading.RLock()
 _PALETTE_BACKEND_CACHE: OrderedDict[tuple[Any, ...], object] = OrderedDict()
+
+
+def _image_import_priority_busy() -> bool:
+    """Yield source preparation while product jobs own CPU/model resources."""
+
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        if _MODEL_LIBRARY_OPERATION_LOCK.locked():
+            return True
+        return any(
+            session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES
+            for key in ("solve", "export", "suggest")
+        )
+
+
+_SOURCE_IMAGES = SourceImageService(
+    _IMAGES_DIR,
+    data_paths.SOURCE_IMAGE_CACHE_DIR,
+)
+_IMAGE_IMPORTS = ImageImportManager(
+    _SOURCE_IMAGES,
+    data_paths.SOURCE_IMAGE_IMPORT_DIR,
+    priority_busy=_image_import_priority_busy,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -797,11 +846,40 @@ def _white_ids(cfg: dict = None) -> list:
     return [wb] if wb == wc else [wb, wc]
 
 
-def _load_run_source_image(image_path: Path, cfg: dict, *, max_dim_mm: Optional[float] = None) -> np.ndarray:
+def _source_service_for_path(image_path: Path) -> SourceImageService:
+    """Return the runtime service, with an isolated fallback for redirected test roots."""
+
+    source_root = image_path.resolve().parent
+    if source_root == _SOURCE_IMAGES.images_dir.resolve():
+        return _SOURCE_IMAGES
+    cache_key = hashlib.sha256(str(source_root).casefold().encode("utf-8")).hexdigest()[:16]
+    return SourceImageService(
+        source_root,
+        data_paths.SOURCE_IMAGE_CACHE_DIR / "redirected-roots" / cache_key,
+    )
+
+
+def _resolve_run_source_image(
+    image_path: Path,
+    *,
+    prepare: bool = True,
+) -> ResolvedSource:
+    service = _source_service_for_path(image_path)
+    return service.resolve(image_path.name, prepare=prepare)
+
+
+def _load_run_source_image(
+    image_path: Path,
+    cfg: dict,
+    *,
+    max_dim_mm: Optional[float] = None,
+    resolved_source: ResolvedSource | None = None,
+) -> np.ndarray:
     """Load the framed, adjusted source raster for solve-adjacent paths."""
 
+    resolved = resolved_source or _resolve_run_source_image(image_path)
     img = load_image(
-        image_path,
+        resolved.working_path,
         pixel_size_mm=cfg["image_sample_pitch_mm"],
         max_dim_mm=cfg["max_dim_mm"] if max_dim_mm is None else max_dim_mm,
         frame=cfg.get("frame"),
@@ -1232,19 +1310,16 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
 def _image_info(path: Path) -> dict:
     """Return metadata for a single image file."""
     try:
-        with Image.open(path) as im:
-            im_oriented = ImageOps.exif_transpose(im)
-            w, h = im_oriented.size
-    except Exception:
-        w, h = 0, 0
-    size_kb = path.stat().st_size / 1024
-    return {
-        "filename": path.name,
-        "width": w,
-        "height": h,
-        "size_kb": round(size_kb, 1),
-        "thumbnail_url": f"/api/images/preview/{path.name}",
-    }
+        return _SOURCE_IMAGES.describe(path)
+    except (SourceImageError, OSError):
+        size_kb = path.stat().st_size / 1024
+        return {
+            "filename": path.name,
+            "width": 0,
+            "height": 0,
+            "size_kb": round(size_kb, 1),
+            "thumbnail_url": f"/api/images/preview/{path.name}",
+        }
 
 
 def _save_de_map(de_map: np.ndarray, path: Path) -> None:
@@ -2091,6 +2166,15 @@ def _solve_owned_fingerprint(cfg: dict) -> str:
         for mid, enabled in subset["__module_state__"].items()
         if enabled and mid in PREPROCESSING_MODULE_IDS
     }
+    image_name = str(canonical_cfg.get("image_path") or "")
+    if image_name:
+        try:
+            subset["__source_asset_fingerprint__"] = _resolve_run_source_image(
+                _IMAGES_DIR / Path(image_name).name,
+                prepare=False,
+            ).fingerprint
+        except SourceImageError:
+            subset["__source_asset_fingerprint__"] = "unavailable"
     if _is_photo_stack_provider(canonical_cfg.get("appearance_model_provider")):
         # The provider instance is not available at config-fingerprint time,
         # but photo-stack predictor logic changes alter solved colors and
@@ -2498,19 +2582,29 @@ def list_filaments() -> List[dict]:
 
 # ── Images ────────────────────────────────────────────────────────────────
 
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}
-
 
 @app.get("/api/images")
 def list_images() -> List[dict]:
     """List source images in images/ directory."""
     if not _IMAGES_DIR.exists():
         return []
-    files = sorted(
-        p for p in _IMAGES_DIR.iterdir()
-        if p.is_file() and p.suffix.lower() in _IMAGE_EXTENSIONS
-    )
-    return [_image_info(f) for f in files]
+    ready, _pending = _SOURCE_IMAGES.discover()
+    return [_image_info(path) for path in ready]
+
+
+@app.post("/api/images/refresh", status_code=202)
+def refresh_images() -> dict:
+    """Scan the visible Images folder and queue missing normalized sources."""
+
+    return _IMAGE_IMPORTS.refresh()
+
+
+@app.get("/api/images/imports/{batch_id}")
+def image_import_status(batch_id: str) -> dict:
+    try:
+        return _IMAGE_IMPORTS.status(batch_id)
+    except KeyError as exc:
+        raise HTTPException(404, f"No such image import: {batch_id}") from exc
 
 
 def _open_images_folder() -> None:
@@ -2529,38 +2623,56 @@ def open_images_folder() -> dict:
 
 @app.post("/api/images/upload")
 async def upload_image(file: UploadFile) -> dict:
-    """Upload an image to images/ directory."""
+    """Compatibility single-file upload; waits until the image is usable."""
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
     suffix = Path(file.filename).suffix.lower()
-    if suffix not in _IMAGE_EXTENSIONS:
+    if suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported format: {suffix}")
 
-    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    # Sanitize filename — use only the basename to prevent path traversal
-    safe_name = Path(file.filename).name
-    dest = _IMAGES_DIR / safe_name
-
-    # Avoid overwriting — append a counter if needed
-    counter = 1
-    while dest.exists():
-        stem = Path(file.filename).stem
-        dest = _IMAGES_DIR / f"{stem}_{counter}{suffix}"
-        counter += 1
-
-    content = await file.read()
-    dest.write_bytes(content)
-
+    data_paths.SOURCE_IMAGE_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+    staged = data_paths.SOURCE_IMAGE_IMPORT_DIR / f".upload-{uuid.uuid4().hex}{suffix}"
     try:
-        with Image.open(dest) as im:
-            w, h = im.size
-    except Exception as exc:
-        dest.unlink(missing_ok=True)
-        raise HTTPException(400, f"Not a valid image: {exc}")
+        with staged.open("xb") as output:
+            while block := await file.read(1024 * 1024):
+                output.write(block)
+        resolved = _IMAGE_IMPORTS.import_staged_sync(file.filename, staged)
+    finally:
+        staged.unlink(missing_ok=True)
 
-    logger.info("Uploaded image: %s (%dx%d)", dest.name, w, h)
-    return {"filename": dest.name, "width": w, "height": h}
+    logger.info("Uploaded image: %s (%dx%d)", resolved.display_name, resolved.width, resolved.height)
+    return {
+        "filename": resolved.display_name,
+        "width": resolved.width,
+        "height": resolved.height,
+    }
+
+
+@app.post("/api/images/import", status_code=202)
+async def import_images(files: List[UploadFile] = File(...)) -> dict:
+    """Stage a batch and return immediately while the single worker validates it."""
+
+    if not files:
+        raise HTTPException(400, "No files provided")
+    data_paths.SOURCE_IMAGE_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+    staged_files: list[tuple[str, Path]] = []
+    try:
+        for upload in files:
+            requested = Path(upload.filename or "").name
+            suffix = Path(requested).suffix.lower()
+            staged = data_paths.SOURCE_IMAGE_IMPORT_DIR / (
+                f".upload-{uuid.uuid4().hex}{suffix if suffix else '.bin'}"
+            )
+            with staged.open("xb") as output:
+                while block := await upload.read(1024 * 1024):
+                    output.write(block)
+            staged_files.append((requested, staged))
+        return _IMAGE_IMPORTS.import_staged(staged_files)
+    except Exception:
+        for _name, staged in staged_files:
+            staged.unlink(missing_ok=True)
+        raise
 
 
 def _safe_path(base: Path, filename: str) -> Path:
@@ -2579,11 +2691,11 @@ def get_image_preview(filename: str):
         raise HTTPException(404, f"Image not found: {filename}")
 
     try:
-        with Image.open(path) as raw_img:
-            img = ImageOps.exif_transpose(raw_img)
-            img = img.convert("RGB")
-    except Exception as exc:
-        raise HTTPException(400, f"Cannot open image: {exc}")
+        resolved = _SOURCE_IMAGES.resolve(path.name, prepare=True)
+        with Image.open(resolved.working_path) as raw_img:
+            img = ImageOps.exif_transpose(raw_img).convert("RGB")
+    except (SourceImageError, OSError, ValueError) as exc:
+        raise HTTPException(400, f"Cannot open image: {exc}") from exc
 
     img.thumbnail((800, 800))
     buf = io.BytesIO()
@@ -4569,6 +4681,7 @@ def _write_completed_solve_cache_entry(card_id: str, cfg: dict, solve: dict, res
             ),
             "export_metadata": deepcopy(getattr(result, "export_metadata", {}) or {}),
             "material_exposure_audit": solve.get("material_exposure_audit"),
+            "source_asset": deepcopy(solve.get("source_asset")),
             "solve_owned_fingerprint": solve.get("solve_owned_fingerprint"),
             "result": solve["result"],
         },
@@ -4710,6 +4823,7 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
             solve["solved_plan"] = None
             solve["export_maps"] = None
             solve["export_metadata"] = None
+            solve["source_asset"] = None
             solve["solve_owned_fingerprint"] = None
             start = time.time()
 
@@ -4730,7 +4844,18 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     stage_index=1,
                     local_pct=0,
                 )
-                img = _load_run_source_image(image_path, cfg)
+                resolved_source = _resolve_run_source_image(image_path)
+                source_asset = resolved_source.provenance()
+                if resolved_source.normalized:
+                    snapshot_name = "source-image.png"
+                    shutil.copy2(resolved_source.working_path, out / snapshot_name)
+                    source_asset["snapshot_name"] = snapshot_name
+                solve["source_asset"] = source_asset
+                img = _load_run_source_image(
+                    image_path,
+                    cfg,
+                    resolved_source=resolved_source,
+                )
                 H, W = img.shape[:2]
                 solve["img"] = img
                 _mark_phase("load_image")
@@ -6423,6 +6548,8 @@ def _assert_no_active_job(*, action: str = "clear cache") -> None:
         for key in ("solve", "export", "suggest"):
             if session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES:
                 raise HTTPException(409, f"Cannot {action} while a {key} job is running")
+        if action != "manage model libraries" and _IMAGE_IMPORTS.active():
+            raise HTTPException(409, "Cannot clear cache while images are being prepared")
 
 
 def _reserve_model_job(key: str, *, already_running: str, state: dict[str, Any]) -> None:
@@ -6585,8 +6712,16 @@ def clear_cache_all() -> dict:
     _assert_no_active_job()
     removed = sum(
         safe_clear_dir(d, root=data_paths.CACHE_DIR)
-        for d in (data_paths.RUN_CACHE_DIR, data_paths.LUT_CACHE_DIR, data_paths.AUTO_RUNS_DIR)
+        for d in (
+            data_paths.RUN_CACHE_DIR,
+            data_paths.LUT_CACHE_DIR,
+            data_paths.AUTO_RUNS_DIR,
+        )
     )
+    source_cache = _SOURCE_IMAGES.cache_dir.resolve()
+    active_cache = data_paths.CACHE_DIR.resolve()
+    if source_cache == active_cache or active_cache in source_cache.parents:
+        removed += _SOURCE_IMAGES.clear()
     session.get("solve_cache", {}).clear()
     _clear_palette_backend_cache()
     return {"cleared": "all", "removed": removed}
@@ -6621,12 +6756,29 @@ def _cached_solve_or_409(card_id: str) -> tuple[dict, dict]:
 
 def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, saved_at: str):
     cfg = _drop_phantom_config_fields(cfg)
-    image_name = Path(str(cfg.get("image_path", ""))).name or "image"
-    image_path = _IMAGES_DIR / image_name
-    if not image_path.exists():
-        # The source image is a REQUIRED archive member — never save a hollow archive.
-        raise HTTPException(409, f"Source image {image_name!r} is missing; cannot save a self-contained run")
-    image_bytes = image_path.read_bytes()
+    original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
+    run_dir = data_paths.RUN_CACHE_DIR / card_id
+    source_asset = deepcopy(solve.get("source_asset") or {})
+    if source_asset.get("normalized"):
+        snapshot_name = Path(str(source_asset.get("snapshot_name") or "")).name
+        snapshot_path = run_dir / snapshot_name
+        if not snapshot_name or not snapshot_path.is_file():
+            raise HTTPException(
+                409,
+                "The exact prepared source used by this solve is missing; rerun the solve before saving.",
+            )
+        image_name = f"{Path(original_image_name).stem}.prisma-source.png"
+        image_bytes = snapshot_path.read_bytes()
+    else:
+        image_name = original_image_name
+        image_path = _IMAGES_DIR / image_name
+        if not image_path.exists():
+            # The source image is a REQUIRED archive member — never save a hollow archive.
+            raise HTTPException(
+                409,
+                f"Source image {image_name!r} is missing; cannot save a self-contained run",
+            )
+        image_bytes = image_path.read_bytes()
     thickness_arrays = {}
     for key, arr in (solve.get("thickness_maps") or {}).items():
         thickness_arrays[f"tm__{getattr(key, 'value', key)}"] = np.asarray(arr)
@@ -6637,12 +6789,13 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
     # Copy the ENTIRE per-card run-cache subtree (png/bin/json/csv + bundle subdir) so
     # instant review (contours, surface explorer, recipe) works on the loaded run.
     run_cache_files = {}
-    run_dir = data_paths.RUN_CACHE_DIR / card_id
     cached_run_metadata = None
     if run_dir.is_dir():
         for p in run_dir.rglob("*"):
             if p.is_file():
                 rel = p.relative_to(run_dir).as_posix()
+                if source_asset.get("normalized") and rel == source_asset.get("snapshot_name"):
+                    continue
                 payload = p.read_bytes()
                 if rel == "run.json":
                     try:
@@ -6670,7 +6823,7 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
     run_json = {
         "schema_version": run_archive.SCHEMA_VERSION,
         "save_id": None, "label": label, "saved_at": saved_at,
-        "source_image_name": image_name,
+        "source_image_name": original_image_name,
         "config": cfg,
         "palette": cfg.get("palette") or [],
         "image_domain_width_mm": solve.get("image_domain_width_mm"),
@@ -6686,6 +6839,8 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
     # added remain valid and continue through the diagnostics/config fallback.
     if cached_run_metadata is not None:
         run_json["run_metadata"] = _json_safe_runtime_diagnostic(cached_run_metadata)
+    if source_asset:
+        run_json["source_asset"] = _json_safe_runtime_diagnostic(source_asset)
     run_json = _sanitize_archive_run_json_phantom_fields(run_json)
     solve_state = {"solve_owned_fingerprint": solve.get("solve_owned_fingerprint")}
     return run_json, thickness_arrays, image_bytes, image_name, solve_state, run_cache_files
@@ -6710,7 +6865,7 @@ def _pack_completed_run_archive(card_id: str, solve: dict, cfg: dict, *, label: 
         "save_id": save_id,
         "label": label,
         "saved_at": saved_at,
-        "source_image_name": img_name,
+        "source_image_name": run_json["source_image_name"],
         "palette": run_json["palette"],
         "stats": {
             "mean_de": run_json["stats"].get("mean_de"),
@@ -6788,7 +6943,7 @@ def _saved_run_preview_response(save_id: str, tier: str):
     try:
         parsed = run_archive.read_run_archive(raw)
         with Image.open(io.BytesIO(parsed.image_bytes)) as raw_img:
-            img = ImageOps.exif_transpose(raw_img).convert("RGB")
+            img = normalize_to_srgb(raw_img)
         img.thumbnail((320, 320))
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=82, optimize=True)
@@ -7015,7 +7170,14 @@ def _rehydrate_loaded_archive(parsed) -> dict:
     # 1. Image -> save-scoped unique path; rewrite config.image_path.
     _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
     safe_img = f"{card_id}-{Path(parsed.image_name).name}"
-    (_IMAGES_DIR / safe_img).write_bytes(parsed.image_bytes)
+    restored_image = _IMAGES_DIR / safe_img
+    restored_image.write_bytes(parsed.image_bytes)
+    try:
+        if restored_image.suffix.lower() in NORMALIZED_EXTENSIONS:
+            _SOURCE_IMAGES.prepare(restored_image)
+    except SourceImageError as exc:
+        restored_image.unlink(missing_ok=True)
+        raise HTTPException(400, f"Saved run source image is unavailable: {exc}") from exc
     cfg["image_path"] = safe_img
     # 2. Split npz back into thickness_maps + debug_maps (string keys; consumers tolerate str).
     thickness_maps, debug_maps, export_maps = {}, {}, {}
@@ -7030,6 +7192,10 @@ def _rehydrate_loaded_archive(parsed) -> dict:
     #    card's dir so /api/run-cache/files serves contours/explorer/recipe, not just PNGs.
     run_dir = data_paths.RUN_CACHE_DIR / card_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    source_asset = deepcopy(rj.get("source_asset") or {})
+    if source_asset.get("normalized"):
+        source_asset["snapshot_name"] = "source-image.png"
+        (run_dir / source_asset["snapshot_name"]).write_bytes(parsed.image_bytes)
     for rel, payload in parsed.run_cache_files.items():
         dest = run_dir / rel        # rel already validated safe by read_run_archive
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -7054,6 +7220,7 @@ def _rehydrate_loaded_archive(parsed) -> dict:
             "image_domain_width_mm": rj.get("image_domain_width_mm"),
             "image_domain_height_mm": rj.get("image_domain_height_mm"),
             "material_exposure_audit": None,
+            "source_asset": source_asset or None,
             "solve_owned_fingerprint": (parsed.solve_state or {}).get("solve_owned_fingerprint"),
             "result": result,
         },

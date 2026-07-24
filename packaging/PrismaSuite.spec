@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 from PyInstaller.building.datastruct import Tree
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve().parent
@@ -41,15 +41,19 @@ def remove_asserted_opencv_video_plugin(analysis, *, application_name):
         )
 
 
+pi_heif_binaries = collect_dynamic_libs("pi_heif")
+pi_heif_hiddenimports = collect_submodules("pi_heif")
+
 generator_analysis = Analysis(
     [str(PRISMA / "launcher.py")],
     pathex=[str(ROOT), str(PRISMA), str(GENERATOR)],
-    binaries=[],
+    binaries=pi_heif_binaries,
     datas=[
         (str(GENERATOR / "app"), "Prisma/generator/app"),
     ],
     hiddenimports=[
         "Prisma.generator.server",
+        *pi_heif_hiddenimports,
         *collect_submodules("lib"),
         *collect_submodules("preprocessing.operators"),
     ],

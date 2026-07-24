@@ -4,6 +4,7 @@
  */
 export function installFeaturesEventBindings(app) {
 function bindEvents() {
+    app.commands.bindImageImportEvents();
     app.lifecycle.listen(window, "resize", app.commands.refreshVisibleSolveContours);
     app.lifecycle.listen(window, "resize", app.commands.syncCreationSidePanelSizing);
 
@@ -51,16 +52,11 @@ function bindEvents() {
 
     // Image tab — upload
     app.lifecycle.listen(app.state.ui.$("#imageUploadInput"), "change", async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (!files.length) return;
       try {
-        const result = await app.api.uploadImage(file);
-        app.commands.showToast(`Uploaded ${result.filename}`, "success");
-        await app.commands.loadImages();
-        app.state.image.selectedImage = app.state.image.availableImages.find((i) => i.filename === result.filename);
-        if (app.state.image.selectedImage) app.commands.applyImageAspectDefault();  // Stage 11: default to image aspect, short side 120mm
-        app.commands.renderImageTab();
-        app.commands.updateRail();
+        await app.commands.startImageBatchImport(files);
       } catch (err) {
         app.commands.showToast(`Upload failed: ${err.message}`, "error");
       }
@@ -425,7 +421,7 @@ function bindEvents() {
     if (imageLibraryRefreshBtn) app.lifecycle.listen(imageLibraryRefreshBtn, "click", async () => {
       imageLibraryRefreshBtn.disabled = true;
       try {
-        await app.commands.refreshImageLibrary({ announce: true });
+        await app.commands.startFolderImageRefresh({ announce: true });
       } catch (err) {
         app.commands.showToast(`Refresh failed: ${err.message}`, "error");
       } finally {
@@ -678,7 +674,7 @@ function bindEvents() {
     if (clearAllBtn) {
       app.lifecycle.listen(clearAllBtn, "click", async () => {
         const ok = await app.commands.appConfirm(
-          "Delete ALL cached temp files (solve runs + LUTs)? Your exported files and saved runs are kept.",
+          "Delete ALL cached temp files (solve runs, LUTs, and prepared source images)? Your original images, exported files, and saved runs are kept.",
           { ok: "Delete", cancel: "Cancel", title: "Clear Temp Files" });
         if (!ok) return;
         try {

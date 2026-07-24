@@ -3,7 +3,7 @@
 from pathlib import Path
 import sys
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 
 ROOT = Path(SPECPATH).resolve().parent
@@ -16,8 +16,12 @@ for path in (ROOT, PRISMA, GENERATOR):
     if text not in sys.path:
         sys.path.insert(0, text)
 
+pi_heif_binaries = collect_dynamic_libs("pi_heif")
+pi_heif_hiddenimports = collect_submodules("pi_heif")
+
 hiddenimports = [
     "Prisma.generator.server",
+    *pi_heif_hiddenimports,
     *collect_submodules("lib"),
     *collect_submodules("preprocessing.operators"),
 ]
@@ -25,7 +29,7 @@ hiddenimports = [
 analysis = Analysis(
     [str(PRISMA / "launcher.py")],
     pathex=[str(ROOT), str(PRISMA), str(GENERATOR)],
-    binaries=[],
+    binaries=pi_heif_binaries,
     datas=[
         (str(GENERATOR / "app"), "Prisma/generator/app"),
     ],

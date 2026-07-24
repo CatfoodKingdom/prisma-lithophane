@@ -210,6 +210,82 @@
   transition: flex-basis 0.15s ease;
 }
 
+.image-import-notice {
+  margin: 5px 6px 2px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--selected) 44%, var(--panel));
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.3;
+  flex-shrink: 0;
+}
+.image-import-notice.is-warning {
+  border-color: color-mix(in srgb, var(--warn-ink) 55%, var(--line));
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+.image-import-notice.is-error {
+  border-color: color-mix(in srgb, var(--error-ink) 55%, var(--line));
+  background: var(--error-bg);
+  color: var(--error-ink);
+}
+.image-import-notice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.image-import-progress {
+  height: 4px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-raised);
+}
+.image-import-progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent-fill);
+}
+.image-import-issues-dialog {
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 32px));
+}
+.image-import-issues-body {
+  overflow-y: auto;
+}
+.image-import-issues-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 12px 0 0;
+  list-style: none;
+}
+.image-import-issues-list li {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-inset);
+}
+.image-import-issues-list strong {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.image-import-issues-list span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.image-import-issues-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* Thumbnail area */
 .library-thumbs {
   display: flex;

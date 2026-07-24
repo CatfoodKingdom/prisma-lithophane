@@ -52,7 +52,7 @@ Detailed guides are available on the
 
 Portable releases keep visible data beside the executable:
 
-- `Generator/Images` — source images;
+- `Generator/Images` — original source images, including HEIC/HEIF and AVIF phone photos;
 - `Generator/Exports` — completed print files;
 - `Generator/Model Libraries` — installed published model bundles;
 - `Generator/Workspace` — settings, runs, caches, and logs;

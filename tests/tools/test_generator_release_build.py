@@ -10,7 +10,7 @@ PROJECT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 def test_generator_runtime_group_excludes_development_families() -> None:
     group = PROJECT.split("generator-runtime = [", 1)[1].split("]", 1)[0]
-    for required in ("fastapi", "opencv-python-headless", "shapely", "trimesh", "uvicorn"):
+    for required in ("fastapi", "opencv-python-headless", "pi-heif", "shapely", "trimesh", "uvicorn"):
         assert f'"{required}' in group
     for development_only in ("build123d", "matplotlib", "playwright", "pytest", "rawpy"):
         assert f'"{development_only}' not in group
@@ -38,3 +38,11 @@ def test_generator_spec_removes_only_asserted_opencv_video_plugin() -> None:
     assert 'elif opencv_videoio_plugins:' in SPEC
     assert 'USE_UPX = sys.platform == "win32"' in SPEC
     assert "upx=USE_UPX" in SPEC
+
+
+def test_generator_spec_collects_heif_decoder_and_native_libraries() -> None:
+    assert 'collect_dynamic_libs("pi_heif")' in SPEC
+    assert 'collect_submodules("pi_heif")' in SPEC
+    assert "binaries=pi_heif_binaries" in SPEC
+    assert "*pi_heif_hiddenimports" in SPEC
+    assert "pi_heif_datas" not in SPEC

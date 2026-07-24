@@ -6,6 +6,7 @@ import re
 
 import numpy as np
 import pytest
+from PIL import Image
 
 
 def test_default_smoothing_radius_is_1mm_at_default_pitch():
@@ -515,7 +516,7 @@ def test_start_solve_passes_modules_path(tmp_path, monkeypatch):
         raise RuntimeError("sentinel solve")
 
     monkeypatch.setattr(server, "solve_full", fake_solve_full)
-    (tmp_path / "sample.png").write_bytes(b"stub")
+    Image.new("RGB", (2, 2), "white").save(tmp_path / "sample.png")
 
     try:
         response = server.start_solve(server.SolveStartPayload())

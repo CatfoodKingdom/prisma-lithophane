@@ -107,6 +107,8 @@ CACHE_DIR = GENERATOR_DATA_DIR / "cache"
 RUN_CACHE_DIR = CACHE_DIR / "runs"
 LUT_CACHE_DIR = CACHE_DIR / "luts"
 AUTO_RUNS_DIR = CACHE_DIR / "auto_runs"
+SOURCE_IMAGE_CACHE_DIR = CACHE_DIR / "source-images"
+SOURCE_IMAGE_IMPORT_DIR = CACHE_DIR / "image-imports"
 
 SAVED_RUNS_DIR = GENERATOR_DATA_DIR / "saved_runs"
 LOG_DIR = GENERATOR_DATA_DIR / "logs"
@@ -114,5 +116,16 @@ LOG_DIR = GENERATOR_DATA_DIR / "logs"
 
 def ensure_dirs() -> None:
     """Create the managed directories that must exist on boot."""
-    for d in (UPLOAD_DIR, OUTPUT_DIR, CACHE_DIR, RUN_CACHE_DIR, LUT_CACHE_DIR, AUTO_RUNS_DIR, SAVED_RUNS_DIR, LOG_DIR):
+    for d in (
+        UPLOAD_DIR,
+        OUTPUT_DIR,
+        CACHE_DIR,
+        RUN_CACHE_DIR,
+        LUT_CACHE_DIR,
+        AUTO_RUNS_DIR,
+        SOURCE_IMAGE_CACHE_DIR,
+        SOURCE_IMAGE_IMPORT_DIR,
+        SAVED_RUNS_DIR,
+        LOG_DIR,
+    ):
         d.mkdir(parents=True, exist_ok=True)

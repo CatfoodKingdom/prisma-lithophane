@@ -9,18 +9,20 @@ export function installFeaturesImageIndex(app) {
       return;
     }
 
-    const previousFilename = app.state.image.selectedImage?.filename || null;
+    const selectedBeforeRefresh = app.state.image.selectedImage?.filename || null;
+    const previousFilename = selectedBeforeRefresh || app.state.image.pendingSelectedFilename || null;
     app.state.image.availableImages = await app.api.fetchImages();
     const refreshedSelection = previousFilename
       ? app.state.image.availableImages.find((img) => img.filename === previousFilename) || null
       : null;
     const selectionWasRemoved = !!previousFilename && !refreshedSelection;
     app.state.image.selectedImage = refreshedSelection;
+    if (refreshedSelection) app.state.image.pendingSelectedFilename = null;
 
     app.commands.renderImageTab();
     app.commands.updateRail();
 
-    if (selectionWasRemoved) {
+    if (selectionWasRemoved && selectedBeforeRefresh) {
       await app.commands.syncConfigToServer({ showErrorToast: true });
       app.commands.showToast(`Removed missing image "${previousFilename}" from the current setup`, "warn");
     } else if (announce) {
