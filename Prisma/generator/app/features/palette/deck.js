@@ -467,15 +467,15 @@ function renderRailDeck() {
       const tags = [
         card.saved ? `<span class="rail-deck-tag is-saved">Saved</span>` : "",
       ].filter(Boolean).join("");
-      return `<div class="rail-deck-card${isActive ? " is-active" : ""}" data-card-id="${card.id}">
-        <div class="rail-deck-card-header">
+      return `<div class="rail-deck-card compact-deck-card${isActive ? " is-active" : ""}" data-card-id="${card.id}">
+        <div class="rail-deck-card-header compact-deck-card-header">
           <div class="rail-deck-card-titlebar">
-            <span class="rail-deck-card-title" title="${app.commands.escAttr(card.name)}">${app.commands.esc(card.name)}</span>
+            <span class="rail-deck-card-title compact-deck-card-title" title="${app.commands.escAttr(card.name)}">${app.commands.esc(card.name)}</span>
           </div>
-          <div class="rail-deck-card-actions">
+          <div class="rail-deck-card-actions compact-deck-card-actions">
             ${tags}
-            ${!card.saved ? `<button class="ghost-button xxs rail-deck-save" data-card-id="${card.id}">Save</button>` : ""}
-            <button class="ghost-button xxs rail-deck-remove" data-card-id="${card.id}" title="Remove from deck" aria-label="Remove ${app.commands.escAttr(card.name)}">${app.commands.xIconSvg()}</button>
+            ${!card.saved ? `<button class="ghost-button xxs rail-deck-save compact-deck-card-save" data-card-id="${card.id}">Save</button>` : ""}
+            <button class="ghost-button xxs rail-deck-remove compact-deck-card-remove" data-card-id="${card.id}" title="Remove from deck" aria-label="Remove ${app.commands.escAttr(card.name)}">${app.commands.xIconSvg()}</button>
           </div>
         </div>
         <div class="rail-deck-card-chips">

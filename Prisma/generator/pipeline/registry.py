@@ -10,6 +10,7 @@ from typing import Dict, Type
 from .base import PreprocessingModule
 
 _PREPROCESSORS: Dict[str, Type[PreprocessingModule]] = {}
+_PREPROCESSING_DISCOVERY_COMPLETE = False
 
 # Auto-discovery boundary for the F1 preprocessing slot (R3-C / R4-A).
 # All public modules under `preprocessing/operators/` are imported in
@@ -86,16 +87,47 @@ def _ensure_store_populated(
 
 
 def _ensure_preprocessing_populated() -> None:
-    """Run auto-discovery if the preprocessing store is empty.
-
-    Unlike the other slots, preprocessing has no hand-maintained tuple of
-    expected names — the filesystem layout under `operators/` is the
-    registry. We only re-discover when the store is empty so a single
-    discovery walk per process is the common case.
-    """
-    if _PREPROCESSORS:
+    """Ensure direct operator imports cannot leave the registry partial."""
+    global _PREPROCESSING_DISCOVERY_COMPLETE
+    if _PREPROCESSING_DISCOVERY_COMPLETE:
         return
-    _discover_preprocessing_operators()
+    if not _PREPROCESSORS:
+        _discover_preprocessing_operators()
+        _PREPROCESSING_DISCOVERY_COMPLETE = True
+        return
+
+    package = importlib.import_module(_PREPROCESSING_OPERATORS_PACKAGE)
+    paths = getattr(package, "__path__", None)
+    if not paths:
+        PREPROCESSING_MODULE_IDS.update(_PREPROCESSORS.keys())
+        _PREPROCESSING_DISCOVERY_COMPLETE = True
+        return
+    registered_modules = {
+        getattr(cls, "__module__", "")
+        for cls in _PREPROCESSORS.values()
+    }
+    # Tests and embedding callers may intentionally install an isolated,
+    # synthetic registry. Only complete a partial registry when its existing
+    # entries are real operators from the discoverable package.
+    if any(
+        not module.startswith(f"{_PREPROCESSING_OPERATORS_PACKAGE}.")
+        for module in registered_modules
+    ):
+        PREPROCESSING_MODULE_IDS.update(_PREPROCESSORS.keys())
+        return
+    for info in sorted(pkgutil.iter_modules(paths), key=lambda entry: entry.name):
+        if info.ispkg or info.name.startswith("_"):
+            continue
+        full = f"{_PREPROCESSING_OPERATORS_PACKAGE}.{info.name}"
+        if full in registered_modules:
+            continue
+        module = sys.modules.get(full)
+        if module is None:
+            importlib.import_module(full)
+        else:
+            importlib.reload(module)
+    PREPROCESSING_MODULE_IDS.update(_PREPROCESSORS.keys())
+    _PREPROCESSING_DISCOVERY_COMPLETE = True
 
 
 def _ensure_registry_populated() -> None:
@@ -124,8 +156,10 @@ def list_preprocessings() -> list[str]:
 
 def _clear_registry() -> None:
     """Clear all registrations. For testing only."""
+    global _PREPROCESSING_DISCOVERY_COMPLETE
     _PREPROCESSORS.clear()
     PREPROCESSING_MODULE_IDS.clear()
+    _PREPROCESSING_DISCOVERY_COMPLETE = False
 
 
 def list_all_modules() -> list[dict]:

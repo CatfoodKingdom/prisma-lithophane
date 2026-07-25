@@ -114,6 +114,58 @@ def test_save_then_list(tmp_path):
     assert any(s["save_id"] == save_id and s["label"] == "My Run" for s in listed)
 
 
+@pytest.mark.parametrize("label", ["Run 7", " run 007 ", "rUn 9"])
+def test_save_rejects_reserved_automatic_run_labels(label):
+    _seed_cached_solve("run-1")
+
+    response = client.post(
+        "/api/runs/save",
+        json={"card_id": "run-1", "label": label},
+    )
+
+    assert response.status_code == 422
+    assert "reserved for automatic run labels" in response.text
+
+
+@pytest.mark.parametrize("label", ["Run 7", " run 007 ", "rUn 9"])
+def test_rename_rejects_reserved_automatic_run_labels(label):
+    _seed_cached_solve("run-1")
+    save_id = client.post(
+        "/api/runs/save",
+        json={"card_id": "run-1", "label": "Named run"},
+    ).json()["save_id"]
+
+    response = client.post(
+        f"/api/runs/saved/{save_id}/rename",
+        json={"label": label},
+    )
+
+    assert response.status_code == 422
+    assert "reserved for automatic run labels" in response.text
+    assert run_store.list_saves()[0]["label"] == "Named run"
+
+
+def test_legacy_reserved_label_still_loads_without_becoming_identity():
+    _seed_cached_solve("run-1")
+    solve, config = server._cached_solve_or_409("run-1")
+    save_id, zip_bytes, sidecar = server._pack_completed_run_archive(
+        "run-1",
+        solve,
+        config,
+        label="Run 7",
+        saved_at="20260724-120000",
+        root=data_paths.SAVED_RUNS_DIR,
+        tier="saved",
+    )
+    run_store.write_save(save_id, zip_bytes, sidecar)
+
+    response = client.post("/api/runs/load", json={"save_id": save_id})
+
+    assert response.status_code == 200
+    assert response.json()["label"] == "Run 7"
+    assert response.json()["card_id"] != save_id
+
+
 def test_settings_only_load_preserves_run_metadata_without_rehydrating(tmp_path):
     _seed_cached_solve("run-1")
     (data_paths.RUN_CACHE_DIR / "run-1" / "run.json").write_text(

@@ -234,6 +234,85 @@ def _load_saved_run(page: Page, *, recipe: bool = False) -> None:
     page.locator('.solve-run-card[data-run-id="browser-loaded-card"]').wait_for(state="visible")
 
 
+def test_run_history_cards_save_naming_and_stable_controls(page: Page):
+    _load_saved_run(page)
+    page.route(
+        "**/api/runs/save",
+        lambda route: route.fulfill(
+            json={"save_id": "browser-save-authoritative", "label": "Server Portrait"}
+        ),
+    )
+
+    cards = page.locator("#solveRunCards")
+    card = page.locator('.solve-run-card[data-run-id="browser-loaded-card"]')
+    assert cards.get_attribute("role") == "listbox"
+    assert cards.get_attribute("aria-multiselectable") == "true"
+    assert card.get_attribute("role") == "option"
+    assert card.get_attribute("aria-selected") == "true"
+    assert card.locator(".solve-run-loaded-badge").count() == 0
+
+    card.press(" ")
+    assert card.get_attribute("aria-selected") == "false"
+    card.press("Enter")
+    assert card.get_attribute("aria-selected") == "true"
+
+    card.locator(".solve-run-save-btn").click()
+    prompt = page.locator("#appDialogInput")
+    assert prompt.input_value() == "Browser saved run"
+    prompt.fill("Run 007")
+    page.locator("#appDialogYes").click()
+    assert page.locator("#appDialog").get_attribute("aria-hidden") == "false"
+    assert "reserved for automatic run labels" in page.locator(
+        ".app-dialog-validation"
+    ).text_content()
+
+    prompt.fill("Portrait")
+    page.locator("#appDialogYes").click()
+    page.locator(".solve-run-label", has_text="Server Portrait").wait_for(
+        state="visible"
+    )
+    assert card.locator(".solve-run-label").text_content() == "Server Portrait"
+
+    page.locator("#savedRunsBtn").click()
+    page.locator(".saved-run-row").wait_for(state="visible")
+    page.locator("#savedRunRenameBtn").click()
+    rename_modal = page.locator("#renameSavedRunModal")
+    rename_modal.wait_for(state="visible")
+    page.locator("#renameSavedRunDisplay").fill(" run 7 ")
+    page.locator("#renameSavedRunSubmit").click()
+    assert rename_modal.is_visible()
+    assert "reserved for automatic run labels" in page.locator(
+        "#renameSavedRunValidation"
+    ).text_content()
+    page.locator("#renameSavedRunCancelBtn").click()
+    rename_modal.wait_for(state="hidden")
+    page.locator("#savedRunsCloseBtn").click()
+
+    card_header = card.locator(".solve-run-card-header")
+    delete_button = card.locator(".solve-run-delete-btn")
+    header_before_delete = card_header.bounding_box()
+    delete_before = delete_button.bounding_box()
+    delete_button.click()
+    assert delete_button.text_content() == "Confirm?"
+    header_after_delete = card_header.bounding_box()
+    delete_after = delete_button.bounding_box()
+    assert header_before_delete == header_after_delete
+    assert delete_before == delete_after
+
+    clear_button = page.locator("#clearSolveHistoryBtn")
+    solve_header = page.locator("#tabSolve .solve-deck-sidebar .deck-header")
+    header_before_clear = solve_header.bounding_box()
+    clear_before = clear_button.bounding_box()
+    clear_button.click()
+    assert clear_button.text_content() == "Confirm?"
+    assert page.locator("#exportClearSolveHistoryBtn").text_content() == "Confirm?"
+    assert solve_header.bounding_box() == header_before_clear
+    assert clear_button.bounding_box() == clear_before
+    clear_button.click()
+    assert clear_button.is_disabled()
+    assert page.locator("#exportClearSolveHistoryBtn").is_disabled()
+
+
 def test_settings_persist_through_the_real_session_api(page: Page):
     page.locator("#settingsDrawerBtn").click()
     page.locator("#settingsDrawer").wait_for(state="visible")

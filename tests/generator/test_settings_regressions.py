@@ -333,6 +333,41 @@ def test_session_config_keeps_preprocessing_param_blocks():
         server.session.update(original_session)
 
 
+def test_session_config_validates_known_preprocessing_params_and_preserves_unknowns():
+    import server
+
+    payload = server.ConfigPayload(
+        preprocessing_params={
+            "b3_tv_flatten": {
+                "n_iter_max": 2,
+                "future_parameter": {"kept": True},
+            },
+            "future_preprocessor": {"future_value": "kept"},
+        }
+    )
+
+    assert payload.preprocessing_params == {
+        "b3_tv_flatten": {
+            "n_iter_max": 2,
+            "future_parameter": {"kept": True},
+        },
+        "future_preprocessor": {"future_value": "kept"},
+    }
+    assert server.ConfigPayload(
+        preprocessing_params={"b3_tv_flatten": {"n_iter_max": 2.0}}
+    ).preprocessing_params["b3_tv_flatten"]["n_iter_max"] == 2
+
+
+@pytest.mark.parametrize("value", [1, 501, 2.5, "2", True])
+def test_session_config_rejects_invalid_flatten_iteration_caps(value):
+    import server
+
+    with pytest.raises(ValueError):
+        server.ConfigPayload(
+            preprocessing_params={"b3_tv_flatten": {"n_iter_max": value}}
+        )
+
+
 def test_partial_config_update_preserves_unspecified_module_settings():
     import server
 

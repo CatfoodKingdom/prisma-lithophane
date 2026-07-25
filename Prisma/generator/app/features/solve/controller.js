@@ -3,6 +3,25 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesSolveController(app) {
+  const RESERVED_RUN_LABEL_RE = /^run\s+\d+$/i;
+  const RESERVED_RUN_LABEL_MESSAGE = "Names in the form ‘Run 7’ are reserved for automatic run labels.";
+
+  function validateWritableRunLabel(value) {
+    const label = String(value || "").trim();
+    if (!label) return "Run name cannot be empty.";
+    if (RESERVED_RUN_LABEL_RE.test(label)) return RESERVED_RUN_LABEL_MESSAGE;
+    return "";
+  }
+
+  function initialSaveRunLabel(run) {
+    const label = String(run?.label || "").trim();
+    return RESERVED_RUN_LABEL_RE.test(label) ? "" : label;
+  }
+
+  function isCardInteractionTarget(target) {
+    return Boolean(target?.closest?.("button, a, input, select, textarea, [role='button']"));
+  }
+
   function isActivePendingSolveRun(run) {
     return !!run
       && !run.results
@@ -24,7 +43,7 @@ export function installFeaturesSolveController(app) {
     const blockReason = app.commands.getSolveRunDeleteBlockReason(run);
     const armed = !blockReason && app.state.solve.solveRunDeleteArmedId === run.id;
     const label = armed ? "Click again to delete this run" : (blockReason || "Delete this run");
-    return `<button class="solve-run-delete-btn${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "Confirm?" : app.commands.xIconSvg()}</button>`;
+    return `<button class="solve-run-delete-btn compact-deck-card-remove ghost-button xxs${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "Confirm?" : app.commands.xIconSvg()}</button>`;
   }
 
   function renderSolveRunDeleteState() {
@@ -121,31 +140,71 @@ export function installFeaturesSolveController(app) {
       .filter(Boolean);
   }
 
+  function isSolveHistoryClearDisabled() {
+    return !app.state.solve.solveRuns.length
+      || app.state.solve.solveStatus.status === "running"
+      || app.state.export.exportRunning;
+  }
+
+  function syncSolveHistoryClearButtons() {
+    const disabled = app.commands.isSolveHistoryClearDisabled();
+    if (disabled && app.state.solve.solveHistoryClearConfirmPending) {
+      if (app.state.solve.solveHistoryClearConfirmTimer) {
+        clearTimeout(app.state.solve.solveHistoryClearConfirmTimer);
+        app.state.solve.solveHistoryClearConfirmTimer = null;
+      }
+      app.state.solve.solveHistoryClearConfirmPending = false;
+    }
+    const armed = app.state.solve.solveHistoryClearConfirmPending;
+    const title = disabled
+      ? (!app.state.solve.solveRuns.length
+          ? "No solve runs to clear"
+          : "Wait for the active solve or export to finish before clearing history")
+      : armed
+        ? "Click again to clear all solve runs"
+        : "Clear all solve runs";
+    const accessibleLabel = disabled
+      ? title
+      : armed
+        ? "Confirm clearing all solve runs"
+        : "Clear all solve runs";
+    app.commands.getSolveHistoryClearButtons().forEach((btn) => {
+      btn.textContent = armed ? "Confirm?" : "Clear";
+      btn.classList.toggle("confirm-pending", armed);
+      btn.title = title;
+      btn.setAttribute("aria-label", accessibleLabel);
+      btn.disabled = disabled;
+      btn.setAttribute("aria-disabled", disabled ? "true" : "false");
+    });
+  }
+
   function resetSolveHistoryClearConfirm() {
     if (app.state.solve.solveHistoryClearConfirmTimer) {
       clearTimeout(app.state.solve.solveHistoryClearConfirmTimer);
       app.state.solve.solveHistoryClearConfirmTimer = null;
     }
     app.state.solve.solveHistoryClearConfirmPending = false;
-    app.commands.getSolveHistoryClearButtons().forEach((btn) => {
-      btn.textContent = "Clear";
-      btn.classList.remove("confirm-pending");
-      btn.title = "Clear all solve runs";
-    });
+    app.commands.syncSolveHistoryClearButtons();
   }
 
   function armSolveHistoryClearConfirm() {
+    if (app.commands.isSolveHistoryClearDisabled()) {
+      app.commands.syncSolveHistoryClearButtons();
+      return;
+    }
+    if (app.state.solve.solveHistoryClearConfirmTimer) {
+      clearTimeout(app.state.solve.solveHistoryClearConfirmTimer);
+    }
     app.state.solve.solveHistoryClearConfirmPending = true;
-    app.commands.getSolveHistoryClearButtons().forEach((btn) => {
-      btn.textContent = "Confirm?";
-      btn.classList.add("confirm-pending");
-      btn.title = "Click again to clear all solve runs";
-    });
-    app.state.solve.solveHistoryClearConfirmTimer = setTimeout(app.commands.resetSolveHistoryClearConfirm, 1800);
+    app.commands.syncSolveHistoryClearButtons();
+    app.state.solve.solveHistoryClearConfirmTimer = setTimeout(app.commands.resetSolveHistoryClearConfirm, 3000);
   }
 
   function handleSolveHistoryClearClick() {
-    if (!app.state.solve.solveRuns.length) return;
+    if (app.commands.isSolveHistoryClearDisabled()) {
+      app.commands.syncSolveHistoryClearButtons();
+      return;
+    }
     if (!app.state.solve.solveHistoryClearConfirmPending) {
       app.commands.armSolveHistoryClearConfirm();
       return;
@@ -158,6 +217,10 @@ export function installFeaturesSolveController(app) {
     const container = app.state.ui.$("#solveRunCards");
     if (!container) return;
     app.commands.hideSolveRunHoverPreview();
+    container.setAttribute("role", "listbox");
+    container.setAttribute("aria-label", "Solve history");
+    container.setAttribute("aria-multiselectable", "true");
+    app.commands.syncSolveHistoryClearButtons();
 
     if (app.state.solve.solveRuns.length === 0) {
       container.innerHTML = `<p class="muted-line" id="solveRunEmpty">No solves yet</p>`;
@@ -177,14 +240,17 @@ export function installFeaturesSolveController(app) {
       const stats = run.results
         ? `<span class="solve-run-card-rmse">${app.commands.formatSolveRunCardRmse(run.results)}</span>`
         : `<span class="solve-run-card-rmse is-pending">solving...</span>`;
-      const loadedBadge = run.loaded_from_archive
-        ? `<span class="solve-run-loaded-badge">Loaded</span>`
-        : "";
-      html += `<div class="solve-run-card ${isSelected ? "is-selected" : ""}" data-run-id="${app.commands.esc(run.id)}" tabindex="0">
-        <div class="solve-run-card-header">
-          <span class="solve-run-label">${app.commands.esc(run.label)}${loadedBadge}</span>
-          <div class="solve-run-card-actions">
-            <button class="solve-run-save-btn ghost-button xxs" data-run-id="${app.commands.esc(run.id)}" title="Save this run to a portable archive">Save</button>
+      const saveDisabled = !run.results || run.save_pending;
+      const saveTitle = !run.results
+        ? "Save is available after this solve completes"
+        : run.save_pending
+          ? "Saving this run"
+          : "Save this run to a portable archive";
+      html += `<div class="solve-run-card compact-deck-card ${isSelected ? "is-selected" : ""}" data-run-id="${app.commands.escAttr(run.id)}" tabindex="0" role="option" aria-selected="${isSelected ? "true" : "false"}">
+        <div class="solve-run-card-header compact-deck-card-header">
+          <span class="solve-run-label compact-deck-card-title" title="${app.commands.escAttr(run.label)}">${app.commands.esc(run.label)}</span>
+          <div class="solve-run-card-actions compact-deck-card-actions">
+            <button class="solve-run-save-btn compact-deck-card-save ghost-button xxs" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(saveTitle)}"${saveDisabled ? " disabled aria-disabled=\"true\"" : ""}${run.save_pending ? " aria-busy=\"true\"" : ""}>Save</button>
             ${app.commands.buildSolveRunDeleteButton(run)}
           </div>
         </div>
@@ -197,16 +263,22 @@ export function installFeaturesSolveController(app) {
     }
     container.innerHTML = html;
 
+    const toggleRunSelection = (el) => {
+      const runId = el.dataset.runId;
+      if (app.state.solve.selectedRunIds.has(runId)) app.state.solve.selectedRunIds.delete(runId);
+      else app.state.solve.selectedRunIds.add(runId);
+      app.commands.renderSolveRunSidebar();
+      app.commands.renderSolveComparisonGrid();
+    };
     container.querySelectorAll(".solve-run-card").forEach(el => {
       el.addEventListener("click", (e) => {
-        if (e.target.closest(".solve-run-settings-btn")) return;
-        if (e.target.closest(".solve-run-delete-btn")) return;
-        if (e.target.closest(".solve-run-save-btn")) return;
-        const runId = el.dataset.runId;
-        if (app.state.solve.selectedRunIds.has(runId)) app.state.solve.selectedRunIds.delete(runId);
-        else app.state.solve.selectedRunIds.add(runId);
-        app.commands.renderSolveRunSidebar();
-        app.commands.renderSolveComparisonGrid();
+        if (app.commands.isCardInteractionTarget(e.target)) return;
+        toggleRunSelection(el);
+      });
+      el.addEventListener("keydown", (e) => {
+        if (!["Enter", " "].includes(e.key) || app.commands.isCardInteractionTarget(e.target)) return;
+        e.preventDefault();
+        toggleRunSelection(el);
       });
     });
 
@@ -222,21 +294,81 @@ export function installFeaturesSolveController(app) {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
         const run = app.state.solve.solveRuns.find(r => r.id === btn.dataset.runId);
+        if (!run?.results || run.save_pending) return;
         const label = await app.commands.appPrompt(
           "Save this run as:",
-          run?.label || "",
-          { title: "Save Run", validate: value => String(value || "").trim() ? "" : "Run name cannot be empty." },
+          app.commands.initialSaveRunLabel(run),
+          { title: "Save Run", validate: app.commands.validateWritableRunLabel },
         );
         if (label == null) return;
-        const trimmed = label.trim();
-        try {
-          const res = await app.api.saveRun(btn.dataset.runId, trimmed);
-          app.commands.showToast(`Saved as "${res.label}"`, "");
-        } catch (err) { app.commands.showToast(err.message, "error"); }
+        await app.commands.saveSolveRun(btn.dataset.runId, label, btn);
       });
     });
 
     app.commands.bindSolveRunCardAuxiliaryInteractions(container, "preview");
+  }
+
+  async function saveSolveRun(runId, label, initiatingButton = null) {
+    const run = app.state.solve.solveRuns.find((candidate) => candidate.id === runId);
+    const validationError = app.commands.validateWritableRunLabel(label);
+    if (!run?.results || run.save_pending || validationError) return false;
+    const trimmed = String(label).trim();
+    run.save_pending = true;
+    if (initiatingButton) {
+      initiatingButton.disabled = true;
+      initiatingButton.setAttribute("aria-disabled", "true");
+      initiatingButton.setAttribute("aria-busy", "true");
+      initiatingButton.title = "Saving this run";
+    }
+    try {
+      const response = await app.api.saveRun(runId, trimmed);
+      const serverLabel = String(response?.label ?? "").trim();
+      if (!serverLabel) throw new Error("Save response did not include a run label.");
+      const currentRun = app.state.solve.solveRuns.find((candidate) => candidate.id === runId);
+      if (currentRun) {
+        const previousLabel = currentRun.label;
+        currentRun.label = serverLabel;
+        currentRun.save_pending = false;
+        app.commands.renderSolveTab();
+        if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
+        if (app.state.solve.solveRunSettingsPanelRunId === runId && app.state.solve.solveRunSettingsPanelEl) {
+          app.commands.renderSolveRunSettingsPanel();
+        }
+        app.commands.refreshOpenSolveRunLabels(currentRun, previousLabel);
+      }
+      app.commands.showToast(`Saved as "${serverLabel}"`, "");
+      return true;
+    } catch (err) {
+      const currentRun = app.state.solve.solveRuns.find((candidate) => candidate.id === runId);
+      if (currentRun) {
+        currentRun.save_pending = false;
+        app.commands.renderSolveTab();
+        if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
+      }
+      if (initiatingButton?.isConnected !== false) {
+        initiatingButton.disabled = false;
+        initiatingButton.removeAttribute("aria-disabled");
+        initiatingButton.removeAttribute("aria-busy");
+        initiatingButton.title = "Save this run to a portable archive";
+      }
+      app.commands.showToast(err.message, "error");
+      return false;
+    }
+  }
+
+  function refreshOpenSolveRunLabels(run, previousLabel = "") {
+    if (!run || app.state.solve._solveLightboxState?.runId !== run.id) return;
+    const content = app.state.ui.$("#compLightboxContent");
+    if (!content) return;
+    const title = content.querySelector(".comp-lightbox-runtitle");
+    if (title) title.textContent = run.label;
+    if (!previousLabel) return;
+    content.querySelectorAll("[aria-label]").forEach((element) => {
+      const label = element.getAttribute("aria-label") || "";
+      if (label === previousLabel || label.startsWith(`${previousLabel} `)) {
+        element.setAttribute("aria-label", `${run.label}${label.slice(previousLabel.length)}`);
+      }
+    });
   }
 
   function _setSavedRunsModalOpen(open) {
@@ -510,11 +642,21 @@ export function installFeaturesSolveController(app) {
     const display = app.state.ui.$("#renameSavedRunDisplay");
     const diskName = app.state.ui.$("#renameSavedRunDiskName");
     const submit = app.state.ui.$("#renameSavedRunSubmit");
+    const validation = app.state.ui.$("#renameSavedRunValidation");
     const cancelBtn = app.state.ui.$("#renameSavedRunCancelBtn");
     const closeBtn = app.state.ui.$("#renameSavedRunCancel");
     if (!overlay || !display || !diskName || !submit) return;
     display.value = save.label || "";
     diskName.value = save.save_id || "";
+    const setValidation = (message = "") => {
+      if (validation) {
+        validation.textContent = message;
+        validation.hidden = !message;
+      }
+      display.setAttribute("aria-invalid", message ? "true" : "false");
+      display.setAttribute("aria-describedby", "renameSavedRunValidation");
+    };
+    setValidation();
     const setOpen = (open) => {
       overlay.classList.toggle("is-hidden", !open);
       overlay.setAttribute("aria-hidden", open ? "false" : "true");
@@ -522,17 +664,31 @@ export function installFeaturesSolveController(app) {
     const close = () => {
       setOpen(false);
       submit.onclick = null;
+      display.oninput = null;
       if (cancelBtn) cancelBtn.onclick = null;
       if (closeBtn) closeBtn.onclick = null;
       overlay.onclick = null;
     };
     submit.onclick = async () => {
       const newLabel = display.value.trim();
-      if (!newLabel) return;
-      close();
-      try { await app.api.renameSavedRun(save.save_id, newLabel); await app.commands.refreshSavedRunRows(); }
-      catch (e) { app.commands.showToast(e.message, "error"); }
+      const validationError = app.commands.validateWritableRunLabel(newLabel);
+      setValidation(validationError);
+      if (validationError || submit.disabled) return;
+      submit.disabled = true;
+      submit.setAttribute("aria-busy", "true");
+      try {
+        await app.api.renameSavedRun(save.save_id, newLabel);
+        await app.commands.refreshSavedRunRows();
+        close();
+      } catch (e) {
+        setValidation(e.message);
+        app.commands.showToast(e.message, "error");
+      } finally {
+        submit.disabled = false;
+        submit.removeAttribute("aria-busy");
+      }
     };
+    display.oninput = () => setValidation();
     if (cancelBtn) cancelBtn.onclick = close;
     if (closeBtn) closeBtn.onclick = close;
     overlay.onclick = (e) => { if (e.target === overlay) close(); };
@@ -607,7 +763,6 @@ export function installFeaturesSolveController(app) {
     app.state.solve.solveRuns.push({
       id: body.card_id,
       label: loadedLabel || `Loaded ${app.state.solve.solveRunCounter}`,
-      loaded_from_archive: true,
       image: normalizedConfig.image_path ? { filename: normalizedConfig.image_path } : null,
       palette: [...loadedPalette],
       config: app.commands._cloneValue(normalizedConfig),
@@ -910,6 +1065,9 @@ export function installFeaturesSolveController(app) {
   }
 
   Object.assign(app.commands, {
+    validateWritableRunLabel,
+    initialSaveRunLabel,
+    isCardInteractionTarget,
     isActivePendingSolveRun,
     getSolveRunDeleteBlockReason,
     buildSolveRunDeleteButton,
@@ -921,10 +1079,14 @@ export function installFeaturesSolveController(app) {
     removePendingSolveRun,
     clearSolveHistory,
     getSolveHistoryClearButtons,
+    isSolveHistoryClearDisabled,
+    syncSolveHistoryClearButtons,
     resetSolveHistoryClearConfirm,
     armSolveHistoryClearConfirm,
     handleSolveHistoryClearClick,
     renderSolveRunSidebar,
+    saveSolveRun,
+    refreshOpenSolveRunLabels,
     _setSavedRunsModalOpen,
     openSavedRunsModal,
     savedRunKey,
