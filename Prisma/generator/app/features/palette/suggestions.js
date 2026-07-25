@@ -8,7 +8,7 @@ function renderCreationTab() {
     if (modeNote) {
       modeNote.textContent = app.state.palette.creationMode === "manual"
         ? "Select filaments to be included in the manual palette. The number chosen can exceed the available AMS slots, but will require swapping filaments mid-print."
-        : "Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the target that matches the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.";
+        : "Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.";
     }
 
     app.commands.syncDeckGenerationSettingsUI("settings");
@@ -382,7 +382,7 @@ function _processSuggestResults(suggestions) {
     const paletteMode = app.commands.normalizeLuminanceMode(
       suggestions?.palette_mode || app.state.ui.$("#paletteSuggestMode")?.value || "standard",
     );
-    const modePrefix = paletteMode === "luminance_detail" ? "Luminance" : "Source";
+    const modePrefix = paletteMode === "luminance_detail" ? "Luminance" : "Color";
     const makeKey = (ids = []) => [...ids].map(String).sort().join("\u0001");
     const pushSuggestionCard = (cand, name, extra = {}) => {
       const key = makeKey(cand.filament_ids || []);

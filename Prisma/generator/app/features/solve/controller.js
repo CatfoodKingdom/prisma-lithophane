@@ -43,7 +43,37 @@ export function installFeaturesSolveController(app) {
     const blockReason = app.commands.getSolveRunDeleteBlockReason(run);
     const armed = !blockReason && app.state.solve.solveRunDeleteArmedId === run.id;
     const label = armed ? "Click again to delete this run" : (blockReason || "Delete this run");
-    return `<button class="solve-run-delete-btn compact-deck-card-remove ghost-button xxs${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "Confirm?" : app.commands.xIconSvg()}</button>`;
+    return `<span class="solve-run-delete-slot"><button class="solve-run-delete-btn compact-deck-card-remove ghost-button xxs${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "Confirm?" : app.commands.xIconSvg()}</button></span>`;
+  }
+
+  function buildSolveRunSupportChipsHtml(run) {
+    const snapshot = app.commands.getSolveRunSettingsSnapshot?.(run) || run?.config || {};
+    const baseId = snapshot.base_filament
+      || snapshot.white_base
+      || app.state.session.DEFAULT_BASE_FILAMENT;
+    const configuredCapId = snapshot.cap_filament || snapshot.white_cap || "__same__";
+    const capId = !configuredCapId || configuredCapId === "__same__" ? baseId : configuredCapId;
+    const entries = [];
+    if (baseId) entries.push({ id: baseId, role: baseId === capId ? "White Base/Cap" : "White Base" });
+    if (capId && capId !== baseId) entries.push({ id: capId, role: "White Cap" });
+    if (!entries.length) return "";
+
+    const slots = entries.map((entry) => {
+      const filament = app.commands.filamentById(entry.id);
+      const filamentName = filament
+        ? [filament.manufacturer, filament.color_name || filament.display_name]
+          .filter(Boolean)
+          .join(" ")
+        : entry.id;
+      const label = `${entry.role}: ${filamentName || "Unset"}`;
+      const hex = filament?.hex || "#ccc";
+      const lightClass = app.commands.isLightHex?.(hex) ? " is-light" : "";
+      return `<span class="deck-support-slot is-filled${lightClass}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}">
+        <span class="color-chip deck-support-chip" style="background:${hex}"></span>
+      </span>`;
+    }).join("");
+    const distinctClass = entries.length > 1 ? " has-distinct-cap" : "";
+    return `<div class="deck-support-tray solve-run-support-tray${distinctClass}" aria-label="White base and cap filament">${slots}</div>`;
   }
 
   function renderSolveRunDeleteState() {
@@ -234,8 +264,10 @@ export function installFeaturesSolveController(app) {
       const chips = (run.palette || []).map(fid => {
         const fil = app.state.session.allFilaments.find(f => f.filament_id === fid);
         const hex = fil?.hex || "#888";
-        return `<span class="comp-deck-chip" style="background:${hex}"></span>`;
+        const label = fil?.color_name || fil?.display_name || fid;
+        return `<span class="comp-deck-chip color-chip" style="background:${hex}" title="${app.commands.escAttr(label)}"></span>`;
       }).join("");
+      const supportChips = app.commands.buildSolveRunSupportChipsHtml(run);
 
       const stats = run.results
         ? `<span class="solve-run-card-rmse">${app.commands.formatSolveRunCardRmse(run.results)}</span>`
@@ -254,7 +286,10 @@ export function installFeaturesSolveController(app) {
             ${app.commands.buildSolveRunDeleteButton(run)}
           </div>
         </div>
-        <div class="comp-deck-card-chips">${chips}</div>
+        <div class="comp-deck-card-chips solve-run-card-chips rail-deck-card-chips">
+          <div class="solve-run-palette-chips">${chips}</div>
+          ${supportChips}
+        </div>
         <div class="solve-run-card-meta">
           <button class="solve-run-settings-btn" data-run-id="${app.commands.esc(run.id)}" title="View the settings captured for this run">Settings</button>
           ${stats}
@@ -1071,6 +1106,7 @@ export function installFeaturesSolveController(app) {
     isActivePendingSolveRun,
     getSolveRunDeleteBlockReason,
     buildSolveRunDeleteButton,
+    buildSolveRunSupportChipsHtml,
     renderSolveRunDeleteState,
     resetSolveRunDeleteConfirm,
     armSolveRunDeleteConfirm,

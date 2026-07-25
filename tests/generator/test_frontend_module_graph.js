@@ -153,14 +153,59 @@ test("light headers use the blue semantic token without changing dark mode or vi
 test("solve history controls and cards reserve stable confirmation geometry", () => {
   const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(appDir, "styles", "solve.css"), "utf8");
+  const shellCss = fs.readFileSync(path.join(appDir, "styles", "shell.css"), "utf8");
   const controller = fs.readFileSync(
     path.join(appDir, "features", "solve", "controller.js"),
     "utf8",
   );
+  const events = fs.readFileSync(
+    path.join(appDir, "features", "event-bindings.js"),
+    "utf8",
+  );
 
-  assert.equal((html.match(/class="ghost-button xxs solve-history-clear"/g) || []).length, 2);
-  assert.match(css, /\.solve-history-clear\s*{[\s\S]*?width:\s*60px;[\s\S]*?white-space:\s*nowrap;/);
-  assert.match(css, /\.solve-run-delete-btn\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;/);
+  assert.equal((html.match(/solve-history-clear/g) || []).length, 2);
+  assert.match(html, /compact-history-header deck-header solve-history-header/);
+  assert.match(shellCss, /\.compact-history-clear\s*{[\s\S]*?width:\s*60px;[\s\S]*?min-width:\s*60px;[\s\S]*?white-space:\s*nowrap;/);
+  assert.match(css, /\.solve-run-card-actions\s*{[\s\S]*?flex:\s*0 0 84px;[\s\S]*?width:\s*84px;/);
+  assert.match(css, /\.solve-run-delete-slot\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;/);
+  assert.match(css, /\.solve-run-delete-btn\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;[\s\S]*?border-color:\s*transparent;/);
   assert.doesNotMatch(css.match(/\.solve-run-card\s*{[\s\S]*?\}/)?.[0] || "", /transition:/);
   assert.doesNotMatch(controller, /loaded_from_archive|solve-run-loaded-badge/);
+  assert.match(events, /railClearDeckBtn\.textContent = "Confirm\?"/);
+  assert.match(events, /clearTimeout\(confirmTimer\)/);
+});
+
+test("palette suggestions use solve-mode naming and compact deck-card geometry", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const suggestions = fs.readFileSync(
+    path.join(appDir, "features", "palette", "suggestions.js"),
+    "utf8",
+  );
+  const deck = fs.readFileSync(
+    path.join(appDir, "features", "palette", "deck.js"),
+    "utf8",
+  );
+  const imageController = fs.readFileSync(
+    path.join(appDir, "features", "image", "index.js"),
+    "utf8",
+  );
+  const paletteCss = fs.readFileSync(path.join(appDir, "styles", "palette.css"), "utf8");
+  const surfacesCss = fs.readFileSync(path.join(appDir, "styles", "surfaces.css"), "utf8");
+
+  assert.match(html, /<label for="paletteSuggestMode">Solve mode<\/label>[\s\S]*?<option value="standard">Color<\/option>[\s\S]*?<option value="luminance_detail">Luminance<\/option>/);
+  assert.doesNotMatch(html, /aria-labeledby=/);
+  assert.doesNotMatch(html, /Source color|Luminance detail/);
+  assert.match(suggestions, /modePrefix\s*=\s*paletteMode === "luminance_detail" \? "Luminance" : "Color"/);
+  assert.match(deck, /class="deck-card compact-deck-card"/);
+  assert.match(deck, /class="deck-card-header compact-deck-card-header"/);
+  assert.match(deck, /class="deck-card-chips rail-deck-card-chips"/);
+  assert.match(deck, /class="deck-card-palette-chips rail-deck-palette-chips"/);
+  assert.match(deck, /class="deck-card-gamut rail-deck-card-meta"/);
+  assert.doesNotMatch(deck, /<strong>\$\{app\.commands\.formatColorRmse\(g\)\}<\/strong>/);
+  assert.match(deck, /resetStagingClearConfirm\(\{ sync: false \}\)/);
+  assert.match(deck, /btn\.textContent = "!"/);
+  assert.match(paletteCss, /--palette-suggestion-panel-width:\s*320px;/);
+  assert.match(paletteCss, /#creationDeckPanel\s*{[\s\S]*?width:\s*var\(--palette-suggestion-panel-width\);/);
+  assert.match(surfacesCss, /@media \(max-width: 980px\)[\s\S]*?\.creation-layout\s*{\s*flex-direction:\s*column;/);
+  assert.match(imageController, /getComputedStyle\(layout\)\.flexDirection === "column"/);
 });

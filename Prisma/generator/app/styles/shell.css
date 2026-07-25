@@ -95,6 +95,32 @@
   gap: 6px;
   margin-left: auto;
 }
+.compact-history-header {
+  min-width: 0;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
+}
+.compact-history-header > .panel-kicker,
+.compact-history-header > .export-panel-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.compact-history-clear-slot {
+  display: inline-flex;
+  flex: 0 0 60px;
+  width: 60px;
+  justify-content: flex-end;
+}
+.compact-history-clear {
+  width: 60px;
+  min-width: 60px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+.compact-history-clear.confirm-pending {
+  color: var(--error-ink);
+  border-color: color-mix(in srgb, var(--error-ink) 35%, var(--line));
+}
 
 .rail-deck {
   display: grid;
@@ -105,8 +131,7 @@
   padding-top: 4px;
 }
 .rail-deck .rail-section-header {
-  padding: 6px 0 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
+  padding-inline: 0;
 }
 .rail-deck-list {
   display: flex;

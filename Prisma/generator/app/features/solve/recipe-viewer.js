@@ -1122,8 +1122,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         const chips = (run.palette || []).map(fid => {
           const fil = app.state.session.allFilaments.find(f => f.filament_id === fid);
           const hex = fil?.hex || "#888";
-          return `<span class="comp-deck-chip" style="background:${hex}"></span>`;
+          const label = fil?.color_name || fil?.display_name || fid;
+          return `<span class="comp-deck-chip color-chip" style="background:${hex}" title="${app.commands.escAttr(label)}"></span>`;
         }).join("");
+        const supportChips = app.commands.buildSolveRunSupportChipsHtml(run);
         const solveDuration = app.commands.formatDurationSeconds(run.solve_elapsed_s ?? run.results?.elapsed_s);
         const stats = `<span class="solve-run-card-rmse">${app.commands.formatSolveRunCardRmse(run.results)}${solveDuration ? ` · ${app.commands.esc(solveDuration)}` : ""}</span>`;
         const staleBadge = run.cache_unavailable
@@ -1136,7 +1138,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
               ${app.commands.buildSolveRunDeleteButton(run)}
             </div>
           </div>
-          <div class="comp-deck-card-chips">${chips}</div>
+          <div class="comp-deck-card-chips solve-run-card-chips rail-deck-card-chips">
+            <div class="solve-run-palette-chips">${chips}</div>
+            ${supportChips}
+          </div>
           <div class="solve-run-card-meta">
             <button class="solve-run-settings-btn" data-run-id="${app.commands.esc(run.id)}" title="View the settings captured for this run">Settings</button>
             ${stats}

@@ -106,6 +106,8 @@ export function initializeApplicationState(app) {
   app.state.palette.deck = [];
   app.state.palette.stagingDeck = [];
   app.state.palette.suggestCapacityNote = "";
+  app.state.palette.stagingClearConfirmPending = false;
+  app.state.palette.stagingClearConfirmTimer = null;
   app.state.palette.activeDeckId = null;
   app.state.solve.solveRuns = [];
   app.state.solve.solveRunCounter = 0;
