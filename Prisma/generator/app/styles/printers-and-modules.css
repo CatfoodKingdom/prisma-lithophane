@@ -47,6 +47,10 @@
 }
 
 .pc-section { margin-bottom: 14px; }
+.pc-nozzle-help {
+  margin: 5px 0 7px;
+  max-width: 620px;
+}
 
 .pc-footer {
   display: flex;
@@ -85,6 +89,21 @@
   border: 1px solid var(--line);
   border-radius: 3px;
   text-align: right;
+}
+.pc-nozzle-table .nz-min-ll-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.pc-nozzle-table .nz-min-ll-derived {
+  min-width: 110px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pc-nozzle-table tr.is-invalid input:invalid {
+  border-color: var(--error-ink);
+  background: var(--error-bg);
 }
 .ghost-button.danger { color: var(--error-ink); border-color: var(--error-ink); }
 .ghost-button.danger:hover { background: var(--error-bg); }

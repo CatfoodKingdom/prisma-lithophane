@@ -96,6 +96,8 @@ def _safe_manifest_path(root: Path, value: str) -> tuple[str, Path]:
 
 def _forbidden_reason(relative_path: str) -> str | None:
     rel = PurePosixPath(relative_path)
+    if rel.as_posix().casefold() == "_internal/prisma/generator/app/printers.json":
+        return "obsolete bundled printer profile"
     lowered_parts = {part.casefold() for part in rel.parts}
     blocked_parts = sorted(lowered_parts & FORBIDDEN_PARTS)
     if blocked_parts:

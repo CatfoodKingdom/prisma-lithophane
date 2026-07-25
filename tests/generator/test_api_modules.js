@@ -47,5 +47,8 @@ test("API client normalizes structured backend errors", async () => {
     json: async () => ({ detail: [{ msg: "first" }, "second"] }),
   }));
 
-  await assert.rejects(client.apiFetch("/failure"), /API 422: first; second/);
+  await assert.rejects(
+    client.apiFetch("/failure"),
+    (error) => error.status === 422 && /API 422: first; second/.test(error.message),
+  );
 });

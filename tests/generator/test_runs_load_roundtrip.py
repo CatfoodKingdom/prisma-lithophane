@@ -32,6 +32,7 @@ export and swap would raise and the oracle would test nothing.
 from __future__ import annotations
 
 import copy
+import io
 import json
 from pathlib import Path
 import time
@@ -40,12 +41,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import auto_run_store
 import data_paths
 import run_archive
 import run_store
 import server
+from source_images import SourceImageService
 from thickness_maps import MapKey
 from white_cap_contract import (
     PHYSICAL_GEOMETRY_METADATA_KEY,
@@ -192,7 +195,14 @@ def roundtrip_env(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "_IMAGES_DIR", tmp_path / "photos")
     for sub in ("saved", "runs", "output", "photos"):
         (tmp_path / sub).mkdir()
-    (server._IMAGES_DIR / "steve.jpg").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    image_buf = io.BytesIO()
+    Image.new("RGB", (8, 6), (32, 96, 160)).save(image_buf, format="JPEG")
+    (server._IMAGES_DIR / "steve.jpg").write_bytes(image_buf.getvalue())
+    monkeypatch.setattr(
+        server,
+        "_SOURCE_IMAGES",
+        SourceImageService(server._IMAGES_DIR, tmp_path / "source-cache"),
+    )
     client = TestClient(server.app)
     try:
         yield SimpleNamespace(client=client, server=server, tmp_path=tmp_path)

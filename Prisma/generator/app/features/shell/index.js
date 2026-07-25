@@ -1044,7 +1044,10 @@ export function installFeaturesShellIndex(app) {
     if (app.state.image.selectedImage) {
       if (app.state.ui.currentTab === "image") {
         // Tab 1: show source image
-        preview.innerHTML = `<img src="${app.api.imagePreviewUrl(app.state.image.selectedImage.filename)}" alt="${app.state.image.selectedImage.filename}">`;
+        preview.innerHTML = `<img src="${app.api.imagePreviewUrl(
+          app.state.image.selectedImage.filename,
+          app.state.image.selectedImage.source_ref,
+        )}" alt="${app.commands.escAttr(app.state.image.selectedImage.filename)}">`;
       } else {
         // Other tabs: show framed preview snapshot
         app.commands.updateRailFramedPreview(preview);
@@ -1081,8 +1084,28 @@ export function installFeaturesShellIndex(app) {
       </select>`;
       const sel = app.state.ui.$("#railPrinterSelect");
       if (sel) sel.addEventListener("change", async () => {
-        await app.api.setActivePrinter({ active_printer_id: sel.value });
-        await app.commands.loadPrinters();
+        const previousId = app.state.session.printersData.active_printer_id;
+        sel.disabled = true;
+        let active;
+        try {
+          active = await app.api.setActivePrinter({ active_printer_id: sel.value });
+        } catch (error) {
+          app.state.session.printersData.active_printer_id = previousId;
+          app.commands.renderPrinterRail();
+          app.commands.showToast(`Failed to change printer: ${error.message}`, "error");
+          return;
+        }
+        app.state.session.printersData.active_printer_id = active.printer?.id || sel.value;
+        app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
+        try {
+          app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
+        } catch (error) {
+          console.error("[printers] active printer could not be rendered:", error);
+          app.commands.showToast(
+            "Printer changed, but the display could not refresh. Reload Prisma.",
+            "error",
+          );
+        }
       });
     }
 
@@ -1095,8 +1118,27 @@ export function installFeaturesShellIndex(app) {
         `<option value="${n.size}"${n.size === app.state.session.printersData.active_nozzle_size ? " selected" : ""}>${n.size}mm</option>`
       ).join("");
       nozzleSel.onchange = async () => {
-        await app.api.setActivePrinter({ active_nozzle_size: parseFloat(nozzleSel.value) });
-        await app.commands.loadPrinters();
+        const previousSize = app.state.session.printersData.active_nozzle_size;
+        nozzleSel.disabled = true;
+        let active;
+        try {
+          active = await app.api.setActivePrinter({ active_nozzle_size: parseFloat(nozzleSel.value) });
+        } catch (error) {
+          app.state.session.printersData.active_nozzle_size = previousSize;
+          app.commands.renderPrinterRail();
+          app.commands.showToast(`Failed to change nozzle: ${error.message}`, "error");
+          return;
+        }
+        app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
+        try {
+          app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
+        } catch (error) {
+          console.error("[printers] active nozzle could not be rendered:", error);
+          app.commands.showToast(
+            "Nozzle changed, but the display could not refresh. Reload Prisma.",
+            "error",
+          );
+        }
       };
       nozzleSel.disabled = profiles.length === 0;
       nozzleSel.title = profiles.length ? "Active nozzle" : "No nozzle profiles configured";

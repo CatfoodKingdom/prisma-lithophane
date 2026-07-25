@@ -231,6 +231,36 @@
   background: var(--error-bg);
   color: var(--error-ink);
 }
+.saved-run-source-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 6px 2px;
+  padding: 5px 7px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--selected) 38%, var(--panel));
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.saved-run-source-notice.is-hidden {
+  display: none;
+}
+.saved-run-source-notice-label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+.saved-run-source-notice-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
 .image-import-notice-row {
   display: flex;
   align-items: center;

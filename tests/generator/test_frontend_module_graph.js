@@ -175,6 +175,30 @@ test("solve history controls and cards reserve stable confirmation geometry", ()
   assert.match(events, /clearTimeout\(confirmTimer\)/);
 });
 
+test("printer configuration exposes derived width and whole-nozzle minimum length", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const printerController = fs.readFileSync(
+    path.join(appDir, "features", "printers", "index.js"),
+    "utf8",
+  );
+  const settingsController = fs.readFileSync(
+    path.join(appDir, "features", "settings", "profiles.js"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(html, /<th>Min W<\/th>/);
+  assert.match(html, /Min Len \(× nozzle\)/);
+  assert.match(
+    printerController,
+    /class="nz-min-ll-mult"[\s\S]*?step="1" min="2" max="10"/,
+  );
+  assert.match(printerController, /class="nz-min-ll-derived"/);
+  assert.doesNotMatch(printerController, /class="nz-min-lw"/);
+  assert.match(settingsController, /activePrintability\?\.minimum_extrusion_width_mm/);
+  assert.match(settingsController, /activePrintability\?\.minimum_line_length_mm/);
+  assert.equal(fs.existsSync(path.join(appDir, "printers.json")), false);
+});
+
 test("palette suggestions use solve-mode naming and compact deck-card geometry", () => {
   const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
   const suggestions = fs.readFileSync(

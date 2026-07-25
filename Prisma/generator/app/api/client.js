@@ -19,7 +19,10 @@ export function createApiClient(fetchImpl = globalThis.fetch.bind(globalThis)) {
       } else if (message && typeof message === "object") {
         try { message = JSON.stringify(message); } catch { message = String(message); }
       }
-      throw new Error(`API ${response.status}: ${message}`);
+      const error = new Error(`API ${response.status}: ${message}`);
+      error.status = response.status;
+      error.body = body;
+      throw error;
     }
     return response.json();
   }

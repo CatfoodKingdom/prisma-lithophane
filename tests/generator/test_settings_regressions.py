@@ -65,7 +65,10 @@ def test_boundary_smoothing_sigma_survives_config_as_float(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -87,7 +90,10 @@ def test_boundary_cap_de_budget_survives_config_as_float(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -136,13 +142,33 @@ def test_frontend_and_server_settings_profile_keys_match():
     assert frontend_keys == set(server._SETTINGS_PROFILE_KEYS)
 
 
+def test_settings_profiles_do_not_own_printer_or_printability_state():
+    import server
+
+    for key in (
+        "printers",
+        "printer_profiles",
+        "active_printer_id",
+        "active_nozzle_size",
+        "min_line_width",
+        "min_line_length",
+        "min_line_length_multiplier",
+        "printability_minimum_extrusion_width_mm",
+        "printability_minimum_line_length_mm",
+    ):
+        assert key not in server._SETTINGS_PROFILE_KEYS
+
+
 def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
     import server
 
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -391,7 +417,10 @@ def test_build_solve_config_carries_preprocessing_params(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -420,8 +449,7 @@ def test_luminance_mode_preset_expands_to_backend_flags(monkeypatch):
             "printer": {"id": "test-printer"},
             "nozzle": {
                 "size": 0.2,
-                "min_line_width": 0.2,
-                "min_line_length": 0.5,
+                "min_line_length_multiplier": 3,
             },
         },
     )
@@ -451,7 +479,10 @@ def test_standard_luminance_mode_preserves_mandatory_printability(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -471,7 +502,10 @@ def test_standard_luminance_mode_preserves_layer_limited_detail_cap(monkeypatch)
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "test-printer"}, "nozzle": {"size": 0.2}},
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -1109,6 +1143,7 @@ def test_active_printer_normalizes_line_width_bounds():
                             "min_layer_height": 0.04,
                             "max_layer_height": 0.16,
                             "line_width": 0.30,
+                            "min_line_length_multiplier": 2,
                         }
                     ],
                 }
@@ -1120,10 +1155,15 @@ def test_active_printer_normalizes_line_width_bounds():
 
     nozzle = resolved["nozzle"]
 
-    assert nozzle["min_line_width"] == pytest.approx(0.16)
     assert nozzle["max_line_width"] == pytest.approx(0.25)
     assert nozzle["line_width"] == pytest.approx(0.25)
-    assert nozzle["min_line_length"] == pytest.approx(0.40)
+    assert nozzle["min_line_length_multiplier"] == 2
+    assert resolved["printability"] == {
+        "minimum_extrusion_width_mm": pytest.approx(0.2),
+        "minimum_line_length_multiplier": 2,
+        "minimum_line_length_mm": pytest.approx(0.4),
+        "minimum_component_area_mm2": pytest.approx(0.08),
+    }
     assert "preferred_line_length" not in nozzle
 
 
@@ -1141,8 +1181,7 @@ def test_active_printer_drops_retired_preferred_line_length():
                             "size": 0.4,
                             "min_layer_height": 0.08,
                             "max_layer_height": 0.32,
-                            "min_line_width": 0.40,
-                            "min_line_length": 0.70,
+                            "min_line_length_multiplier": 3,
                             "preferred_line_length": 0.50,
                         }
                     ],
@@ -1155,9 +1194,119 @@ def test_active_printer_drops_retired_preferred_line_length():
 
     nozzle = resolved["nozzle"]
 
-    assert nozzle["min_line_width"] == pytest.approx(0.40)
-    assert nozzle["min_line_length"] == pytest.approx(0.70)
+    assert nozzle["min_line_length_multiplier"] == 3
+    assert resolved["printability"]["minimum_extrusion_width_mm"] == pytest.approx(0.40)
+    assert resolved["printability"]["minimum_line_length_mm"] == pytest.approx(1.20)
     assert "preferred_line_length" not in nozzle
+
+
+def test_default_printer_profiles_use_nozzle_multiplier_schema():
+    import server
+
+    for printer in server._DEFAULT_PRINTERS["printers"]:
+        for nozzle in printer["nozzle_profiles"]:
+            assert nozzle["min_line_length_multiplier"] == 2
+            assert "min_line_width" not in nozzle
+            assert "min_line_length" not in nozzle
+
+
+@pytest.mark.parametrize(
+    "multiplier",
+    [1, 11, 2.5, True, "2", float("nan"), float("inf")],
+)
+def test_nozzle_printability_rejects_invalid_multiplier(multiplier):
+    import server
+
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._resolve_nozzle_printability(
+            {"size": 0.2, "min_line_length_multiplier": multiplier},
+            printer_id="printer-a",
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["field"] == "min_line_length_multiplier"
+    assert exc_info.value.detail["printer"] == "printer-a"
+    assert exc_info.value.detail["path"] == str(server._PRINTERS_PATH)
+
+
+@pytest.mark.parametrize("multiplier", [2, 10])
+def test_nozzle_printability_resolves_bounded_multiplier(multiplier):
+    import server
+
+    resolved = server._resolve_nozzle_printability(
+        {"size": 0.2, "min_line_length_multiplier": multiplier},
+        printer_id="printer-a",
+    )
+
+    assert resolved["minimum_extrusion_width_mm"] == pytest.approx(0.2)
+    assert resolved["minimum_line_length_multiplier"] == multiplier
+    assert resolved["minimum_line_length_mm"] == pytest.approx(0.2 * multiplier)
+    assert resolved["minimum_component_area_mm2"] == pytest.approx(
+        0.2 * 0.2 * multiplier
+    )
+
+
+def test_nozzle_printability_canonicalizes_derived_values():
+    import server
+
+    resolved = server._resolve_nozzle_printability(
+        {"size": 0.3333333, "min_line_length_multiplier": 3},
+        printer_id="printer-a",
+    )
+
+    assert resolved == {
+        "minimum_extrusion_width_mm": 0.333333,
+        "minimum_line_length_multiplier": 3,
+        "minimum_line_length_mm": 0.999999,
+        "minimum_component_area_mm2": 0.333333,
+    }
+    normalized = server._normalize_nozzle_profile(
+        {"size": 0.3333333, "min_line_length_multiplier": 3},
+        printer_id="printer-a",
+    )
+    assert normalized["size"] == 0.333333
+
+
+def test_obsolete_printability_fields_are_rejected_without_rewriting_file(
+    tmp_path, monkeypatch
+):
+    import server
+
+    printers_path = tmp_path / "config" / "printers.json"
+    printers_path.parent.mkdir(parents=True)
+    original = {
+        "printers": [
+            {
+                "id": "printer-a",
+                "name": "Printer A",
+                "nozzle_profiles": [
+                    {
+                        "size": 0.2,
+                        "min_line_width": 0.16,
+                        "min_line_length": 0.4,
+                    }
+                ],
+            }
+        ],
+        "active_printer_id": "printer-a",
+        "active_nozzle_size": 0.2,
+    }
+    encoded = server.json.dumps(original, indent=2)
+    printers_path.write_text(encoded, encoding="utf-8")
+    monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
+
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._load_printers()
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["obsolete_fields"] == [
+        "min_line_length",
+        "min_line_width",
+    ]
+    assert exc_info.value.detail["printer"] == "printer-a"
+    assert exc_info.value.detail["nozzle_size"] == pytest.approx(0.2)
+    assert exc_info.value.detail["path"] == str(printers_path)
+    assert printers_path.read_text(encoding="utf-8") == encoded
 
 
 def test_save_printers_rejects_retired_preferred_line_length():
@@ -1173,8 +1322,7 @@ def test_save_printers_rejects_retired_preferred_line_length():
                         "size": 0.4,
                         "min_layer_height": 0.08,
                         "max_layer_height": 0.32,
-                        "min_line_width": 0.40,
-                        "min_line_length": 0.70,
+                        "min_line_length_multiplier": 2,
                         "preferred_line_length": 0.80,
                     }
                 ],
@@ -1189,6 +1337,77 @@ def test_save_printers_rejects_retired_preferred_line_length():
 
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail["error"] == "retired_printer_profile_field"
+
+
+def test_printer_normalization_canonicalizes_active_selection():
+    import server
+
+    normalized = server._normalize_printers_data(
+        {
+            "printers": [
+                {
+                    "id": "printer-a",
+                    "name": "Printer A",
+                    "nozzle_profiles": [
+                        {
+                            "size": 0.2,
+                            "min_line_length_multiplier": 2,
+                        }
+                    ],
+                }
+            ],
+            "active_printer_id": "missing-printer",
+            "active_nozzle_size": 0.8,
+        }
+    )
+
+    assert normalized["active_printer_id"] == "printer-a"
+    assert normalized["active_nozzle_size"] == pytest.approx(0.2)
+
+
+def test_save_printers_returns_authoritative_printability_and_updates_session(
+    tmp_path, monkeypatch
+):
+    import server
+
+    printers_path = tmp_path / "config" / "printers.json"
+    monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
+    monkeypatch.setitem(server.session, "config", dict(server._DEFAULT_CONFIG))
+    response = server.save_printers(
+        {
+            "printers": [
+                {
+                    "id": "printer-a",
+                    "name": "Printer A",
+                    "nozzle_profiles": [
+                        {
+                            "size": 0.4,
+                            "min_line_length_multiplier": 3,
+                        }
+                    ],
+                }
+            ],
+            "active_printer_id": "printer-a",
+            "active_nozzle_size": 0.4,
+        }
+    )
+
+    assert response["active"]["printability"] == {
+        "minimum_extrusion_width_mm": pytest.approx(0.4),
+        "minimum_line_length_multiplier": 3,
+        "minimum_line_length_mm": pytest.approx(1.2),
+        "minimum_component_area_mm2": pytest.approx(0.48),
+    }
+    assert server.session["config"][
+        "printability_minimum_extrusion_width_mm"
+    ] == pytest.approx(0.4)
+    assert server.session["config"][
+        "printability_minimum_line_length_mm"
+    ] == pytest.approx(1.2)
+    persisted = server.json.loads(printers_path.read_text(encoding="utf-8"))
+    assert persisted["printers"][0]["nozzle_profiles"][0][
+        "min_line_length_multiplier"
+    ] == 3
 
 
 def test_luminance_base_shading_limit_folds_into_optical_authority():

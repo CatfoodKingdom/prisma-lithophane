@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image
+import Prisma.generator.source_images as source_images_module
 
 from Prisma.generator.source_images import (
     ImageImportManager,
@@ -101,6 +102,35 @@ def test_native_jpeg_alias_preserves_direct_working_path(tmp_path: Path) -> None
     assert resolved.normalized is False
     assert resolved.working_path == source
     assert (resolved.width, resolved.height) == (7, 5)
+
+
+def test_native_digest_is_indexed_and_reused_without_rehashing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "portrait.jpg"
+    Image.new("RGB", (9, 6), (10, 20, 30)).save(source, format="JPEG")
+    service = SourceImageService(images, tmp_path / "cache")
+    real_hash = source_images_module._sha256_file
+    calls = []
+
+    def count_hash(path: Path) -> str:
+        calls.append(Path(path))
+        return real_hash(path)
+
+    monkeypatch.setattr(source_images_module, "_sha256_file", count_hash)
+    first = service.prepare(source.name)
+    second = service.prepare(source.name)
+    matches = service.paths_with_digest(first.fingerprint)
+
+    assert first.fingerprint == second.fingerprint
+    assert calls == [source]
+    assert matches == [source]
+    reloaded = SourceImageService(images, tmp_path / "cache")
+    assert reloaded.prepare(source.name).fingerprint == first.fingerprint
+    assert calls == [source]
 
 
 def test_nclx_display_p3_converts_and_hdr_only_is_rejected() -> None:

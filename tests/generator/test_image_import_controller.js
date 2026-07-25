@@ -79,10 +79,12 @@ function makeApp(statuses) {
       applyImageAspectDefault: () => { app.aspectDefaults += 1; },
       renderImageTab: () => { app.renders += 1; },
       updateRail: () => {},
+      syncConfigToServer: async () => { app.configSyncs += 1; },
       showToast: (message, kind) => toasts.push({ message, kind }),
     },
     aspectDefaults: 0,
     renders: 0,
+    configSyncs: 0,
     toasts,
   };
   installFeaturesImageImports(app);
@@ -114,6 +116,7 @@ test("completed batch refreshes the library and selects the first successful ima
 
   assert.equal(app.state.image.selectedImage.filename, "phone.heic");
   assert.equal(app.aspectDefaults, 1);
+  assert.equal(app.configSyncs, 1);
   assert.deepEqual(app.toasts.at(-1), { message: "Added 1 image", kind: "success" });
   assert.equal(app.state.image.activeImportBatchId, null);
 });

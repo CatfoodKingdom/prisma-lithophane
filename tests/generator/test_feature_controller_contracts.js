@@ -6,6 +6,7 @@ const {
   createFeatureHarness,
   fakeElement,
   memoryStorage,
+  moduleUrl,
 } = require("./support/application_harness.cjs");
 
 const filaments = [
@@ -46,6 +47,9 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.ok(keys.includes("color_region_target_mm"));
   assert.ok(!keys.includes("enforce_printability"));
   assert.ok(!keys.includes("cap_continuity_cleanup"));
+  assert.ok(!keys.includes("printability_minimum_extrusion_width_mm"));
+  assert.ok(!keys.includes("printability_minimum_line_length_mm"));
+  assert.ok(!keys.includes("min_line_length_multiplier"));
   assert.equal(app.state.settings.config.enforce_printability, true);
   assert.equal(app.state.settings.config.cap_continuity_cleanup, true);
 });
@@ -121,6 +125,212 @@ test("solve preflight math reports layer alignment and nozzle constraints", asyn
   assert.ok(misaligned.remainderMm > 0);
   assert.match(app.commands.buildStackLayerAlignmentIssue(misaligned), /whole Layer Height steps/);
   assert.match(app.commands.buildSolvePitchNozzleIssue(0.2, 0.4), /cannot be smaller/);
+});
+
+test("printer printability uses bounded whole-nozzle length multipliers", async () => {
+  const { app } = await harness();
+  assert.deepEqual(app.commands.defaultNozzleLineWidths(0.2), {
+    line_width: 0.22,
+    max_line_width: 0.25,
+    min_line_length_multiplier: 2,
+  });
+  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.2, 2), "0.4");
+  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.4, 10), "4");
+  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.3333333, 3), "0.999999");
+
+  const normalized = app.commands.normalizeNozzleProfile({
+    size: 0.4,
+    min_layer_height: 0.08,
+    max_layer_height: 0.32,
+    line_width: 0.2,
+    max_line_width: 0.3,
+    min_line_length_multiplier: 3,
+  });
+  assert.equal(normalized.line_width, 0.4);
+  assert.equal(normalized.max_line_width, 0.4);
+  assert.equal(normalized.min_line_length_multiplier, 3);
+  assert.equal("min_line_width" in normalized, false);
+  assert.equal("min_line_length" in normalized, false);
+
+  const sizeInput = fakeElement();
+  sizeInput.value = "0.2";
+  sizeInput.setCustomValidity = message => { sizeInput.validationMessage = message; };
+  const multiplierInput = fakeElement();
+  multiplierInput.value = "1";
+  multiplierInput.setCustomValidity = message => { multiplierInput.validationMessage = message; };
+  const output = fakeElement();
+  const row = fakeElement();
+  row.querySelector = selector => ({
+    ".nz-size": sizeInput,
+    ".nz-min-ll-mult": multiplierInput,
+    ".nz-min-ll-derived": output,
+  }[selector] || null);
+  assert.equal(app.commands.validateNozzleRow(row), false);
+  assert.match(multiplierInput.validationMessage, /whole number from 2 through 10/);
+  assert.equal(row.classList.contains("is-invalid"), true);
+
+  multiplierInput.value = "3";
+  app.commands.syncNozzleDerivedLength(row);
+  assert.equal(output.textContent, "× nozzle = 0.6 mm");
+  assert.equal(app.commands.validateNozzleRow(row), true);
+  assert.equal(multiplierInput.validationMessage, "");
+  assert.equal(row.classList.contains("is-invalid"), false);
+});
+
+test("live config uses server-authoritative active printer thresholds", async () => {
+  const { app } = await harness();
+  app.state.session.activeNozzle = {
+    size: 0.4,
+    min_line_length_multiplier: 2,
+  };
+  app.state.session.activePrintability = {
+    minimum_extrusion_width_mm: 0.4,
+    minimum_line_length_mm: 0.8,
+    minimum_component_area_mm2: 0.32,
+  };
+  global.document = {
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  try {
+    app.commands.readConfigFromUI();
+    assert.equal(app.state.settings.config.printability_minimum_extrusion_width_mm, 0.4);
+    assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.8);
+  } finally {
+    delete global.document;
+  }
+});
+
+test("printer editor stays open with its draft after a failed save", async () => {
+  const printerPage = fakeElement();
+  const draft = {
+    printers: [{
+      id: "printer-a",
+      name: "Unsaved draft",
+      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
+    }],
+    active_printer_id: "printer-a",
+    active_nozzle_size: 0.2,
+  };
+  const { app } = await harness({
+    api: {
+      savePrinters: async () => { throw new Error("offline"); },
+    },
+    elements: { "#printerConfigPage": printerPage },
+  });
+  app.state.session.printersData = draft;
+  app.state.session.printerConfigEditingId = "printer-a";
+  app.commands._readPrinterFromConfigPage = () => draft.printers[0];
+  app.commands.showToast = () => {};
+  app.commands.switchTab = () => { throw new Error("must not navigate"); };
+
+  assert.equal(await app.commands.hidePrinterConfigPage("image"), false);
+  assert.equal(printerPage.classList.contains("is-hidden"), false);
+  assert.equal(app.state.session.printersData.printers[0].name, "Unsaved draft");
+  assert.equal(app.state.session.printersData.printers[0].nozzle_profiles[0].min_line_length_multiplier, 3);
+});
+
+test("successful printer saves reconcile active printability from the server", async () => {
+  const printerPage = fakeElement();
+  const draft = {
+    printers: [{
+      id: "printer-a",
+      name: "Draft name",
+      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
+    }],
+    active_printer_id: "printer-a",
+    active_nozzle_size: 0.2,
+  };
+  const authoritative = {
+    ok: true,
+    printers: [{
+      id: "printer-a",
+      name: "Canonical name",
+      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
+    }],
+    active_printer_id: "printer-a",
+    active_nozzle_size: 0.2,
+    active: {
+      printer: { id: "printer-a", name: "Canonical name", max_print_area: { x: 180, y: 180 } },
+      nozzle: { size: 0.2, min_line_length_multiplier: 3 },
+      printability: {
+        minimum_extrusion_width_mm: 0.2,
+        minimum_line_length_mm: 0.6,
+        minimum_component_area_mm2: 0.12,
+      },
+    },
+  };
+  const { app } = await harness({
+    api: { savePrinters: async () => authoritative },
+    elements: { "#printerConfigPage": printerPage },
+  });
+  app.state.session.printersData = draft;
+  app.state.session.printerConfigEditingId = "printer-a";
+  app.commands._readPrinterFromConfigPage = () => draft.printers[0];
+  app.commands.renderPrinterRail = () => {};
+  app.commands.updateDerivedParams = () => {};
+  app.commands.switchTab = () => {};
+
+  assert.equal(await app.commands.hidePrinterConfigPage("image"), true);
+  assert.equal(printerPage.classList.contains("is-hidden"), true);
+  assert.equal(app.state.session.printersData.printers[0].name, "Canonical name");
+  assert.equal(app.state.session.activePrintability.minimum_line_length_mm, 0.6);
+  assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.6);
+});
+
+test("a post-save render failure never rolls back authoritative printer state", async () => {
+  const printerPage = fakeElement();
+  const draft = {
+    printers: [{
+      id: "printer-a",
+      name: "Draft",
+      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 2 }],
+    }],
+    active_printer_id: "printer-a",
+    active_nozzle_size: 0.2,
+  };
+  const authoritative = {
+    printers: [{
+      id: "printer-a",
+      name: "Saved",
+      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 4 }],
+    }],
+    active_printer_id: "printer-a",
+    active_nozzle_size: 0.2,
+    active: {
+      printer: { id: "printer-a", name: "Saved" },
+      nozzle: { size: 0.2, min_line_length_multiplier: 4 },
+      printability: {
+        minimum_extrusion_width_mm: 0.2,
+        minimum_line_length_mm: 0.8,
+        minimum_component_area_mm2: 0.16,
+      },
+    },
+  };
+  const { app } = await harness({
+    api: { savePrinters: async () => authoritative },
+    elements: { "#printerConfigPage": printerPage },
+  });
+  app.state.session.printersData = draft;
+  app.state.session.printerConfigEditingId = "printer-a";
+  app.commands._readPrinterFromConfigPage = () => draft.printers[0];
+  app.commands.renderPrinterRail = () => {};
+  app.commands.updateDerivedParams = () => { throw new Error("render failed"); };
+  app.commands.switchTab = () => { throw new Error("must not navigate"); };
+  let toast = "";
+  app.commands.showToast = message => { toast = message; };
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    assert.equal(await app.commands.hidePrinterConfigPage("image"), false);
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(printerPage.classList.contains("is-hidden"), false);
+  assert.equal(app.state.session.printersData.printers[0].name, "Saved");
+  assert.equal(app.state.session.activePrintability.minimum_line_length_mm, 0.8);
+  assert.match(toast, /was saved/);
 });
 
 test("filament eligibility and reconciliation preserve explicit choices and default new IDs on", async () => {
@@ -504,6 +714,210 @@ test("solve cards expose listbox semantics, omit loaded provenance, and gate Sav
   assert.match(cards.innerHTML, /solve-run-support-tray/);
   assert.match(cards.innerHTML, /White Base\/Cap: White/);
   assert.doesNotMatch(cards.innerHTML, />Loaded<\/span>|solve-run-loaded-badge/);
+});
+
+test("image library refresh preserves a private saved-run source outside available images", async () => {
+  const privateSource = {
+    filename: "portrait.jpg",
+    width: 1200,
+    height: 800,
+    source_ref: "loaded-run:loaded-1",
+    temporary: true,
+  };
+  const { app } = await harness({ api: {
+    fetchImages: async () => [{ filename: "library.jpg", width: 640, height: 480 }],
+  } });
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = privateSource;
+  app.commands.renderImageTab = () => {};
+  app.commands.updateRail = () => {};
+  let syncCount = 0;
+  app.commands.syncConfigToServer = async () => { syncCount += 1; };
+
+  await app.commands.refreshImageLibrary();
+
+  assert.equal(app.state.image.selectedImage, privateSource);
+  assert.deepEqual(app.state.image.availableImages.map(image => image.filename), ["library.jpg"]);
+  assert.equal(syncCount, 0);
+});
+
+test("config synchronization carries the active private source reference and clears it for library images", async () => {
+  const payloads = [];
+  const { app } = await harness({ api: {
+    updateConfig: async (payload) => {
+      payloads.push(payload);
+      return { config: payload };
+    },
+  } });
+  app.state.session.apiConnected = true;
+  app.state.session.printerConfig = { ams_slots: 4, white_slots: 1 };
+  app.commands.syncConfigFromModuleState = () => {};
+  app.commands.readConfigFromUI = () => {};
+  app.commands.getActivePalette = () => ["red"];
+  app.commands.getBaseFilament = () => "white";
+  app.state.image.selectedImage = {
+    filename: "portrait.jpg",
+    source_ref: "loaded-run:loaded-1",
+  };
+
+  await app.commands.syncConfigToServer({ throwOnError: true });
+  app.state.image.selectedImage = { filename: "library.jpg" };
+  await app.commands.syncConfigToServer({ throwOnError: true });
+
+  assert.equal(payloads[0].image_path, "portrait.jpg");
+  assert.equal(payloads[0].image_source_ref, "loaded-run:loaded-1");
+  assert.equal(payloads[1].image_path, "library.jpg");
+  assert.equal(payloads[1].image_source_ref, null);
+});
+
+test("failed loaded-run synchronization rolls back all staged client state", async () => {
+  const { app } = await harness({ api: {
+    fetchImages: async () => [],
+  } });
+  const previousImage = { filename: "library.jpg" };
+  const previousDeck = [{ id: "deck-1", filament_ids: ["blue"] }];
+  app.state.image.selectedImage = previousImage;
+  app.state.settings.config.t_max = 3;
+  app.state.palette.deck = previousDeck;
+  app.state.palette.activeDeckId = "deck-1";
+  app.commands.loadImages = async () => {};
+  app.commands.applyImageAspectDefault = () => {};
+  app.commands.renderSettingsTab = () => {};
+  app.commands.renderImageTab = () => {};
+  app.commands.renderSolveTab = () => {};
+  app.commands.renderExportTab = () => {};
+  app.commands.renderFrameCanvas = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.restoreLoadedRunPaletteToDeck = async () => {
+    app.state.palette.deck = [{ id: "loaded-deck", filament_ids: ["red"] }];
+    app.state.palette.activeDeckId = "loaded-deck";
+  };
+  let syncCount = 0;
+  app.commands.syncConfigToServer = async () => {
+    syncCount += 1;
+    if (syncCount === 1) throw new Error("network interrupted");
+  };
+
+  await assert.rejects(
+    app.commands.applyLoadedRun({
+      card_id: "loaded-1",
+      label: "Portrait",
+      config: {
+        image_path: "portrait.jpg",
+        image_source_ref: "loaded-run:loaded-1",
+        palette: ["red"],
+        white_base: "white",
+        t_max: 9,
+      },
+      source_image: {
+        filename: "portrait.jpg",
+        source_ref: "loaded-run:loaded-1",
+        temporary: true,
+      },
+      result: {},
+    }),
+    /network interrupted/,
+  );
+
+  assert.equal(app.state.solve.solveRuns.length, 0);
+  assert.equal(app.state.solve.solveRunCounter, 0);
+  assert.equal(app.state.solve.loadedRunApplyRunning, false);
+  assert.equal(app.state.image.selectedImage, previousImage);
+  assert.equal(app.state.settings.config.t_max, 3);
+  assert.deepEqual(app.state.palette.deck, previousDeck);
+  assert.equal(app.state.palette.activeDeckId, "deck-1");
+  assert.equal(syncCount, 2);
+});
+
+test("loaded result keeps historical printability while re-solve state uses active printer", async () => {
+  const { app } = await harness();
+  app.state.session.activePrintability = {
+    minimum_extrusion_width_mm: 0.4,
+    minimum_line_length_mm: 0.8,
+    minimum_component_area_mm2: 0.32,
+  };
+  app.commands.renderSettingsTab = () => {};
+  app.commands.renderImageTab = () => {};
+  app.commands.renderSolveTab = () => {};
+  app.commands.renderFrameCanvas = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.restoreLoadedRunPaletteToDeck = async () => {};
+  app.commands.syncConfigToServer = async () => {
+    app.state.settings.config.printability_minimum_extrusion_width_mm =
+      app.state.session.activePrintability.minimum_extrusion_width_mm;
+    app.state.settings.config.printability_minimum_line_length_mm =
+      app.state.session.activePrintability.minimum_line_length_mm;
+  };
+
+  await app.commands.applyLoadedRun({
+    card_id: "loaded-1",
+    label: "Historical run",
+    config: {
+      palette: ["red"],
+      white_base: "white",
+      printability_minimum_extrusion_width_mm: 0.16,
+      printability_minimum_line_length_mm: 0.4,
+    },
+    result: {},
+  });
+
+  const loadedCard = app.state.solve.solveRuns[0];
+  assert.equal(loadedCard.config.printability_minimum_extrusion_width_mm, 0.16);
+  assert.equal(loadedCard.config.printability_minimum_line_length_mm, 0.4);
+  assert.equal(app.state.settings.config.printability_minimum_extrusion_width_mm, 0.4);
+  assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.8);
+});
+
+test("Clear Temp drains config sync and force-reconciles private source and stale histories", async () => {
+  let clearCalled = false;
+  const { app } = await harness({ api: {
+    clearAllTempFiles: async () => {
+      clearCalled = true;
+      return {
+        cleared_source_ref: "loaded-run:loaded-1",
+        active_image_cleared: true,
+        config: { image_path: null, image_source_ref: null },
+      };
+    },
+  } });
+  const eventBindings = await import(moduleUrl("features/event-bindings.js"));
+  eventBindings.installFeaturesEventBindings(app);
+  const clearButton = fakeElement();
+  app.state.ui.$ = (selector) => selector === "#clearAllTempBtn" ? clearButton : null;
+  app.commands.appConfirm = async () => true;
+  app.commands.showToast = () => {};
+  app.commands.renderImageTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.renderSolveTab = () => {};
+  app.commands.renderExportTab = () => {};
+  app.state.image.selectedImage = {
+    filename: "portrait.jpg",
+    source_ref: "loaded-run:loaded-1",
+  };
+  app.state.settings.config.image_path = "portrait.jpg";
+  app.state.settings.config.image_source_ref = "loaded-run:loaded-1";
+  app.state.solve.solveRuns = [{ id: "loaded-1", results: {} }];
+  app.state.solve.solveStatus = { status: "running" };
+  app.state.export.exportRunning = true;
+  let releaseSync;
+  app.state.settings._configSyncChain = new Promise((resolve) => {
+    releaseSync = resolve;
+  });
+  app.commands.syncConfigToServer = async () => {};
+  const clearing = app.commands.clearAllTempFiles();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(clearCalled, false);
+  assert.equal(clearButton.disabled, true);
+  releaseSync();
+  await clearing;
+
+  assert.equal(clearCalled, true);
+  assert.equal(app.state.image.selectedImage, null);
+  assert.equal(app.state.solve.solveRuns.length, 0);
+  assert.equal(app.state.solve.solveStatus.status, "idle");
+  assert.equal(app.state.export.exportRunning, false);
+  assert.equal(clearButton.disabled, false);
+  assert.equal(app.state.session.clearTempRunning, false);
 });
 
 test("operation progress exposes cancellation only to its owning workflow", async () => {

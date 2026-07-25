@@ -279,6 +279,7 @@ async function handleSuggestPalettes() {
 
     const payload = {
       image_path: app.state.image.selectedImage.filename,
+      image_source_ref: app.state.image.selectedImage.source_ref || null,
       n_filaments: targetCount,
       top_k: parseInt(app.state.ui.$("#targetSuggestCount")?.value) || 6,
       filament_ids: availableIds,
@@ -353,6 +354,7 @@ async function handleSuggestBaseShadingLimit() {
     try {
       const result = await app.api.apiPost("/luminance/base-shading-limit/recommend", {
         image_path: app.state.image.selectedImage.filename,
+        image_source_ref: app.state.image.selectedImage.source_ref || null,
       });
       const value = app.commands.setLuminanceBaseShadingLimitFraction(
         result.recommended_base_shading_limit_fraction

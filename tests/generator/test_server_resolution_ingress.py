@@ -174,12 +174,12 @@ def test_session_config_allows_repeated_canonical_updates(client):
     assert second.json()["config"]["color_region_target_mm"] == pytest.approx(1.00)
 
 
-def test_session_config_accepts_staged_backend_controls(client):
+def test_session_config_uses_active_printer_for_printability_thresholds(client):
     resp = client.post("/api/session/config", json={
         "stage1_coarsening_factor": 2,
         "emit_blueprint_printability": True,
-        "printability_minimum_extrusion_width_mm": 0.2,
-        "printability_minimum_line_length_mm": 0.5,
+        "printability_minimum_extrusion_width_mm": 9.0,
+        "printability_minimum_line_length_mm": 9.0,
         "stage2_boundary_mutation_enabled": True,
         "stage2_boundary_mutation_current_de_percentile": 80.0,
         "stage2_boundary_mutation_max_passes": 12,
@@ -189,7 +189,7 @@ def test_session_config_accepts_staged_backend_controls(client):
     assert cfg["stage1_coarsening_factor"] == 2
     assert cfg["emit_blueprint_printability"] is True
     assert cfg["printability_minimum_extrusion_width_mm"] == pytest.approx(0.2)
-    assert cfg["printability_minimum_line_length_mm"] == pytest.approx(0.5)
+    assert cfg["printability_minimum_line_length_mm"] == pytest.approx(0.4)
     assert cfg["stage2_boundary_mutation_enabled"] is True
     assert "stage2_boundary_mutation_edge_run_mode" not in cfg
     assert cfg["stage2_boundary_mutation_current_de_percentile"] == pytest.approx(80.0)

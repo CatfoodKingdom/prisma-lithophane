@@ -152,6 +152,12 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     assert diagnostics["resolved_settings"]["color_region_target_mm"] == 1.40
     assert diagnostics["resolved_settings"]["image_sample_pitch_mm"] == 0.25
     assert diagnostics["resolved_settings"]["solver_fine_pitch_mm"] == 0.25
+    assert diagnostics["resolved_settings"][
+        "printability_minimum_extrusion_width_mm"
+    ] == 0.2
+    assert diagnostics["resolved_settings"][
+        "printability_minimum_line_length_mm"
+    ] == 0.4
 
     run_json = json.loads(
         (solve_env.run_cache_dir / "diag_run" / "run.json").read_text(encoding="utf-8")
@@ -159,6 +165,8 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     assert "solver" not in run_json["solve_start_diagnostics"]["active_modules"]
     assert "grouping" not in run_json["solve_start_diagnostics"]["active_modules"]
     assert run_json["diagnostic_palette_version"] == "inferno-v1"
+    assert run_json["config"]["printability_minimum_extrusion_width_mm"] == 0.2
+    assert run_json["config"]["printability_minimum_line_length_mm"] == 0.4
 
 
 def test_staged_backend_diagnostics_report_only_live_module_slots(solve_env):

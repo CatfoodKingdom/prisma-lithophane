@@ -1,5 +1,6 @@
 """Tests for the data_paths module (Stage 9a managed filesystem locations)."""
 import importlib
+import json
 
 import pytest
 
@@ -169,3 +170,13 @@ def test_printer_defaults_bootstrap_into_missing_distribution_config_dir(tmp_pat
 
     assert printers["printers"]
     assert printers_path.is_file()
+    persisted = json.loads(printers_path.read_text(encoding="utf-8"))
+    for printer in persisted["printers"]:
+        for nozzle in printer["nozzle_profiles"]:
+            assert nozzle["min_line_length_multiplier"] == 2
+            assert "min_line_width" not in nozzle
+            assert "min_line_length" not in nozzle
+
+    before = printers_path.read_bytes()
+    assert server._load_printers() == printers
+    assert printers_path.read_bytes() == before

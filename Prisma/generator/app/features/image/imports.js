@@ -73,11 +73,13 @@ export function installFeaturesImageImports(app) {
       const selected = app.state.image.availableImages.find(
         (image) => image.filename === successful[0].stored_name,
       ) || null;
-      const changed = selected?.filename !== app.state.image.selectedImage?.filename;
+      const changed = !!app.state.image.selectedImage?.source_ref
+        || selected?.filename !== app.state.image.selectedImage?.filename;
       app.state.image.selectedImage = selected;
       if (selected && changed) app.commands.applyImageAspectDefault();
       app.commands.renderImageTab();
       app.commands.updateRail();
+      await app.commands.syncConfigToServer({ showErrorToast: true });
       requestAnimationFrame(() => {
         const card = Array.from(app.state.ui.$$(".image-card")).find(
           (candidate) => candidate.dataset.filename === selected?.filename,

@@ -168,6 +168,34 @@ def test_clear_all_on_empty_dirs_is_ok(cache_dirs):
     assert resp.json()["removed"] == 0
 
 
+def test_clear_all_invalidates_active_private_loaded_source(cache_dirs):
+    card_id = "loaded-123"
+    source_dir = cache_dirs["runs"] / card_id / server._LOADED_SOURCE_PRIVATE_DIR
+    _write_file(source_dir / "source.jpg", b"private")
+    server.session["config"]["image_path"] = "source.jpg"
+    server.session["config"]["image_source_ref"] = f"loaded-run:{card_id}"
+    server.session["solve_cache"][card_id] = {
+        "config": {},
+        "solve": {
+            "_loaded_source": {
+                "relative_path": f"{server._LOADED_SOURCE_PRIVATE_DIR}/source.jpg",
+            },
+        },
+    }
+
+    response = client.post("/api/cache/clear-all")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["active_image_cleared"] is True
+    assert body["cleared_source_ref"] == f"loaded-run:{card_id}"
+    assert body["config"]["image_path"] is None
+    assert body["config"]["image_source_ref"] is None
+    assert server.session["config"]["image_path"] is None
+    assert server.session["config"]["image_source_ref"] is None
+    assert server.session["solve_cache"] == {}
+
+
 # ---------------------------------------------------------------------------
 # Tests: 409 guard — all three living job types
 # ---------------------------------------------------------------------------

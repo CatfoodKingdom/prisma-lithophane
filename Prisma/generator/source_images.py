@@ -250,9 +250,11 @@ class SourceImageService:
         try:
             raw = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return {"schema_version": 1, "entries": {}}
+            return {"schema_version": 1, "entries": {}, "native_entries": {}}
         if raw.get("schema_version") != 1 or not isinstance(raw.get("entries"), dict):
-            return {"schema_version": 1, "entries": {}}
+            return {"schema_version": 1, "entries": {}, "native_entries": {}}
+        if not isinstance(raw.get("native_entries"), dict):
+            raw["native_entries"] = {}
         return raw
 
     def _write_manifest(self) -> None:
@@ -293,12 +295,78 @@ class SourceImageService:
             return None
         return entry
 
+    @staticmethod
+    def _stat_identity(path: Path) -> tuple[int, int, int]:
+        stat = path.stat()
+        return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    def _native_entry_for(self, path: Path) -> dict | None:
+        entry = self._manifest["native_entries"].get(path.name)
+        if not isinstance(entry, dict):
+            return None
+        try:
+            size, mtime_ns, ctime_ns = self._stat_identity(path)
+        except OSError:
+            return None
+        if (
+            entry.get("size") != size
+            or entry.get("mtime_ns") != mtime_ns
+            or entry.get("ctime_ns") != ctime_ns
+            or not isinstance(entry.get("digest"), str)
+        ):
+            return None
+        return entry
+
+    def _record_native_entry(
+        self,
+        path: Path,
+        *,
+        digest: str,
+        width: int,
+        height: int,
+        source_format: str,
+    ) -> None:
+        size, mtime_ns, ctime_ns = self._stat_identity(path)
+        self._manifest["native_entries"][path.name] = {
+            "digest": digest,
+            "source_format": source_format,
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "ctime_ns": ctime_ns,
+            "width": int(width),
+            "height": int(height),
+            "last_used_ns": time.time_ns(),
+        }
+
+    def paths_with_digest(self, digest: str) -> list[Path]:
+        """Return ready source paths whose cached source-byte digest matches."""
+
+        canonical = str(digest or "").lower()
+        if len(canonical) != 64:
+            return []
+        ready, _pending = self.discover()
+        ready_by_name = {path.name: path for path in ready}
+        with self._lock:
+            matches = {
+                name
+                for name, entry in self._manifest["native_entries"].items()
+                if isinstance(entry, dict)
+                and str(entry.get("digest") or "").lower() == canonical
+            }
+            matches.update(
+                name
+                for name, entry in self._manifest["entries"].items()
+                if isinstance(entry, dict)
+                and str(entry.get("digest") or "").lower() == canonical
+            )
+        return [ready_by_name[name] for name in matches if name in ready_by_name]
+
     def is_ready(self, path: Path) -> bool:
         if path.suffix.lower() in NATIVE_EXTENSIONS:
             if not path.is_file():
                 return False
             try:
-                self._inspect_native(path)
+                self.prepare(path)
             except SourceImageError:
                 return False
             return True
@@ -390,6 +458,15 @@ class SourceImageService:
                 raise SourceImageError("The image changed while Prisma was preparing it; retry.")
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staged, destination)
+            with self._lock:
+                self._record_native_entry(
+                    destination,
+                    digest=digest,
+                    width=width,
+                    height=height,
+                    source_format=source_format,
+                )
+                self._write_manifest()
             return ResolvedSource(
                 destination,
                 destination,
@@ -464,10 +541,37 @@ class SourceImageService:
         if suffix not in SUPPORTED_EXTENSIONS:
             raise SourceImageError(f"Unsupported image format: {suffix or '(none)'}")
         if suffix in NATIVE_EXTENSIONS:
-            width, height, source_format = self._inspect_native(path)
-            return ResolvedSource(
-                path, path, path.name, source_format, _sha256_file(path), False, width, height
-            )
+            with self._lock:
+                entry = self._native_entry_for(path)
+                if entry is not None:
+                    entry["last_used_ns"] = time.time_ns()
+                    return ResolvedSource(
+                        path,
+                        path,
+                        path.name,
+                        str(entry["source_format"]),
+                        str(entry["digest"]),
+                        False,
+                        int(entry["width"]),
+                        int(entry["height"]),
+                    )
+                before = self._stat_identity(path)
+                width, height, source_format = self._inspect_native(path)
+                digest = _sha256_file(path)
+                after = self._stat_identity(path)
+                if before != after:
+                    raise SourceImageError("The image changed while Prisma was preparing it; retry.")
+                self._record_native_entry(
+                    path,
+                    digest=digest,
+                    width=width,
+                    height=height,
+                    source_format=source_format,
+                )
+                self._write_manifest()
+                return ResolvedSource(
+                    path, path, path.name, source_format, digest, False, width, height
+                )
 
         with self._lock:
             entry = self._entry_for(path)
@@ -574,15 +678,24 @@ class SourceImageService:
 
     def prune_orphans(self) -> None:
         with self._lock:
-            existing = {
+            existing_normalized = {
                 path.name
                 for path in self.images_dir.iterdir()
                 if path.is_file() and path.suffix.lower() in NORMALIZED_EXTENSIONS
             } if self.images_dir.exists() else set()
+            existing_native = {
+                path.name
+                for path in self.images_dir.iterdir()
+                if path.is_file() and path.suffix.lower() in NATIVE_EXTENSIONS
+            } if self.images_dir.exists() else set()
             changed = False
             for name in list(self._manifest["entries"]):
-                if name not in existing:
+                if name not in existing_normalized:
                     self._manifest["entries"].pop(name, None)
+                    changed = True
+            for name in list(self._manifest["native_entries"]):
+                if name not in existing_native:
+                    self._manifest["native_entries"].pop(name, None)
                     changed = True
             changed = self._prune_locked() or changed
             if changed:
@@ -633,7 +746,7 @@ class SourceImageService:
                     elif path.is_dir():
                         shutil.rmtree(path)
                         removed += 1
-            self._manifest = {"schema_version": 1, "entries": {}}
+            self._manifest = {"schema_version": 1, "entries": {}, "native_entries": {}}
             return removed
 
 

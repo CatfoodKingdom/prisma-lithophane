@@ -267,10 +267,10 @@ def test_debug_artifact_flags_default_off_but_api_toggleable(_patched_modules):
     assert sc_enabled.emit_blueprint_printability is True
 
 
-def test_solve_config_carries_active_nozzle_min_line_width(
+def test_solve_config_derives_printability_from_active_nozzle(
     _patched_modules, monkeypatch
 ):
-    """Blank/auto min extrusion width resolves from the printer nozzle profile."""
+    """Client thresholds cannot override nozzle-derived printer printability."""
     import server
     from server import _DEFAULT_CONFIG, _build_solve_config
 
@@ -282,24 +282,24 @@ def test_solve_config_carries_active_nozzle_min_line_width(
             "nozzle": {
                 "size": 0.20,
                 "line_width": 0.22,
-                "min_line_width": 0.16,
                 "max_line_width": 0.25,
-                "min_line_length": 0.45,
+                "min_line_length_multiplier": 3,
             },
         },
     )
     cfg = {
         **_DEFAULT_CONFIG,
         "palette": ["bambu-basic-cyan"],
-        "printability_minimum_extrusion_width_mm": None,
+        "printability_minimum_extrusion_width_mm": 9.0,
+        "printability_minimum_line_length_mm": 9.0,
     }
 
     sc = _build_solve_config(cfg)
 
     assert sc.nozzle_diameter == 0.20
-    assert sc.printer_min_line_width_mm == 0.16
-    assert sc.printability_minimum_extrusion_width_mm == 0.16
-    assert sc.printability_minimum_line_length_mm == 0.45
+    assert sc.printer_min_line_width_mm == 0.20
+    assert sc.printability_minimum_extrusion_width_mm == 0.20
+    assert sc.printability_minimum_line_length_mm == pytest.approx(0.60)
 
 
 def test_active_nozzle_printability_change_invalidates(_patched_modules, monkeypatch):
@@ -313,9 +313,8 @@ def test_active_nozzle_printability_change_invalidates(_patched_modules, monkeyp
         "nozzle": {
             "size": 0.20,
             "line_width": 0.22,
-            "min_line_width": 0.20,
             "max_line_width": 0.25,
-            "min_line_length": 0.40,
+            "min_line_length_multiplier": 2,
         },
     }
     monkeypatch.setattr(server, "get_active_printer", lambda: active)
@@ -324,7 +323,7 @@ def test_active_nozzle_printability_change_invalidates(_patched_modules, monkeyp
 
     active["nozzle"] = {
         **active["nozzle"],
-        "min_line_length": 0.50,
+        "min_line_length_multiplier": 3,
     }
     fp2 = _solve_owned_fingerprint(cfg)
 
