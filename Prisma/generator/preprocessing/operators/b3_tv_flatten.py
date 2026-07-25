@@ -20,6 +20,8 @@ _LOG = logging.getLogger(__name__)
 _AUTOSCALE_BASELINE_MM = 0.40
 _MIN_EFFECTIVE_WEIGHT = 0.005
 _MAX_EFFECTIVE_WEIGHT = 0.30
+MIN_ITERATIONS = 2
+MAX_ITERATIONS = 500
 
 
 def _validate_float(name: str, value: float, lower: float, upper: float) -> float:
@@ -30,6 +32,14 @@ def _validate_float(name: str, value: float, lower: float, upper: float) -> floa
 
 
 def _validate_int(name: str, value: int, lower: int, upper: int) -> int:
+    if isinstance(value, bool) or not isinstance(
+        value, (int, float, np.integer, np.floating)
+    ):
+        raise ValueError(f"{name} must be an integer")
+    if isinstance(value, (float, np.floating)) and (
+        not np.isfinite(value) or not float(value).is_integer()
+    ):
+        raise ValueError(f"{name} must be an integer")
     parsed = int(value)
     if not lower <= parsed <= upper:
         raise ValueError(f"{name}={parsed!r} outside [{lower}, {upper}]")
@@ -121,11 +131,11 @@ class B3TvFlatten(PreprocessingModule):
             label="Max Iterations",
             type="int",
             default=100,
-            min=20,
-            max=500,
+            min=MIN_ITERATIONS,
+            max=MAX_ITERATIONS,
             description=(
-                "Chambolle iteration cap. 100 is typically converged; "
-                "raise for larger weights."
+                "Chambolle iteration cap. Low values may stop well before "
+                "convergence; 100 is the recommended default."
             ),
             order=40,
         ),
@@ -147,7 +157,12 @@ class B3TvFlatten(PreprocessingModule):
             channel_axis,
             self._CHANNEL_AXIS_CHOICES,
         )
-        self.n_iter_max = _validate_int("n_iter_max", n_iter_max, 20, 500)
+        self.n_iter_max = _validate_int(
+            "n_iter_max",
+            n_iter_max,
+            MIN_ITERATIONS,
+            MAX_ITERATIONS,
+        )
 
     def _effective_weight(self, context: PreprocessingContext) -> tuple[float, float]:
         feature_scale_mm = resolve_feature_scale_mm(context)

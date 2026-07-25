@@ -116,3 +116,51 @@ test("Generator CSS classifies every literal color as a token or feature visuali
     });
   }
 });
+
+test("light headers use the blue semantic token without changing dark mode or visualizations", () => {
+  const stylesDir = path.join(appDir, "styles");
+  const tokens = fs.readFileSync(path.join(stylesDir, "tokens.css"), "utf8");
+  assert.match(tokens, /:root\s*{[\s\S]*?--header-bg:\s*#dce3e8;/);
+  assert.match(tokens, /\[data-theme="dark"\]\s*{[\s\S]*?--header-bg:\s*#2c312d;/);
+  const luminance = (hex) => [1, 3, 5]
+    .map((index) => Number.parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map((channel) => (
+      channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4
+    ))
+    .reduce((total, channel, index) => (
+      total + channel * [0.2126, 0.7152, 0.0722][index]
+    ), 0);
+  const headerLuminance = luminance("#dce3e8");
+  const mutedLuminance = luminance("#62625c");
+  const contrast = (headerLuminance + 0.05) / (mutedLuminance + 0.05);
+  assert.ok(contrast >= 4.5, `light header contrast is only ${contrast.toFixed(2)}:1`);
+
+  const consumers = fs.readdirSync(stylesDir)
+    .filter((name) => name.endsWith(".css"))
+    .filter((name) => fs.readFileSync(path.join(stylesDir, name), "utf8").includes("var(--header-bg)"))
+    .sort();
+  assert.deepEqual(consumers, [
+    "export.css",
+    "image.css",
+    "palette.css",
+    "profiles.css",
+    "solve.css",
+  ]);
+});
+
+test("solve history controls and cards reserve stable confirmation geometry", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(appDir, "styles", "solve.css"), "utf8");
+  const controller = fs.readFileSync(
+    path.join(appDir, "features", "solve", "controller.js"),
+    "utf8",
+  );
+
+  assert.equal((html.match(/class="ghost-button xxs solve-history-clear"/g) || []).length, 2);
+  assert.match(css, /\.solve-history-clear\s*{[\s\S]*?width:\s*60px;[\s\S]*?white-space:\s*nowrap;/);
+  assert.match(css, /\.solve-run-delete-btn\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;/);
+  assert.doesNotMatch(css.match(/\.solve-run-card\s*{[\s\S]*?\}/)?.[0] || "", /transition:/);
+  assert.doesNotMatch(controller, /loaded_from_archive|solve-run-loaded-badge/);
+});

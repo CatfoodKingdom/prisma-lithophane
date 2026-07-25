@@ -283,6 +283,179 @@ test("saved-run identity, timestamp, and tiers are stable behavior", async () =>
   assert.match(app.commands.formatSavedRunTimestamp(saved.saved_at), /2026|Jul/);
 });
 
+test("run name validation reserves automatic labels and clears automatic save defaults", async () => {
+  const { app } = await harness();
+  for (const label of ["Run 7", " run 007 ", "rUn 9"]) {
+    assert.match(app.commands.validateWritableRunLabel(label), /reserved for automatic run labels/);
+  }
+  assert.equal(app.commands.validateWritableRunLabel("Run Seven"), "");
+  assert.equal(app.commands.validateWritableRunLabel(""), "Run name cannot be empty.");
+  assert.equal(app.commands.initialSaveRunLabel({ label: "Run 42" }), "");
+  assert.equal(app.commands.initialSaveRunLabel({ label: "Portrait" }), "Portrait");
+});
+
+test("generic numeric module controls clamp the flattening cap to descriptor bounds", async () => {
+  const { app } = await harness();
+  const descriptor = { type: "int", min: 2, max: 500 };
+  assert.deepEqual(app.commands.coerceNumericParamValue(descriptor, "1", 100), {
+    ok: true, value: 2,
+  });
+  assert.deepEqual(app.commands.coerceNumericParamValue(descriptor, "501", 100), {
+    ok: true, value: 500,
+  });
+  assert.deepEqual(app.commands.coerceNumericParamValue(descriptor, "2", 100), {
+    ok: true, value: 2,
+  });
+});
+
+test("saving a run is single-flight and applies the server label authoritatively", async () => {
+  let releaseSave;
+  let saveCalls = 0;
+  const saveResponse = new Promise((resolve) => { releaseSave = resolve; });
+  const button = fakeElement();
+  const { app } = await harness({ api: {
+    saveRun: async () => { saveCalls += 1; return saveResponse; },
+  } });
+  const run = { id: "run-a", label: "Run 1", results: {} };
+  app.state.solve.solveRuns = [run];
+  let solveRenders = 0;
+  app.commands.renderSolveTab = () => { solveRenders += 1; };
+  app.commands.showToast = () => {};
+
+  const first = app.commands.saveSolveRun(run.id, "Portrait", button);
+  const duplicate = await app.commands.saveSolveRun(run.id, "Duplicate", button);
+  assert.equal(duplicate, false);
+  assert.equal(saveCalls, 1);
+  assert.equal(button.disabled, true);
+  assert.equal(button["aria-busy"], "true");
+
+  releaseSave({ save_id: "stable-save-id", label: "Server Portrait" });
+  assert.equal(await first, true);
+  assert.equal(run.label, "Server Portrait");
+  assert.equal(run.save_pending, false);
+  assert.equal(solveRenders, 1);
+});
+
+test("failed or orphaned saves do not mutate unrelated run state", async () => {
+  const button = fakeElement();
+  const { app } = await harness({ api: {
+    saveRun: async () => { throw new Error("save failed"); },
+  } });
+  const run = { id: "run-a", label: "Original", results: {} };
+  app.state.solve.solveRuns = [run];
+  app.commands.showToast = () => {};
+  app.commands.renderSolveTab = () => {};
+  assert.equal(await app.commands.saveSolveRun(run.id, "New name", button), false);
+  assert.equal(run.label, "Original");
+  assert.equal(run.save_pending, false);
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-busy"], undefined);
+
+  let releaseSave;
+  app.api.saveRun = () => new Promise((resolve) => { releaseSave = resolve; });
+  let renderCount = 0;
+  app.commands.renderSolveTab = () => { renderCount += 1; };
+  const orphaned = app.commands.saveSolveRun(run.id, "Orphan", button);
+  app.state.solve.solveRuns = [];
+  releaseSave({ save_id: "save-a", label: "Server Orphan" });
+  assert.equal(await orphaned, true);
+  assert.equal(renderCount, 0);
+});
+
+test("authoritative run labels refresh open lightbox and settings surfaces", async () => {
+  const { app } = await harness();
+  const title = fakeElement();
+  title.textContent = "Run 1";
+  const contour = fakeElement();
+  contour.setAttribute("aria-label", "Run 1 layer contours");
+  const lightboxContent = fakeElement();
+  lightboxContent.querySelector = (selector) => (
+    selector === ".comp-lightbox-runtitle" ? title : null
+  );
+  lightboxContent.querySelectorAll = (selector) => (
+    selector === "[aria-label]" ? [contour] : []
+  );
+  app.state.ui.$ = (selector) => (
+    selector === "#compLightboxContent" ? lightboxContent : null
+  );
+  app.state.solve._solveLightboxState = { runId: "run-a", kind: "solve" };
+  app.commands.refreshOpenSolveRunLabels(
+    { id: "run-a", label: "Server Portrait" },
+    "Run 1",
+  );
+  assert.equal(title.textContent, "Server Portrait");
+  assert.equal(contour["aria-label"], "Server Portrait layer contours");
+
+  const settingsLabel = fakeElement();
+  const settingsToggle = fakeElement();
+  const settingsBody = fakeElement();
+  const settingsPanel = fakeElement();
+  settingsPanel.querySelector = (selector) => ({
+    ".run-settings-run-label": settingsLabel,
+    ".run-settings-advanced-toggle": settingsToggle,
+    ".run-settings-body": settingsBody,
+  })[selector] || null;
+  app.state.solve.solveRuns = [{ id: "run-a", label: "Server Portrait" }];
+  app.state.solve.solveRunSettingsPanelEl = settingsPanel;
+  app.state.solve.solveRunSettingsPanelRunId = "run-a";
+  app.commands.buildReadOnlyRunSettingsHtml = () => "settings";
+  app.commands.renderSolveRunSettingsPanel();
+  assert.equal(settingsPanel["aria-label"], "Settings used by Server Portrait");
+  assert.equal(settingsLabel.textContent, "Server Portrait");
+});
+
+test("solve-history clear controls stay synchronized and disable invalid actions", async () => {
+  const solveClear = fakeElement();
+  const exportClear = fakeElement();
+  const { app } = await harness({ elements: {
+    "#clearSolveHistoryBtn": solveClear,
+    "#exportClearSolveHistoryBtn": exportClear,
+  } });
+  app.state.solve.solveRuns = [{ id: "run-a", results: {} }];
+  app.state.solve.solveStatus = { status: "idle" };
+  app.state.export.exportRunning = false;
+
+  app.commands.syncSolveHistoryClearButtons();
+  assert.equal(solveClear.disabled, false);
+  assert.equal(exportClear.disabled, false);
+  app.commands.armSolveHistoryClearConfirm();
+  assert.equal(solveClear.textContent, "Confirm?");
+  assert.equal(exportClear.textContent, "Confirm?");
+  assert.equal(solveClear["aria-label"], "Confirm clearing all solve runs");
+  app.commands.resetSolveHistoryClearConfirm();
+  assert.equal(solveClear.textContent, "Clear");
+  assert.equal(exportClear.textContent, "Clear");
+
+  app.state.solve.solveRuns = [];
+  app.commands.syncSolveHistoryClearButtons();
+  assert.equal(solveClear.disabled, true);
+  assert.equal(exportClear.disabled, true);
+  assert.equal(solveClear.title, "No solve runs to clear");
+});
+
+test("solve cards expose listbox semantics, omit loaded provenance, and gate Save by completion", async () => {
+  const cards = fakeElement();
+  const { app } = await harness({ elements: { "#solveRunCards": cards } });
+  app.commands.hideSolveRunHoverPreview = () => {};
+  app.commands.bindSolveRunCardAuxiliaryInteractions = () => {};
+  app.commands.formatSolveRunCardRmse = () => "1.2 dE";
+  app.commands.esc = (value) => String(value);
+  app.commands.escAttr = (value) => String(value);
+  app.state.solve.solveRuns = [{
+    id: "run-a", label: "Loaded portrait", loaded_from_archive: true,
+    palette: [], results: null,
+  }];
+
+  app.commands.renderSolveRunSidebar();
+
+  assert.equal(cards.role, "listbox");
+  assert.equal(cards["aria-multiselectable"], "true");
+  assert.match(cards.innerHTML, /role="option"/);
+  assert.match(cards.innerHTML, /aria-selected="false"/);
+  assert.match(cards.innerHTML, /solve-run-save-btn[^>]+disabled/);
+  assert.doesNotMatch(cards.innerHTML, />Loaded<\/span>|solve-run-loaded-badge/);
+});
+
 test("operation progress exposes cancellation only to its owning workflow", async () => {
   const overlay = fakeElement(); const cancel = fakeElement(); const fill = fakeElement();
   const label = fakeElement(); const elapsed = fakeElement();

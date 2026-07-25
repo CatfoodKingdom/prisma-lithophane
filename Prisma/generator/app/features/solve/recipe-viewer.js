@@ -1105,6 +1105,9 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
       const container = app.state.ui.$("#exportRunCards");
       if (!container) return;
       app.commands.hideSolveRunHoverPreview();
+      container.setAttribute("role", "listbox");
+      container.setAttribute("aria-label", "Export run selection");
+      app.commands.syncSolveHistoryClearButtons();
 
       const completed = app.commands.getCompletedExportRuns();
       if (!completed.length) {
@@ -1126,10 +1129,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         const staleBadge = run.cache_unavailable
           ? `<span class="solve-run-stale-badge">Unavailable after restart</span>`
           : "";
-        html += `<div class="solve-run-card ${isSelected ? "is-selected" : ""}" data-export-run-id="${app.commands.esc(run.id)}" tabindex="0">
-          <div class="solve-run-card-header">
-            <span class="solve-run-label">${app.commands.esc(run.label)}${staleBadge}</span>
-            <div class="solve-run-card-actions">
+        html += `<div class="solve-run-card compact-deck-card ${isSelected ? "is-selected" : ""}" data-export-run-id="${app.commands.escAttr(run.id)}" tabindex="0" role="option" aria-selected="${isSelected ? "true" : "false"}">
+          <div class="solve-run-card-header compact-deck-card-header">
+            <span class="solve-run-label compact-deck-card-title" title="${app.commands.escAttr(run.label)}">${app.commands.esc(run.label)}${staleBadge}</span>
+            <div class="solve-run-card-actions compact-deck-card-actions">
               ${app.commands.buildSolveRunDeleteButton(run)}
             </div>
           </div>
@@ -1142,14 +1145,21 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
       }
       container.innerHTML = html;
 
+      const selectExportRun = (el) => {
+        const runId = el.dataset.exportRunId;
+        if (!runId || runId === app.state.export.exportSelectedRunId) return;
+        app.state.export.exportSelectedRunId = runId;
+        app.commands.renderExportTab();
+      };
       container.querySelectorAll(".solve-run-card[data-export-run-id]").forEach((el) => {
         el.addEventListener("click", (e) => {
-          if (e.target.closest(".solve-run-delete-btn")) return;
-          if (e.target.closest(".solve-run-settings-btn")) return;
-          const runId = el.dataset.exportRunId;
-          if (!runId || runId === app.state.export.exportSelectedRunId) return;
-          app.state.export.exportSelectedRunId = runId;
-          app.commands.renderExportTab();
+          if (app.commands.isCardInteractionTarget(e.target)) return;
+          selectExportRun(el);
+        });
+        el.addEventListener("keydown", (e) => {
+          if (!["Enter", " "].includes(e.key) || app.commands.isCardInteractionTarget(e.target)) return;
+          e.preventDefault();
+          selectExportRun(el);
         });
       });
 

@@ -547,6 +547,9 @@ function renderSolveRunSettingsPanel() {
       app.commands.hideSolveRunSettingsPanel();
       return;
     }
+    app.state.solve.solveRunSettingsPanelEl.setAttribute("aria-label", `Settings used by ${run.label}`);
+    const runLabel = app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-run-label");
+    if (runLabel) runLabel.textContent = run.label;
     app.state.solve.solveRunSettingsPanelEl.classList.toggle("show-advanced-settings", app.state.solve.solveRunSettingsAdvancedVisible);
     const toggle = app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-advanced-toggle");
     if (toggle) {

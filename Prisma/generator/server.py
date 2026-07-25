@@ -3161,6 +3161,11 @@ def _normalize_preprocessing_params(raw: Any) -> Dict[str, Dict[str, Any]]:
     if not isinstance(raw, dict):
         raise ValueError("preprocessing_params must be an object keyed by module id")
 
+    descriptors = {
+        descriptor["name"]: descriptor
+        for descriptor in list_all_modules()
+        if descriptor.get("slot") == "preprocessing"
+    }
     normalized: Dict[str, Dict[str, Any]] = {}
     for module_id, params in raw.items():
         if not isinstance(module_id, str):
@@ -3172,7 +3177,51 @@ def _normalize_preprocessing_params(raw: Any) -> Dict[str, Dict[str, Any]]:
             raise ValueError(
                 f"preprocessing_params[{module_id!r}] must be an object"
             )
-        normalized[module_id] = deepcopy(dict(params))
+        normalized_params = deepcopy(dict(params))
+        descriptor_params = descriptors.get(module_id, {}).get("params", {})
+        for param_name, value in normalized_params.items():
+            param = descriptor_params.get(param_name)
+            if param is None:
+                continue
+            param_type = param.get("type")
+            qualified_name = (
+                f"preprocessing_params[{module_id!r}][{param_name!r}]"
+            )
+            if param_type == "int":
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(f"{qualified_name} must be an integer")
+                if isinstance(value, float) and (
+                    not math.isfinite(value) or not value.is_integer()
+                ):
+                    raise ValueError(f"{qualified_name} must be an integer")
+                value = int(value)
+                normalized_params[param_name] = value
+            elif param_type == "float":
+                if (
+                    isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))
+                ):
+                    raise ValueError(f"{qualified_name} must be a finite number")
+            elif param_type == "bool":
+                if not isinstance(value, bool):
+                    raise ValueError(f"{qualified_name} must be a boolean")
+            elif param_type == "choice":
+                choices = param.get("choices") or []
+                if value not in choices:
+                    raise ValueError(
+                        f"{qualified_name} must be one of {choices!r}"
+                    )
+
+            if param.get("min") is not None and value < param["min"]:
+                raise ValueError(
+                    f"{qualified_name} must be at least {param['min']}"
+                )
+            if param.get("max") is not None and value > param["max"]:
+                raise ValueError(
+                    f"{qualified_name} must be at most {param['max']}"
+                )
+        normalized[module_id] = normalized_params
     return normalized
 
 
@@ -6737,13 +6786,38 @@ import auto_run_store
 from run_naming import make_save_id
 
 
+_RESERVED_RUN_LABEL_RE = re.compile(r"^run\s+\d+$", re.IGNORECASE)
+_RESERVED_RUN_LABEL_MESSAGE = (
+    "Names in the form 'Run 7' are reserved for automatic run labels."
+)
+
+
+def _validate_writable_run_label(label: Optional[str]) -> Optional[str]:
+    if label is None:
+        return None
+    if _RESERVED_RUN_LABEL_RE.fullmatch(str(label).strip()):
+        raise ValueError(_RESERVED_RUN_LABEL_MESSAGE)
+    return label
+
+
 class SaveRunPayload(BaseModel):
     card_id: str
     label: Optional[str] = None
 
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_writable_run_label(value)
+
 
 class RenameRunPayload(BaseModel):
     label: str
+
+    @field_validator("label")
+    @classmethod
+    def _validate_label(cls, value: str) -> str:
+        validated = _validate_writable_run_label(value)
+        return "" if validated is None else validated
 
 
 def _cached_solve_or_409(card_id: str) -> tuple[dict, dict]:

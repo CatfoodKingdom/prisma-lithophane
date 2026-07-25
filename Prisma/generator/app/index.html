@@ -19,7 +19,7 @@
       document.documentElement.style.colorScheme = resolved;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=2026-07-17-dark1">
+  <link rel="stylesheet" href="style.css?v=2026-07-24-run-polish">
 </head>
 <body>
   <div class="app-shell">
@@ -932,7 +932,9 @@
               <span class="panel-kicker">Solve History</span>
               <button class="ghost-button xxs" id="savedRunsBtn"
                       title="Browse, load, download, or delete saved runs">Load</button>
-              <button class="ghost-button xxs" id="clearSolveHistoryBtn" title="Clear all solve runs">Clear</button>
+              <button class="ghost-button xxs solve-history-clear" id="clearSolveHistoryBtn"
+                      title="No solve runs to clear" aria-label="No solve runs to clear"
+                      aria-disabled="true" disabled>Clear</button>
             </div>
             <div class="solve-run-cards" id="solveRunCards">
               <p class="muted-line" id="solveRunEmpty">No solves yet</p>
@@ -952,7 +954,9 @@
               </div>
               <button class="ghost-button xxs" id="exportSavedRunsBtn"
                       title="Browse, load, download, or delete saved runs">Load</button>
-              <button class="ghost-button xxs" id="exportClearSolveHistoryBtn" title="Clear all solve runs">Clear</button>
+              <button class="ghost-button xxs solve-history-clear" id="exportClearSolveHistoryBtn"
+                      title="No solve runs to clear" aria-label="No solve runs to clear"
+                      aria-disabled="true" disabled>Clear</button>
             </div>
             <div class="solve-run-cards" id="exportRunCards">
               <p class="muted-line" id="exportRunEmpty">No completed solves yet</p>
@@ -1458,7 +1462,9 @@
       <div class="rename-saved-run-body surface-body">
         <div class="rename-saved-run-field">
           <label class="rename-saved-run-label" for="renameSavedRunDisplay">Display name</label>
-          <input type="text" class="control-input rename-saved-run-input" id="renameSavedRunDisplay">
+          <input type="text" class="control-input rename-saved-run-input" id="renameSavedRunDisplay"
+                 aria-describedby="renameSavedRunValidation">
+          <p class="rename-saved-run-validation" id="renameSavedRunValidation" role="alert" hidden></p>
         </div>
         <div class="rename-saved-run-field">
           <label class="rename-saved-run-label" for="renameSavedRunDiskName">On-disk name</label>
@@ -1506,6 +1512,6 @@
     </button>
   </div>
 
-  <script type="module" src="bootstrap.js?v=2026-07-17-dark1"></script>
+  <script type="module" src="bootstrap.js?v=2026-07-24-run-polish"></script>
 </body>
 </html>

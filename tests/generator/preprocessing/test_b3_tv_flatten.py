@@ -240,8 +240,30 @@ def test_descriptor_matches_contract():
 
     assert op.params["n_iter_max"].type == "int"
     assert op.params["n_iter_max"].default == 100
-    assert op.params["n_iter_max"].min == 20
+    assert op.params["n_iter_max"].min == 2
     assert op.params["n_iter_max"].max == 500
+
+
+def test_iteration_two_is_first_effective_supported_cap():
+    rng = np.random.default_rng(101)
+    image = rng.random((24, 24, 3), dtype=np.float32)
+
+    result = B3TvFlatten(n_iter_max=2).apply(
+        image,
+        context=_make_context(),
+        progress=None,
+    )
+
+    assert np.isfinite(result.image).all()
+    assert not np.array_equal(result.image, image)
+    assert result.metrics["n_iter_max"] == 2
+    assert B3TvFlatten(n_iter_max=2.0).n_iter_max == 2
+
+
+@pytest.mark.parametrize("value", [1, 501, 2.5, "2", True])
+def test_constructor_rejects_invalid_iteration_caps(value):
+    with pytest.raises(ValueError):
+        B3TvFlatten(n_iter_max=value)
 
 
 def test_flat_region_becomes_piecewise_constant():

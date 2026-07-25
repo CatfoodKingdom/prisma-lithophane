@@ -420,6 +420,27 @@
   color: var(--error-ink);
   border-color: color-mix(in srgb, var(--error-ink) 35%, var(--line));
 }
+.deck-header .panel-kicker,
+.deck-header .export-panel-heading {
+  min-width: 0;
+  overflow: hidden;
+}
+.deck-header .export-panel-heading {
+  flex: 1 1 auto;
+}
+.deck-header .panel-kicker,
+.deck-header .export-panel-heading h3 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.solve-history-clear {
+  flex: 0 0 60px;
+  width: 60px;
+  min-width: 60px;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
 
 /* Saved-run rename dialog — sized so both labeled fields fit without clipping. */
 .rename-saved-run-modal { max-width: 420px; }
@@ -447,6 +468,16 @@
   margin: 0;
   font-size: 11px;
   color: var(--muted);
+}
+.rename-saved-run-validation {
+  min-height: 14px;
+  margin: 0;
+  color: var(--error-ink);
+  font-size: 11px;
+  line-height: 1.25;
+}
+.rename-saved-run-input[aria-invalid="true"] {
+  border-color: var(--error-ink);
 }
 .rename-saved-run-actions {
   display: flex;
@@ -600,37 +631,67 @@
   padding: 4px 0;
 }
 .solve-run-card {
-  padding: 6px 8px;
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 2px 5px 3px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 6px;
   margin-bottom: 4px;
   cursor: pointer;
   background: var(--panel);
-  transition: background 0.1s, border-color 0.1s, box-shadow 0.1s;
+  overflow: hidden;
 }
-.solve-run-card:hover { background: var(--control-hover); }
+.solve-run-card:hover {
+  background: var(--panel);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
 .solve-run-card.is-selected {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .solve-run-card-header {
   display: flex;
+  min-width: 0;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: 3px;
+  height: 22px;
+  min-height: 22px;
+  margin: -2px -5px 0;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 5px 5px 0 0;
+  background: color-mix(in srgb, var(--selected) 40%, var(--panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+}
+.solve-run-card.is-selected .solve-run-card-header {
+  background: color-mix(in srgb, var(--accent) 12%, var(--selected));
 }
 .solve-run-card-actions {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  flex: 0 0 auto;
+  opacity: 1;
+}
+.solve-run-save-btn {
+  min-width: 34px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0 7px;
+  box-sizing: border-box;
+  font-size: 9px;
+  line-height: 1;
 }
 .solve-run-delete-btn {
   width: 48px;
+  min-width: 48px;
   height: 18px;
+  min-height: 18px;
   padding: 0;
-  border: none;
-  background: transparent;
   color: var(--muted);
   font-size: 10px;
   line-height: 1;
@@ -665,12 +726,15 @@
   color: var(--muted);
 }
 .solve-run-label {
+  display: block;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 600;
+  line-height: 1.05;
 }
 .solve-run-card-meta {
   display: flex;
@@ -697,21 +761,6 @@
   border: none;
   padding: 0;
   cursor: pointer;
-}
-.solve-run-loaded-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 5px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--line));
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1.2;
-  text-transform: uppercase;
-  vertical-align: middle;
 }
 .solve-run-stale-badge {
   display: inline-flex;

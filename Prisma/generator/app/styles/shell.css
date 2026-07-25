@@ -124,7 +124,7 @@
   font-size: 11px;
   color: var(--muted);
 }
-.rail-deck-card {
+:is(.rail-deck-card, .compact-deck-card) {
     display: grid;
     flex: 0 0 auto;
     min-width: 0;
@@ -134,20 +134,19 @@
     border-radius: 6px;
     background: var(--panel);
     cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
     overflow: hidden;
 }
-.rail-deck-card:hover {
+:is(.rail-deck-card, .compact-deck-card):hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
   box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent);
 }
-.rail-deck-card.is-active {
+:is(.rail-deck-card.is-active, .compact-deck-card.is-selected) {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent),
     0 3px 10px color-mix(in srgb, var(--accent) 10%, transparent);
 }
-.rail-deck-card-header {
+:is(.rail-deck-card-header, .compact-deck-card-header) {
     display: flex;
     min-width: 0;
     align-items: center;
@@ -162,7 +161,7 @@
     background: color-mix(in srgb, var(--selected) 40%, var(--panel));
     border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
   }
-  .rail-deck-card.is-active .rail-deck-card-header {
+  :is(.rail-deck-card.is-active, .compact-deck-card.is-selected) :is(.rail-deck-card-header, .compact-deck-card-header) {
     background: color-mix(in srgb, var(--accent) 12%, var(--selected));
   }
   .rail-deck-card-titlebar {
@@ -171,7 +170,7 @@
     min-width: 0;
     flex: 1;
   }
-.rail-deck-card-title {
+:is(.rail-deck-card-title, .compact-deck-card-title) {
     display: block;
     flex: 1 1 auto;
     min-width: 0;
@@ -183,17 +182,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.rail-deck-card-actions {
+:is(.rail-deck-card-actions, .compact-deck-card-actions) {
     display: flex;
     align-items: center;
     gap: 2px;
     opacity: 0.82;
-    transition: opacity 0.15s;
     flex-shrink: 0;
   }
 .rail-deck-save,
 .rail-deck-tag,
-.rail-deck-remove {
+.rail-deck-remove,
+.compact-deck-card-save,
+.compact-deck-card-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -210,6 +210,8 @@
 }
 .rail-deck-card:hover .rail-deck-card-actions,
 .rail-deck-card.is-active .rail-deck-card-actions,
+.compact-deck-card:hover .compact-deck-card-actions,
+.compact-deck-card.is-selected .compact-deck-card-actions,
 .rail-deck-remove.confirm-pending {
   opacity: 1;
 }
