@@ -588,6 +588,122 @@ def test_saved_run_load_and_export_initiation_workflow(page: Page):
     assert page.locator("#exportFileList").get_by_text("browser.3mf").is_visible()
 
 
+def test_private_saved_run_source_stays_out_of_library_and_survives_reload(page: Page):
+    source_image = {
+        "filename": "archived-portrait.png",
+        "width": 4,
+        "height": 4,
+        "size_kb": 0.1,
+        "thumbnail_url": (
+            "/api/images/preview/archived-portrait.png"
+            "?image_source_ref=loaded-run%3Abrowser-private-card"
+        ),
+        "source_ref": "loaded-run:browser-private-card",
+        "temporary": True,
+    }
+    loaded_config = {
+        "image_path": "archived-portrait.png",
+        "image_source_ref": "loaded-run:browser-private-card",
+        "palette": ["bambu-basic-cyan"],
+        "white_base": "panchroma-matte-cotton-white",
+        "white_cap": "panchroma-matte-cotton-white",
+        "base_filament": "panchroma-matte-cotton-white",
+        "cap_filament": "panchroma-matte-cotton-white",
+        "layer_height": 0.08,
+        "d_wb": 0.2,
+        "t_max": 2.0,
+        "image_sample_pitch_mm": 0.4,
+        "solver_fine_pitch_mm": 0.4,
+    }
+    config_writes: list[dict] = []
+
+    page.route("**/api/run-cache/files/**", _fulfill_png)
+    page.route("**/api/images/preview/**", _fulfill_png)
+    page.route(
+        "**/api/images",
+        lambda route: route.fulfill(
+            json=[{
+                "filename": "library-only.png",
+                "width": 4,
+                "height": 4,
+                "size_kb": 0.1,
+            }]
+        ),
+    )
+    page.route(
+        "**/api/runs/saved",
+        lambda route: route.fulfill(
+            json=[{
+                "save_id": "browser-private-save",
+                "tier": "saved",
+                "label": "Private source run",
+                "source_image_name": "archived-portrait.png",
+                "saved_at": "2026-07-25T12:00:00Z",
+            }]
+        ),
+    )
+    page.route("**/api/runs/saved/*/preview", _fulfill_png)
+    page.route(
+        "**/api/runs/load",
+        lambda route: route.fulfill(
+            json={
+                "card_id": "browser-private-card",
+                "label": "Private source run",
+                "palette": ["bambu-basic-cyan"],
+                "config": loaded_config,
+                "source_image": source_image,
+                "result": _solve_result("browser-private-card"),
+            }
+        ),
+    )
+
+    def update_config(route: Route) -> None:
+        payload = route.request.post_data_json
+        config_writes.append(payload)
+        route.fulfill(json={"config": payload})
+
+    page.route("**/api/session/config", update_config)
+    page.locator('#tabSwitch .mode-button[data-tab="solve"]').click()
+    page.locator("#savedRunsBtn").click()
+    page.locator(".saved-run-row").wait_for(state="visible")
+    page.locator("#savedRunLoadBtn").click()
+    page.locator('.solve-run-card[data-run-id="browser-private-card"]').wait_for(
+        state="visible"
+    )
+
+    page.locator('#tabSwitch .mode-button[data-tab="image"]').click()
+    notice = page.locator("#savedRunSourceNotice")
+    notice.wait_for(state="visible")
+    assert page.locator("#savedRunSourceNoticeName").text_content() == "archived-portrait.png"
+    assert page.locator("#imageGrid .image-card").count() == 1
+    assert page.locator('#imageGrid [data-filename^="loaded-"]').count() == 0
+    assert config_writes[-1]["image_source_ref"] == "loaded-run:browser-private-card"
+
+    page.route(
+        "**/api/session",
+        lambda route: route.fulfill(
+            json={
+                "config": loaded_config,
+                "source_image": source_image,
+                "solve": {"status": "idle", "elapsed_s": 0, "result": None},
+            }
+        ),
+    )
+    page.reload(wait_until="domcontentloaded")
+    page.locator("#dataSourceBadge.connected").wait_for(state="visible")
+    _close_recovery_modal(page)
+    page.locator("#savedRunSourceNotice").wait_for(state="visible")
+    assert page.locator("#imageGrid .image-card").count() == 1
+
+    page.locator('#imageGrid [data-filename="library-only.png"]').click()
+    page.locator("#savedRunSourceNotice").wait_for(state="hidden")
+    page.wait_for_function(
+        "() => document.querySelector('[data-filename=\"library-only.png\"]')"
+        "?.classList.contains('is-selected')"
+    )
+    assert config_writes[-1]["image_source_ref"] is None
+
+
 def test_solve_view_controls_and_recipe_lightbox_are_operable(page: Page):
     _load_saved_run(page, recipe=True)
     view_bar = page.locator("#solveViewBar")
@@ -657,6 +773,37 @@ def test_management_surfaces_have_accessible_headers_and_clean_close_paths(page:
     assert page.locator("#printerConfigClose").get_attribute("aria-label") == (
         "Close printer configuration"
     )
+    page.locator("#printerConfigClose").click()
+    printer_page.wait_for(state="hidden")
+
+
+def test_printer_minimum_length_is_whole_nozzle_derived_and_blocks_invalid_exit(
+    page: Page,
+):
+    page.locator("#printerConfigBtn").click()
+    printer_page = page.locator("#printerConfigPage")
+    printer_page.wait_for(state="visible")
+
+    table = page.locator("#pcNozzleTable")
+    assert "Min W" not in table.locator("thead").inner_text()
+    multiplier = table.locator(".nz-min-ll-mult").first
+    nozzle = table.locator(".nz-size").first
+    derived = table.locator(".nz-min-ll-derived").first
+    assert multiplier.get_attribute("min") == "2"
+    assert multiplier.get_attribute("max") == "10"
+    assert multiplier.get_attribute("step") == "1"
+    assert "pcNozzleLengthHelp" in (multiplier.get_attribute("aria-describedby") or "")
+
+    nozzle.fill("0.2")
+    multiplier.fill("3")
+    assert derived.text_content() == "× nozzle = 0.6 mm"
+
+    multiplier.fill("1")
+    page.locator("#printerConfigClose").click()
+    assert printer_page.is_visible()
+    assert table.locator("tr.is-invalid").count() == 1
+
+    multiplier.fill("2")
     page.locator("#printerConfigClose").click()
     printer_page.wait_for(state="hidden")
 

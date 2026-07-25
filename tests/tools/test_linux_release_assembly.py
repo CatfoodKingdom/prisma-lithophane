@@ -158,6 +158,32 @@ def test_private_runtime_data_is_rejected_before_promotion(
         )
 
 
+def test_obsolete_bundled_printer_profile_aborts_assembly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, library = _sources(tmp_path, product="generator")
+    (app / "_internal" / "Prisma" / "generator" / "app" / "printers.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release, "validate_standard_model_library", _library_report)
+
+    with pytest.raises(
+        release.LinuxReleaseError,
+        match="obsolete bundled printer profile",
+    ):
+        release.assemble_linux_release(
+            product="generator",
+            pyinstaller_root=app,
+            model_library_root=library,
+            third_party_licenses_root=make_license_bundle(tmp_path / "licenses"),
+            destination=tmp_path / "release",
+            release_version="test",
+            app_version="0.1.0",
+        )
+
+
 def test_validator_detects_changed_executable_mode(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

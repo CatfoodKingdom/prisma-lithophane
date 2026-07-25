@@ -47,7 +47,9 @@ export function installFeaturesApplication(app) {
           // Deck is ephemeral — don't restore stale server palette.
           // Saved palettes can be loaded via the Load button.
           if (session.config.image_path) {
-            app.state.image.selectedImage = app.state.image.availableImages.find((i) => i.filename === session.config.image_path);
+            app.state.image.selectedImage = session.config.image_source_ref && session.source_image
+              ? session.source_image
+              : app.state.image.availableImages.find((i) => i.filename === session.config.image_path);
             if (!app.state.image.selectedImage) {
               app.state.image.pendingSelectedFilename = session.config.image_path;
             }

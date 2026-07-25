@@ -190,6 +190,13 @@ _SYSTEM_SETTINGS_PROFILE_NAME = "Basic"
 _SETTINGS_PROFILE_STATE_NAME = "state.json"
 _SETTINGS_PROFILE_FORBIDDEN_NAME_CHARS = set('<>:"/\\|?*')
 
+_MIN_LINE_LENGTH_MULTIPLIER = 2
+_MAX_LINE_LENGTH_MULTIPLIER = 10
+_PRINTABILITY_MM_PRECISION = 6
+_OBSOLETE_NOZZLE_PRINTABILITY_FIELDS = frozenset(
+    {"min_line_width", "min_line_length"}
+)
+
 _DEFAULT_PRINTERS = {
     "printers": [
         {
@@ -204,18 +211,16 @@ _DEFAULT_PRINTERS = {
                     "min_layer_height": 0.05,
                     "max_layer_height": 0.15,
                     "line_width": 0.22,
-                    "min_line_width": 0.16,
                     "max_line_width": 0.25,
-                    "min_line_length": 0.40,
+                    "min_line_length_multiplier": 2,
                 },
                 {
                     "size": 0.4,
                     "min_layer_height": 0.08,
                     "max_layer_height": 0.32,
                     "line_width": 0.42,
-                    "min_line_width": 0.32,
                     "max_line_width": 0.5,
-                    "min_line_length": 0.50,
+                    "min_line_length_multiplier": 2,
                 },
             ],
         }
@@ -228,20 +233,108 @@ _DEFAULT_PRINTERS = {
 def _default_line_widths(nozzle_size: float) -> dict[str, float]:
     size = round(float(nozzle_size), 4)
     if math.isclose(size, 0.2, abs_tol=1e-6):
-        return {"line_width": 0.22, "min_line_width": 0.16, "max_line_width": 0.25}
+        return {"line_width": 0.22, "max_line_width": 0.25}
     if math.isclose(size, 0.4, abs_tol=1e-6):
-        return {"line_width": 0.42, "min_line_width": 0.32, "max_line_width": 0.5}
+        return {"line_width": 0.42, "max_line_width": 0.5}
     return {
         "line_width": round(size * 1.05, 2),
-        "min_line_width": round(size * 0.8, 2),
         "max_line_width": round(size * 1.25, 2),
     }
 
 
-def _default_printability_lengths(min_line_width: float) -> dict[str, float]:
-    minimum = max(0.40, float(min_line_width) + 0.10)
+def _printer_profile_error(
+    *,
+    message: str,
+    printer_id: str,
+    nozzle_size: Any,
+    field: str | None = None,
+    obsolete_fields: list[str] | None = None,
+) -> HTTPException:
+    detail: dict[str, Any] = {
+        "error": "invalid_printer_profile",
+        "message": message,
+        "printer": printer_id,
+        "nozzle_size": nozzle_size,
+        "path": str(_PRINTERS_PATH),
+    }
+    if field is not None:
+        detail["field"] = field
+    if obsolete_fields:
+        detail["obsolete_fields"] = obsolete_fields
+    return HTTPException(422, detail)
+
+
+def _resolve_nozzle_printability(
+    profile: Mapping[str, Any],
+    *,
+    printer_id: str = "unknown",
+    nozzle_index: int | None = None,
+) -> dict[str, float | int]:
+    raw_size = profile.get("size")
+    nozzle_label = raw_size if raw_size is not None else f"#{nozzle_index or 0}"
+    if (
+        isinstance(raw_size, bool)
+        or not isinstance(raw_size, (int, float))
+        or not math.isfinite(float(raw_size))
+        or float(raw_size) <= 0
+    ):
+        raise _printer_profile_error(
+            message="Nozzle size must be a positive finite number.",
+            printer_id=printer_id,
+            nozzle_size=nozzle_label,
+            field="size",
+        )
+    obsolete = sorted(_OBSOLETE_NOZZLE_PRINTABILITY_FIELDS.intersection(profile))
+    if obsolete:
+        raise _printer_profile_error(
+            message=(
+                "Printer profile uses obsolete printability fields; minimum "
+                "width is derived from nozzle size and minimum length is stored "
+                "as min_line_length_multiplier."
+            ),
+            printer_id=printer_id,
+            nozzle_size=float(raw_size),
+            obsolete_fields=obsolete,
+        )
+    raw_multiplier = profile.get("min_line_length_multiplier")
+    if (
+        isinstance(raw_multiplier, bool)
+        or not isinstance(raw_multiplier, (int, float))
+        or not math.isfinite(float(raw_multiplier))
+        or not float(raw_multiplier).is_integer()
+    ):
+        raise _printer_profile_error(
+            message=(
+                "Minimum line length multiplier must be a whole number from "
+                f"{_MIN_LINE_LENGTH_MULTIPLIER} through "
+                f"{_MAX_LINE_LENGTH_MULTIPLIER}."
+            ),
+            printer_id=printer_id,
+            nozzle_size=float(raw_size),
+            field="min_line_length_multiplier",
+        )
+    multiplier = int(raw_multiplier)
+    if not _MIN_LINE_LENGTH_MULTIPLIER <= multiplier <= _MAX_LINE_LENGTH_MULTIPLIER:
+        raise _printer_profile_error(
+            message=(
+                "Minimum line length multiplier must be from "
+                f"{_MIN_LINE_LENGTH_MULTIPLIER} through "
+                f"{_MAX_LINE_LENGTH_MULTIPLIER}."
+            ),
+            printer_id=printer_id,
+            nozzle_size=float(raw_size),
+            field="min_line_length_multiplier",
+        )
+    size = round(float(raw_size), _PRINTABILITY_MM_PRECISION)
+    minimum_line = round(size * multiplier, _PRINTABILITY_MM_PRECISION)
     return {
-        "min_line_length": round(minimum, 2),
+        "minimum_extrusion_width_mm": size,
+        "minimum_line_length_multiplier": multiplier,
+        "minimum_line_length_mm": minimum_line,
+        "minimum_component_area_mm2": round(
+            size * minimum_line,
+            _PRINTABILITY_MM_PRECISION,
+        ),
     }
 
 
@@ -256,26 +349,33 @@ def _find_nozzle_profiles_with_retired_preferred_length(data: dict) -> list[str]
     return hits
 
 
-def _normalize_nozzle_profile(profile: dict) -> dict:
+def _normalize_nozzle_profile(
+    profile: dict,
+    *,
+    printer_id: str = "unknown",
+    nozzle_index: int | None = None,
+) -> dict:
     normalized = dict(profile)
     normalized.pop("preferred_line_length", None)
-    size = float(normalized.get("size") or 0.4)
-    defaults = _default_line_widths(size)
-    min_line_width = float(normalized.get("min_line_width") or defaults["min_line_width"])
-    max_line_width = float(normalized.get("max_line_width") or defaults["max_line_width"])
-    if min_line_width > max_line_width:
-        min_line_width, max_line_width = max_line_width, min_line_width
-    nominal = float(normalized.get("line_width") or defaults["line_width"])
-    nominal = min(max(nominal, min_line_width), max_line_width)
-    length_defaults = _default_printability_lengths(min_line_width)
-    min_line_length = float(
-        normalized.get("min_line_length") or length_defaults["min_line_length"]
+    printability = _resolve_nozzle_printability(
+        normalized,
+        printer_id=printer_id,
+        nozzle_index=nozzle_index,
     )
+    size = float(printability["minimum_extrusion_width_mm"])
+    defaults = _default_line_widths(size)
+    max_line_width = max(
+        size,
+        float(normalized.get("max_line_width") or defaults["max_line_width"]),
+    )
+    nominal = float(normalized.get("line_width") or defaults["line_width"])
+    nominal = min(max(nominal, size), max_line_width)
     normalized["size"] = size
     normalized["line_width"] = nominal
-    normalized["min_line_width"] = min_line_width
     normalized["max_line_width"] = max_line_width
-    normalized["min_line_length"] = min_line_length
+    normalized["min_line_length_multiplier"] = int(
+        printability["minimum_line_length_multiplier"]
+    )
     return normalized
 
 
@@ -304,14 +404,46 @@ def _normalize_printers_data(data: dict, *, retired_policy: str = "warn_drop") -
             raise ValueError(f"Unknown printer retired-field policy {retired_policy!r}")
     normalized = dict(data)
     printers = []
-    for printer in data.get("printers", []):
+    for printer_index, printer in enumerate(data.get("printers", [])):
         normalized_printer = dict(printer)
+        printer_id = str(printer.get("id") or f"#{printer_index}")
         normalized_printer["nozzle_profiles"] = [
-            _normalize_nozzle_profile(profile)
-            for profile in printer.get("nozzle_profiles", [])
+            _normalize_nozzle_profile(
+                profile,
+                printer_id=printer_id,
+                nozzle_index=nozzle_index,
+            )
+            for nozzle_index, profile in enumerate(printer.get("nozzle_profiles", []))
         ]
         printers.append(normalized_printer)
     normalized["printers"] = printers
+    active_printer = next(
+        (
+            printer
+            for printer in printers
+            if printer.get("id") == data.get("active_printer_id")
+        ),
+        printers[0] if printers else None,
+    )
+    normalized["active_printer_id"] = (
+        active_printer.get("id") if active_printer is not None else None
+    )
+    nozzle_profiles = (
+        active_printer.get("nozzle_profiles", [])
+        if active_printer is not None
+        else []
+    )
+    active_nozzle = next(
+        (
+            nozzle
+            for nozzle in nozzle_profiles
+            if nozzle.get("size") == data.get("active_nozzle_size")
+        ),
+        nozzle_profiles[0] if nozzle_profiles else None,
+    )
+    normalized["active_nozzle_size"] = (
+        active_nozzle.get("size") if active_nozzle is not None else None
+    )
     return normalized
 
 
@@ -339,19 +471,48 @@ def _save_printers(data: dict) -> None:
 
 
 def _resolve_active_printer(data: dict) -> dict:
-    """Return {printer: {...}, nozzle: {...}} for the active selection."""
+    """Return the active printer, nozzle profile, and resolved printability."""
     data = _normalize_printers_data(data)
     printers = data.get("printers", [])
     active_id = data.get("active_printer_id")
     printer = next((p for p in printers if p["id"] == active_id), printers[0] if printers else None)
     if not printer:
-        return {"printer": None, "nozzle": None}
+        return {"printer": None, "nozzle": None, "printability": None}
     active_nozzle_size = data.get("active_nozzle_size")
     nozzle = next(
         (n for n in printer.get("nozzle_profiles", []) if n["size"] == active_nozzle_size),
         printer["nozzle_profiles"][0] if printer.get("nozzle_profiles") else None,
     )
-    return {"printer": printer, "nozzle": nozzle}
+    printability = (
+        _resolve_nozzle_printability(nozzle, printer_id=str(printer["id"]))
+        if nozzle is not None
+        else None
+    )
+    return {"printer": printer, "nozzle": nozzle, "printability": printability}
+
+
+def _with_active_printer_printability(
+    cfg: Mapping[str, Any],
+    *,
+    active: Mapping[str, Any] | None = None,
+) -> dict:
+    """Overlay backend-authoritative active-printer thresholds on config."""
+    resolved_active = (
+        dict(active)
+        if active is not None
+        else _resolve_active_printer(_load_printers())
+    )
+    printability = resolved_active.get("printability")
+    if not isinstance(printability, Mapping):
+        return dict(cfg)
+    resolved = dict(cfg)
+    resolved["printability_minimum_extrusion_width_mm"] = printability[
+        "minimum_extrusion_width_mm"
+    ]
+    resolved["printability_minimum_line_length_mm"] = printability[
+        "minimum_line_length_mm"
+    ]
+    return resolved
 
 
 def _load_profile_sandbox(filament_id: str) -> dict:
@@ -442,6 +603,9 @@ def _require_model_library() -> None:
 
 _DEFAULT_CONFIG: Dict[str, Any] = {
     "image_path": None,
+    # Runtime-only opaque reference for a source restored from a saved run.
+    # Persisted archives and settings profiles must never carry this value.
+    "image_source_ref": None,
     "palette": [],
     "base_filament": "bambu-tough-white",
     "cap_filament": "__same__",
@@ -627,6 +791,7 @@ class ConfigPayload(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     image_path: Optional[str] = None
+    image_source_ref: Optional[str] = None
     palette: List[str] = Field(default_factory=list)
     base_filament: str = "bambu-tough-white"
     cap_filament: str = "__same__"
@@ -753,6 +918,16 @@ class ConfigPayload(BaseModel):
     def _normalize_cap_mode_field(cls, value: Any) -> str:
         return _normalize_cap_mode(value)
 
+    @field_validator("image_source_ref", mode="before")
+    @classmethod
+    def _validate_image_source_ref(cls, value: Any) -> Optional[str]:
+        if value is None or str(value).strip() == "":
+            return None
+        canonical = str(value).strip()
+        if not re.fullmatch(r"loaded-run:[a-zA-Z0-9_-]+", canonical):
+            raise ValueError("image_source_ref must be a valid loaded-run reference")
+        return canonical
+
     @field_validator("detail_cap_enabled")
     @classmethod
     def _validate_detail_cap_enabled(cls, value: bool) -> bool:
@@ -868,6 +1043,26 @@ def _resolve_run_source_image(
     return service.resolve(image_path.name, prepare=prepare)
 
 
+def _source_provenance_for_config(
+    cfg: Mapping[str, Any],
+    resolved_source: ResolvedSource,
+) -> dict:
+    provenance = resolved_source.provenance()
+    loaded_card_id = _loaded_source_card_id(cfg.get("image_source_ref"))
+    if loaded_card_id is None:
+        return provenance
+    record = _loaded_source_record(loaded_card_id)
+    archived = record.get("source_asset")
+    if isinstance(archived, dict):
+        provenance.update(deepcopy(archived))
+    provenance["original_source_name"] = str(
+        record.get("display_name") or cfg.get("image_path") or resolved_source.display_name
+    )
+    provenance["normalized"] = bool(record.get("normalized", provenance.get("normalized")))
+    provenance.pop("snapshot_name", None)
+    return provenance
+
+
 def _load_run_source_image(
     image_path: Path,
     cfg: dict,
@@ -906,6 +1101,22 @@ def _drop_phantom_config_fields(cfg: Optional[dict]) -> dict:
     for key in _PHANTOM_CONFIG_FIELDS:
         resolved.pop(key, None)
     return resolved
+
+
+def _strip_runtime_source_refs(value: Any) -> Any:
+    """Remove loaded-run source references from durable JSON carriers."""
+
+    if isinstance(value, dict):
+        return {
+            key: _strip_runtime_source_refs(item)
+            for key, item in value.items()
+            if key != "image_source_ref"
+        }
+    if isinstance(value, list):
+        return [_strip_runtime_source_refs(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_runtime_source_refs(item) for item in value)
+    return deepcopy(value)
 
 
 def _sanitize_recipe_snapshot_phantom_fields(snapshot: Any) -> Any:
@@ -1135,16 +1346,26 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
     _require_model_library()
     cfg = _apply_luminance_mode_preset(cfg, reset_standard=True)
     cfg = _force_mandatory_product_settings(cfg)
-    # Derive nozzle diameter from active printer config
+    # Derive printability exclusively from the active printer. Session/client
+    # copies of the resolved millimeter fields are provenance only and never
+    # override this authority.
     active = get_active_printer()
     nozzle_size = 0.20  # fallback
-    printer_min_line_width = None
-    printer_min_line_length = None
+    printer_min_line_width = 0.20
+    printer_min_line_length = 0.40
     if active.get("nozzle") and active["nozzle"].get("size"):
         nozzle = active["nozzle"]
-        nozzle_size = nozzle["size"]
-        printer_min_line_width = nozzle.get("min_line_width")
-        printer_min_line_length = nozzle.get("min_line_length")
+        printability = active.get("printability") or _resolve_nozzle_printability(
+            nozzle,
+            printer_id=str((active.get("printer") or {}).get("id") or "unknown"),
+        )
+        nozzle_size = float(nozzle["size"])
+        printer_min_line_width = float(
+            printability["minimum_extrusion_width_mm"]
+        )
+        printer_min_line_length = float(
+            printability["minimum_line_length_mm"]
+        )
     # Product printability is mandatory; older sessions/profiles cannot
     # silently disable or partially reconfigure enforcement.
     # Blueprint printability diagnostics stay on for normal solves.  Heavier
@@ -2015,6 +2236,82 @@ def _validate_card_id(card_id: str) -> str:
     return card_id
 
 
+_LOADED_SOURCE_REF_PREFIX = "loaded-run:"
+_LOADED_SOURCE_PRIVATE_DIR = "_loaded_source"
+
+
+def _loaded_source_ref(card_id: str) -> str:
+    return f"{_LOADED_SOURCE_REF_PREFIX}{_validate_card_id(card_id)}"
+
+
+def _loaded_source_card_id(source_ref: object) -> str | None:
+    if source_ref is None or str(source_ref).strip() == "":
+        return None
+    value = str(source_ref).strip()
+    if not value.startswith(_LOADED_SOURCE_REF_PREFIX):
+        raise HTTPException(400, "Invalid image_source_ref")
+    card_id = value[len(_LOADED_SOURCE_REF_PREFIX):]
+    if not card_id:
+        raise HTTPException(400, "Invalid image_source_ref")
+    return _validate_card_id(card_id)
+
+
+def _loaded_source_record(card_id: str) -> dict:
+    cached = session.get("solve_cache", {}).get(_validate_card_id(card_id))
+    record = cached.get("solve", {}).get("_loaded_source") if isinstance(cached, dict) else None
+    if not isinstance(record, dict):
+        raise HTTPException(404, "Loaded run source is no longer available; load the saved run again")
+    relative_path = str(record.get("relative_path") or "")
+    rel = Path(relative_path)
+    if (
+        not relative_path
+        or rel.is_absolute()
+        or ".." in rel.parts
+        or not rel.parts
+        or rel.parts[0] != _LOADED_SOURCE_PRIVATE_DIR
+    ):
+        raise HTTPException(500, "Loaded run source metadata is invalid")
+    run_dir = data_paths.RUN_CACHE_DIR / card_id
+    source_path = (run_dir / rel).resolve()
+    if not source_path.is_relative_to(run_dir.resolve()):
+        raise HTTPException(500, "Loaded run source metadata escapes its cache directory")
+    if not source_path.is_file():
+        raise HTTPException(404, "Loaded run source is no longer available; load the saved run again")
+    return {**record, "path": source_path}
+
+
+def _resolve_image_source_path(image_path: object, image_source_ref: object = None) -> Path:
+    loaded_card_id = _loaded_source_card_id(image_source_ref)
+    if loaded_card_id is not None:
+        record = _loaded_source_record(loaded_card_id)
+        filename = str(image_path or "")
+        expected = Path(str(record.get("display_name") or "")).name
+        if (
+            not filename
+            or Path(filename).name != filename
+            or not expected
+            or filename != expected
+        ):
+            raise HTTPException(400, "image_path does not match the loaded-run source")
+        return record["path"]
+    filename = str(image_path or "")
+    if not filename or Path(filename).name != filename:
+        raise HTTPException(400, "Invalid image filename")
+    path = (_IMAGES_DIR / filename).resolve()
+    if not path.is_relative_to(_IMAGES_DIR.resolve()):
+        raise HTTPException(400, "Invalid image filename")
+    if not path.is_file():
+        raise HTTPException(404, f"Image not found: {filename}")
+    return path
+
+
+def _resolve_config_image_source(cfg: Mapping[str, Any]) -> Path:
+    return _resolve_image_source_path(
+        cfg.get("image_path"),
+        cfg.get("image_source_ref"),
+    )
+
+
 def _current_out_dir(card_id: str | None = None) -> Path:
     """Return (and create) the per-solve working directory in the clearable run cache (data/generator/cache/runs/{run_id}).
 
@@ -2115,7 +2412,7 @@ _SOLVE_OWNED_KEYS = (
     "cap_mode", "boundary_cap_de_budget",
     # (No cleanup_* raster params here: all four retired — 2.2a reassign_mode/
     # search_radius_mm, 2.2b min_width/min_area. Wing-B feature scale is now
-    # nozzle-derived; the active nozzle's size/min_line_width already enter this
+    # nozzle-derived; the active nozzle's resolved printability already enters this
     # fingerprint via __active_nozzle_printability__ below.)
     # Print-aware source resample kernel (Wing B / B7).
     # Toggling this changes the ingress raster and must invalidate
@@ -2124,7 +2421,7 @@ _SOLVE_OWNED_KEYS = (
     # Thickness smoothing kernel (applied after solver)
     "smooth_kernel",
     # Image selection
-    "image_path", "image_adjust", "max_dim_mm", "frame",
+    "image_path", "image_source_ref", "image_adjust", "max_dim_mm", "frame",
 )
 
 
@@ -2153,10 +2450,26 @@ def _solve_owned_fingerprint(cfg: dict) -> str:
     subset = {k: canonical_cfg.get(k) for k in _SOLVE_OWNED_KEYS}
     active = get_active_printer()
     nozzle = active.get("nozzle") or {}
+    printability = active.get("printability") or (
+        _resolve_nozzle_printability(
+            nozzle,
+            printer_id=str((active.get("printer") or {}).get("id") or "unknown"),
+        )
+        if nozzle
+        else {}
+    )
     subset["__active_nozzle_printability__"] = {
         "size": nozzle.get("size"),
-        "min_line_width": nozzle.get("min_line_width"),
-        "min_line_length": nozzle.get("min_line_length"),
+        "min_line_length_multiplier": nozzle.get(
+            "min_line_length_multiplier"
+        ),
+        "minimum_extrusion_width_mm": printability.get(
+            "minimum_extrusion_width_mm"
+        ),
+        "minimum_line_length_mm": printability.get("minimum_line_length_mm"),
+        "minimum_component_area_mm2": printability.get(
+            "minimum_component_area_mm2"
+        ),
     }
     subset["__module_state__"] = load_module_state(_MODULES_PATH)
     _ensure_registry_populated()
@@ -2170,10 +2483,10 @@ def _solve_owned_fingerprint(cfg: dict) -> str:
     if image_name:
         try:
             subset["__source_asset_fingerprint__"] = _resolve_run_source_image(
-                _IMAGES_DIR / Path(image_name).name,
+                _resolve_config_image_source(canonical_cfg),
                 prepare=False,
             ).fingerprint
-        except SourceImageError:
+        except (SourceImageError, HTTPException):
             subset["__source_asset_fingerprint__"] = "unavailable"
     if _is_photo_stack_provider(canonical_cfg.get("appearance_model_provider")):
         # The provider instance is not available at config-fingerprint time,
@@ -2297,6 +2610,12 @@ def _build_solve_start_diagnostics(cfg: dict) -> dict:
         "k_max": cfg.get("k_max"),
         "image_path": cfg.get("image_path"),
         "palette": list(cfg.get("palette", [])),
+        "printability_minimum_extrusion_width_mm": cfg.get(
+            "printability_minimum_extrusion_width_mm"
+        ),
+        "printability_minimum_line_length_mm": cfg.get(
+            "printability_minimum_line_length_mm"
+        ),
         "data_root": str(_DATA_DIR),
     }
     if _is_photo_stack_provider(cfg.get("appearance_model_provider")):
@@ -2684,14 +3003,12 @@ def _safe_path(base: Path, filename: str) -> Path:
 
 
 @app.get("/api/images/preview/{filename}")
-def get_image_preview(filename: str):
+def get_image_preview(filename: str, image_source_ref: str | None = None):
     """Return a resized JPEG preview (max 800px wide)."""
-    path = _safe_path(_IMAGES_DIR, filename)
-    if not path.exists():
-        raise HTTPException(404, f"Image not found: {filename}")
+    path = _resolve_image_source_path(filename, image_source_ref)
 
     try:
-        resolved = _SOURCE_IMAGES.resolve(path.name, prepare=True)
+        resolved = _resolve_run_source_image(path)
         with Image.open(resolved.working_path) as raw_img:
             img = ImageOps.exif_transpose(raw_img).convert("RGB")
     except (SourceImageError, OSError, ValueError) as exc:
@@ -2710,10 +3027,26 @@ def get_image_preview(filename: str):
 @app.get("/api/session")
 def get_session() -> dict:
     """Return full session state (config + solve status)."""
-    return {
+    response = {
         "config": _with_canonical_pitch_egress(session["config"]),
         "solve": _serialize_solve_status(session["solve"]),
     }
+    source_ref = session["config"].get("image_source_ref")
+    if source_ref:
+        card_id = _loaded_source_card_id(source_ref)
+        record = _loaded_source_record(card_id)
+        private_path = (
+            data_paths.RUN_CACHE_DIR / card_id / str(record["relative_path"])
+        ).resolve()
+        resolved = _resolve_run_source_image(private_path)
+        response["source_image"] = _loaded_source_response(
+            display_name=Path(str(record.get("display_name") or "")).name or "image",
+            source_ref=source_ref,
+            private_path=private_path,
+            resolved_source=resolved,
+            library_match=None,
+        )
+    return response
 
 
 def _solve_elapsed_seconds(solve: dict) -> float:
@@ -2917,10 +3250,15 @@ def set_config(payload: ConfigPayload) -> dict:
         reset_standard=("luminance_mode" in incoming),
     )
     merged = _force_mandatory_product_settings(merged)
+    merged = _with_active_printer_printability(merged)
     merged["luminance_base_shading_limit_fraction"] = merged.get(
         "luminance_handler_optical_authority_fraction",
         merged.get("luminance_base_shading_limit_fraction", 0.75),
     )
+    if merged.get("image_source_ref"):
+        if not merged.get("image_path"):
+            raise HTTPException(400, "image_path is required with image_source_ref")
+        _resolve_config_image_source(merged)
     changed = [k for k in merged if old.get(k) != merged[k]]
     session["config"] = merged
     if changed:
@@ -2939,10 +3277,15 @@ def get_printers() -> dict:
 @app.put("/api/printers")
 def save_printers(payload: dict) -> dict:
     """Save the full printers object (printers list + active selection)."""
-    _normalize_printers_data(payload, retired_policy="reject")
-    _save_printers(payload)
-    logger.info("Printers saved: %d printer(s)", len(payload.get("printers", [])))
-    return {"ok": True}
+    normalized = _normalize_printers_data(payload, retired_policy="reject")
+    _save_printers(normalized)
+    active = _resolve_active_printer(normalized)
+    session["config"] = _with_active_printer_printability(
+        session["config"],
+        active=active,
+    )
+    logger.info("Printers saved: %d printer(s)", len(normalized.get("printers", [])))
+    return {"ok": True, **normalized, "active": active}
 
 
 @app.get("/api/printers/active")
@@ -2961,7 +3304,12 @@ def set_active_printer(payload: dict) -> dict:
     if "active_nozzle_size" in payload:
         data["active_nozzle_size"] = payload["active_nozzle_size"]
     _save_printers(data)
-    return {"ok": True, **_resolve_active_printer(data)}
+    active = _resolve_active_printer(data)
+    session["config"] = _with_active_printer_printability(
+        session["config"],
+        active=active,
+    )
+    return {"ok": True, **active}
 
 
 # ── Modules ──────────────────────────────────────────────────────────────
@@ -3258,6 +3606,7 @@ def _normalize_settings_profile_modules(modules: Optional[dict]) -> Dict[str, bo
 
 def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, Any]:
     incoming = dict(settings or {})
+    incoming.pop("image_source_ref", None)
     incoming.pop("run_logging", None)  # retired feature: quiet-drop stale profile/UI residue
     for key in sorted(_QUIET_DROPPED_CONFIG_EXTRAS):
         if key in incoming:
@@ -3681,6 +4030,7 @@ class PaletteSuggestPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     image_path: str
+    image_source_ref: Optional[str] = None
     n_filaments: int = 7
     top_k: int = 5
     filament_ids: Optional[List[str]] = None
@@ -3705,6 +4055,7 @@ class PaletteSuggestPayload(BaseModel):
 
 class LuminanceBaseShadingLimitRecommendPayload(BaseModel):
     image_path: Optional[str] = None
+    image_source_ref: Optional[str] = None
 
 
 def _recommend_luminance_base_shading_limit_fraction(img: np.ndarray) -> dict:
@@ -4021,9 +4372,12 @@ def recommend_luminance_base_shading_limit(
     image_name = payload.image_path or cfg.get("image_path")
     if not image_name:
         raise HTTPException(400, "No image selected")
-    image_path = _IMAGES_DIR / str(image_name)
-    if not image_path.exists():
-        raise HTTPException(404, f"Image not found: {image_name}")
+    image_source_ref = (
+        payload.image_source_ref
+        if payload.image_path is not None
+        else cfg.get("image_source_ref")
+    )
+    image_path = _resolve_image_source_path(image_name, image_source_ref)
     img = _load_run_source_image(image_path, cfg, max_dim_mm=80.0)
     result = _recommend_luminance_base_shading_limit_fraction(img)
     return {
@@ -4071,9 +4425,10 @@ def _complete_suggest_job(job_id: str, *, result: dict[str, Any], elapsed_s: flo
 def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
     """Auto-suggest optimal palettes for the given image."""
     _require_model_library()
-    image_path = _IMAGES_DIR / payload.image_path
-    if not image_path.exists():
-        raise HTTPException(404, f"Image not found: {payload.image_path}")
+    image_path = _resolve_image_source_path(
+        payload.image_path,
+        payload.image_source_ref,
+    )
 
     cfg = _cfg()
 
@@ -4084,6 +4439,8 @@ def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
         raise HTTPException(409, "Suggestion already running")
 
     snapshot = dict(cfg)
+    snapshot["image_path"] = payload.image_path
+    snapshot["image_source_ref"] = payload.image_source_ref
 
     # The configured white base/cap are fixed inputs the suggester cannot drop
     # (unlike color candidates) — refuse up front if either is excluded from
@@ -4779,12 +5136,12 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
     if not palette:
         raise HTTPException(400, "No palette selected")
 
-    image_path = _IMAGES_DIR / raw_cfg["image_path"]
-    if not image_path.exists():
-        raise HTTPException(404, f"Image not found: {raw_cfg['image_path']}")
+    image_path = _resolve_config_image_source(raw_cfg)
 
     # Snapshot config so the solve thread isn't affected by mid-solve changes
-    cfg = _drop_phantom_config_fields(raw_cfg)
+    cfg = _with_active_printer_printability(
+        _drop_phantom_config_fields(raw_cfg)
+    )
     _validate_solve_pitch_for_nozzle(cfg)
     cfg["palette"] = canonical_palette_order(
         palette,
@@ -4894,8 +5251,8 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     local_pct=0,
                 )
                 resolved_source = _resolve_run_source_image(image_path)
-                source_asset = resolved_source.provenance()
-                if resolved_source.normalized:
+                source_asset = _source_provenance_for_config(cfg, resolved_source)
+                if source_asset.get("normalized"):
                     snapshot_name = "source-image.png"
                     shutil.copy2(resolved_source.working_path, out / snapshot_name)
                     source_asset["snapshot_name"] = snapshot_name
@@ -6578,6 +6935,14 @@ def open_export_folder(payload: ExportFolderPayload) -> dict:
 @app.get("/api/run-cache/files/{filename:path}")
 def serve_run_cache_file(filename: str, run: str | None = None):
     """Serve a solve diagnostic or cached preview file from the run cache."""
+    normalized = filename.replace("\\", "/").lstrip("/")
+    normalized_folded = normalized.casefold()
+    private_dir_folded = _LOADED_SOURCE_PRIVATE_DIR.casefold()
+    if (
+        normalized_folded == private_dir_folded
+        or normalized_folded.startswith(f"{private_dir_folded}/")
+    ):
+        raise HTTPException(404, f"File not found: {filename}")
     out_dir = _run_cache_dir(run)
     path = _safe_path(out_dir, filename)
     if not path.exists():
@@ -6759,6 +7124,9 @@ def clear_cache_all() -> dict:
     """
     from cache_admin import safe_clear_dir
     _assert_no_active_job()
+    config = session.get("config", {})
+    cleared_source_ref = str(config.get("image_source_ref") or "") or None
+    active_private_source = cleared_source_ref is not None
     removed = sum(
         safe_clear_dir(d, root=data_paths.CACHE_DIR)
         for d in (
@@ -6772,8 +7140,17 @@ def clear_cache_all() -> dict:
     if source_cache == active_cache or active_cache in source_cache.parents:
         removed += _SOURCE_IMAGES.clear()
     session.get("solve_cache", {}).clear()
+    if active_private_source:
+        config["image_path"] = None
+        config["image_source_ref"] = None
     _clear_palette_backend_cache()
-    return {"cleared": "all", "removed": removed}
+    return {
+        "cleared": "all",
+        "removed": removed,
+        "active_image_cleared": active_private_source,
+        "cleared_source_ref": cleared_source_ref,
+        "config": _with_canonical_pitch_egress(config),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -6830,10 +7207,36 @@ def _cached_solve_or_409(card_id: str) -> tuple[dict, dict]:
 
 def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, saved_at: str):
     cfg = _drop_phantom_config_fields(cfg)
-    original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
     run_dir = data_paths.RUN_CACHE_DIR / card_id
     source_asset = deepcopy(solve.get("source_asset") or {})
-    if source_asset.get("normalized"):
+    loaded_source = solve.get("_loaded_source")
+    if isinstance(loaded_source, dict):
+        relative_path = str(loaded_source.get("relative_path") or "")
+        snapshot_path = (run_dir / relative_path).resolve()
+        relative_parts = Path(relative_path).parts
+        if (
+            not relative_path
+            or not relative_parts
+            or relative_parts[0] != _LOADED_SOURCE_PRIVATE_DIR
+            or not snapshot_path.is_relative_to(run_dir.resolve())
+            or not snapshot_path.is_file()
+        ):
+            raise HTTPException(
+                409,
+                "The exact archived source used by this loaded run is missing; load the saved run again.",
+            )
+        original_image_name = (
+            Path(str(loaded_source.get("display_name") or "")).name
+            or Path(str(cfg.get("image_path", ""))).name
+            or "image"
+        )
+        image_name = (
+            Path(str(loaded_source.get("archive_image_name") or "")).name
+            or original_image_name
+        )
+        image_bytes = snapshot_path.read_bytes()
+    elif source_asset.get("normalized"):
+        original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
         snapshot_name = Path(str(source_asset.get("snapshot_name") or "")).name
         snapshot_path = run_dir / snapshot_name
         if not snapshot_name or not snapshot_path.is_file():
@@ -6844,14 +7247,16 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
         image_name = f"{Path(original_image_name).stem}.prisma-source.png"
         image_bytes = snapshot_path.read_bytes()
     else:
+        original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
         image_name = original_image_name
-        image_path = _IMAGES_DIR / image_name
-        if not image_path.exists():
+        try:
+            image_path = _resolve_config_image_source(cfg)
+        except HTTPException as exc:
             # The source image is a REQUIRED archive member — never save a hollow archive.
             raise HTTPException(
                 409,
                 f"Source image {image_name!r} is missing; cannot save a self-contained run",
-            )
+            ) from exc
         image_bytes = image_path.read_bytes()
     thickness_arrays = {}
     for key, arr in (solve.get("thickness_maps") or {}).items():
@@ -6868,6 +7273,12 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
         for p in run_dir.rglob("*"):
             if p.is_file():
                 rel = p.relative_to(run_dir).as_posix()
+                rel_folded = rel.casefold()
+                private_dir_folded = _LOADED_SOURCE_PRIVATE_DIR.casefold()
+                if rel_folded == private_dir_folded or rel_folded.startswith(
+                    f"{private_dir_folded}/"
+                ):
+                    continue
                 if source_asset.get("normalized") and rel == source_asset.get("snapshot_name"):
                     continue
                 payload = p.read_bytes()
@@ -6878,7 +7289,9 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
                         pass
                     else:
                         if isinstance(decoded, dict):
-                            sanitized = _sanitize_run_metadata_phantom_fields(decoded)
+                            sanitized = _strip_runtime_source_refs(
+                                _sanitize_run_metadata_phantom_fields(decoded)
+                            )
                             if sanitized != decoded:
                                 payload = json.dumps(
                                     sanitized,
@@ -6891,14 +7304,16 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
             try:
                 parsed_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
                 if isinstance(parsed_metadata, dict):
-                    cached_run_metadata = _sanitize_run_metadata_phantom_fields(parsed_metadata)
+                    cached_run_metadata = _strip_runtime_source_refs(
+                        _sanitize_run_metadata_phantom_fields(parsed_metadata)
+                    )
             except (OSError, UnicodeDecodeError, json.JSONDecodeError):
                 logger.warning("Could not read run metadata for archive card %s", card_id)
     run_json = {
         "schema_version": run_archive.SCHEMA_VERSION,
         "save_id": None, "label": label, "saved_at": saved_at,
         "source_image_name": original_image_name,
-        "config": cfg,
+        "config": _strip_runtime_source_refs(cfg),
         "palette": cfg.get("palette") or [],
         "image_domain_width_mm": solve.get("image_domain_width_mm"),
         "image_domain_height_mm": solve.get("image_domain_height_mm"),
@@ -6915,7 +7330,9 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
         run_json["run_metadata"] = _json_safe_runtime_diagnostic(cached_run_metadata)
     if source_asset:
         run_json["source_asset"] = _json_safe_runtime_diagnostic(source_asset)
-    run_json = _sanitize_archive_run_json_phantom_fields(run_json)
+    run_json = _strip_runtime_source_refs(
+        _sanitize_archive_run_json_phantom_fields(run_json)
+    )
     solve_state = {"solve_owned_fingerprint": solve.get("solve_owned_fingerprint")}
     return run_json, thickness_arrays, image_bytes, image_name, solve_state, run_cache_files
 
@@ -7193,8 +7610,24 @@ def _reject_retired_loaded_archive_artifacts(parsed) -> None:
             raise _retired_archive_artifact_error(f"run_cache_files.{rel}")
 
 
+def _reject_reserved_loaded_source_artifacts(parsed) -> None:
+    for rel in getattr(parsed, "run_cache_files", {}) or {}:
+        normalized = str(rel).replace("\\", "/").casefold()
+        private_dir = _LOADED_SOURCE_PRIVATE_DIR.casefold()
+        if (
+            normalized == private_dir
+            or normalized.startswith(f"{private_dir}/")
+        ):
+            raise HTTPException(
+                400,
+                "Saved run archive uses Prisma's reserved loaded-source cache namespace",
+            )
+
+
 def _validate_loaded_archive_config(cfg: dict) -> dict:
     incoming = _drop_phantom_config_fields(cfg)
+    # Loaded-run source references are process-local and never portable.
+    incoming.pop("image_source_ref", None)
     if incoming.get("detail_cap_enabled") is False:
         raise HTTPException(
             422,
@@ -7223,7 +7656,9 @@ def _optional_loaded_run_metadata(parsed) -> dict:
     """
     raw = (getattr(parsed, "run_json", {}) or {}).get("run_metadata")
     if isinstance(raw, dict):
-        return _sanitize_run_metadata_phantom_fields(raw)
+        return _strip_runtime_source_refs(
+            _sanitize_run_metadata_phantom_fields(raw)
+        )
     cached = (getattr(parsed, "run_cache_files", {}) or {}).get("run.json")
     if not cached:
         return {}
@@ -7231,28 +7666,210 @@ def _optional_loaded_run_metadata(parsed) -> dict:
         decoded = json.loads(cached.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return {}
-    return _sanitize_run_metadata_phantom_fields(decoded)
+    return _strip_runtime_source_refs(
+        _sanitize_run_metadata_phantom_fields(decoded)
+    )
 
 
-def _rehydrate_loaded_archive(parsed) -> dict:
+def _loaded_archive_display_name(parsed, run_json: Mapping[str, Any]) -> str:
+    source_asset = run_json.get("source_asset")
+    candidates = (
+        run_json.get("source_image_name"),
+        source_asset.get("original_source_name") if isinstance(source_asset, dict) else None,
+        parsed.image_name,
+    )
+    for candidate in candidates:
+        name = Path(str(candidate or "")).name
+        if name:
+            return name
+    return "image"
+
+
+def _loaded_archive_was_normalized(
+    parsed,
+    run_json: Mapping[str, Any],
+    display_name: str,
+) -> bool:
+    source_asset = run_json.get("source_asset")
+    display_suffix = Path(display_name).suffix.lower()
+    member_suffix = Path(parsed.image_name).suffix.lower()
+    if isinstance(source_asset, dict) and "normalized" in source_asset:
+        raw_claim = source_asset.get("normalized")
+        if not isinstance(raw_claim, bool):
+            raise HTTPException(400, "Saved run normalized-source provenance must be boolean")
+        normalized = raw_claim
+    else:
+        normalized = (
+            display_suffix in NORMALIZED_EXTENSIONS
+            and member_suffix == ".png"
+        ) or str(parsed.image_name).lower().endswith(".prisma-source.png")
+
+    if normalized:
+        if display_suffix not in NORMALIZED_EXTENSIONS or member_suffix != ".png":
+            raise HTTPException(
+                400,
+                "Saved run normalized-source provenance does not match its image member",
+            )
+        return True
+
+    native_family = {
+        ".jpg": "jpeg",
+        ".jpeg": "jpeg",
+        ".jpe": "jpeg",
+        ".jfif": "jpeg",
+        ".tif": "tiff",
+        ".tiff": "tiff",
+    }
+    display_family = native_family.get(display_suffix, display_suffix)
+    member_family = native_family.get(member_suffix, member_suffix)
+    if (
+        display_suffix not in NATIVE_EXTENSIONS
+        or member_suffix not in NATIVE_EXTENSIONS
+        or display_family != member_family
+    ):
+        raise HTTPException(
+            400,
+            "Saved run native-source provenance does not match its image member",
+        )
+    return False
+
+
+def _loaded_archive_source_digest(
+    parsed,
+    run_json: Mapping[str, Any],
+    *,
+    normalized: bool,
+    trust_normalized_provenance: bool,
+) -> str | None:
+    source_asset = run_json.get("source_asset")
+    digest = source_asset.get("source_digest") if isinstance(source_asset, dict) else None
+    if normalized:
+        # A normalized PNG member cannot identify the original HEIC/AVIF bytes.
+        # Schema-v1 uploads are untrusted, so only locally managed archives may
+        # use Prisma-authored provenance to reuse an original library source.
+        if not trust_normalized_provenance:
+            return None
+        return (
+            digest.lower()
+            if isinstance(digest, str) and re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+            else None
+        )
+    # Native archives embed the original source bytes. Derive identity from
+    # those bytes rather than trusting optional, client-controlled provenance.
+    return hashlib.sha256(parsed.image_bytes).hexdigest()
+
+
+def _matching_library_source(
+    *,
+    display_name: str,
+    expected_digest: str | None,
+) -> tuple[Path, ResolvedSource] | None:
+    if not expected_digest:
+        return None
+    candidates = sorted(
+        _SOURCE_IMAGES.paths_with_digest(expected_digest),
+        key=lambda path: (
+            path.name.casefold() != display_name.casefold(),
+            path.name.casefold(),
+            path.name,
+        ),
+    )
+    for candidate in candidates:
+        try:
+            resolved = _SOURCE_IMAGES.resolve(candidate.name, prepare=True)
+        except (SourceImageError, OSError):
+            continue
+        if resolved.fingerprint.lower() == expected_digest:
+            return candidate, resolved
+    return None
+
+
+def _loaded_source_response(
+    *,
+    display_name: str,
+    source_ref: str,
+    private_path: Path,
+    resolved_source: ResolvedSource,
+    library_match: tuple[Path, ResolvedSource] | None,
+) -> dict:
+    if library_match is not None:
+        path, _resolved = library_match
+        return {
+            **_image_info(path),
+            "source_ref": None,
+            "temporary": False,
+        }
+    return {
+        "filename": display_name,
+        "width": resolved_source.width,
+        "height": resolved_source.height,
+        "size_kb": round(private_path.stat().st_size / 1024, 1),
+        "thumbnail_url": (
+            f"/api/images/preview/{quote(display_name)}"
+            f"?image_source_ref={quote(source_ref)}"
+        ),
+        "source_format": resolved_source.source_format,
+        "normalized": resolved_source.normalized,
+        "source_ref": source_ref,
+        "temporary": True,
+    }
+
+
+def _rehydrate_loaded_archive(
+    parsed,
+    *,
+    trust_normalized_provenance: bool = False,
+) -> dict:
     """Build a completed-solve payload + populate solve_cache from a ParsedArchive."""
     card_id = _fresh_loaded_card_id()
     rj = _sanitize_archive_run_json_phantom_fields(parsed.run_json)
     cfg = _validate_loaded_archive_config(rj.get("config") or {})
     _reject_retired_loaded_archive_artifacts(parsed)
+    _reject_reserved_loaded_source_artifacts(parsed)
     run_metadata = _optional_loaded_run_metadata(parsed)
-    # 1. Image -> save-scoped unique path; rewrite config.image_path.
-    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    safe_img = f"{card_id}-{Path(parsed.image_name).name}"
-    restored_image = _IMAGES_DIR / safe_img
-    restored_image.write_bytes(parsed.image_bytes)
+    # 1. Keep the archive member private and bind it through an opaque runtime
+    #    reference. It must never be published into the visible Images folder.
+    display_name = _loaded_archive_display_name(parsed, rj)
+    normalized_source = _loaded_archive_was_normalized(parsed, rj, display_name)
+    run_dir = data_paths.RUN_CACHE_DIR / card_id
+    private_dir = run_dir / _LOADED_SOURCE_PRIVATE_DIR
+    private_dir.mkdir(parents=True, exist_ok=True)
+    archive_image_name = Path(parsed.image_name).name
+    private_path = private_dir / archive_image_name
+    private_path.write_bytes(parsed.image_bytes)
     try:
-        if restored_image.suffix.lower() in NORMALIZED_EXTENSIONS:
-            _SOURCE_IMAGES.prepare(restored_image)
-    except SourceImageError as exc:
-        restored_image.unlink(missing_ok=True)
+        resolved_private = _resolve_run_source_image(private_path)
+    except (SourceImageError, OSError) as exc:
+        shutil.rmtree(run_dir, ignore_errors=True)
         raise HTTPException(400, f"Saved run source image is unavailable: {exc}") from exc
-    cfg["image_path"] = safe_img
+    source_ref = _loaded_source_ref(card_id)
+    expected_digest = _loaded_archive_source_digest(
+        parsed,
+        rj,
+        normalized=normalized_source,
+        trust_normalized_provenance=trust_normalized_provenance,
+    )
+    library_match = _matching_library_source(
+        display_name=display_name,
+        expected_digest=expected_digest,
+    )
+    source_image = _loaded_source_response(
+        display_name=display_name,
+        source_ref=source_ref,
+        private_path=private_path,
+        resolved_source=resolved_private,
+        library_match=library_match,
+    )
+    cfg["image_path"] = display_name
+    cfg["image_source_ref"] = source_ref
+    loaded_source = {
+        "relative_path": private_path.relative_to(run_dir).as_posix(),
+        "archive_image_name": archive_image_name,
+        "display_name": display_name,
+        "normalized": normalized_source,
+        "source_asset": deepcopy(rj.get("source_asset") or {}),
+        "source_digest": expected_digest,
+    }
     # 2. Split npz back into thickness_maps + debug_maps (string keys; consumers tolerate str).
     thickness_maps, debug_maps, export_maps = {}, {}, {}
     for key, arr in parsed.thickness_arrays.items():
@@ -7264,16 +7881,14 @@ def _rehydrate_loaded_archive(parsed) -> dict:
             export_maps[key[4:]] = arr
     # 3. Restore the WHOLE run-cache subtree (png/bin/json/csv + bundle) under the fresh
     #    card's dir so /api/run-cache/files serves contours/explorer/recipe, not just PNGs.
-    run_dir = data_paths.RUN_CACHE_DIR / card_id
-    run_dir.mkdir(parents=True, exist_ok=True)
     source_asset = deepcopy(rj.get("source_asset") or {})
-    if source_asset.get("normalized"):
-        source_asset["snapshot_name"] = "source-image.png"
-        (run_dir / source_asset["snapshot_name"]).write_bytes(parsed.image_bytes)
     for rel, payload in parsed.run_cache_files.items():
         dest = run_dir / rel        # rel already validated safe by read_run_archive
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(payload)
+    if source_asset.get("normalized"):
+        source_asset["snapshot_name"] = "source-image.png"
+        (run_dir / source_asset["snapshot_name"]).write_bytes(parsed.image_bytes)
     # 4. Rebased result payload (recursive: top-level + nested url maps/lists).
     result = _rebase_run_urls(rj.get("result") or {}, card_id)
     result["card_id"] = card_id
@@ -7295,6 +7910,7 @@ def _rehydrate_loaded_archive(parsed) -> dict:
             "image_domain_height_mm": rj.get("image_domain_height_mm"),
             "material_exposure_audit": None,
             "source_asset": source_asset or None,
+            "_loaded_source": loaded_source,
             "solve_owned_fingerprint": (parsed.solve_state or {}).get("solve_owned_fingerprint"),
             "result": result,
         },
@@ -7306,6 +7922,7 @@ def _rehydrate_loaded_archive(parsed) -> dict:
         "result": result,
         "label": rj.get("label"),
         "run_metadata": run_metadata,
+        "source_image": source_image,
     }
 
 
@@ -7319,12 +7936,19 @@ class LoadRunSettingsPayload(BaseModel):
     tier: Literal["saved", "auto"] = "saved"
 
 
-def _load_from_bytes(raw: bytes) -> dict:
+def _load_from_bytes(
+    raw: bytes,
+    *,
+    trust_normalized_provenance: bool = False,
+) -> dict:
     try:
         parsed = run_archive.read_run_archive(raw)
     except run_archive.ArchiveError as exc:
         raise HTTPException(400, f"Invalid run archive: {exc}")
-    return _rehydrate_loaded_archive(parsed)
+    return _rehydrate_loaded_archive(
+        parsed,
+        trust_normalized_provenance=trust_normalized_provenance,
+    )
 
 
 def _read_run_zip_for_tier(save_id: str, tier: str) -> bytes:
@@ -7347,6 +7971,7 @@ def load_run_settings(payload: LoadRunSettingsPayload) -> dict:
     run_json = _sanitize_archive_run_json_phantom_fields(parsed.run_json)
     config = _validate_loaded_archive_config(run_json.get("config") or {})
     _reject_retired_loaded_archive_artifacts(parsed)
+    _reject_reserved_loaded_source_artifacts(parsed)
     result = run_json.get("result") or {}
     diagnostics = result.get("solve_start_diagnostics") if isinstance(result, dict) else None
     metadata = _optional_loaded_run_metadata(parsed)
@@ -7370,7 +7995,7 @@ def load_run(payload: LoadRunPayload) -> dict:
         raw = _read_run_zip_for_tier(payload.save_id, payload.tier)
     except run_store.SaveNotFoundError:
         raise HTTPException(404, f"No such {payload.tier} run: {payload.save_id}")
-    return _load_from_bytes(raw)
+    return _load_from_bytes(raw, trust_normalized_provenance=True)
 
 
 @app.post("/api/runs/load-upload")
@@ -7387,7 +8012,7 @@ async def load_run_upload(file: UploadFile = File(...)) -> dict:
         raw.extend(chunk)
         if len(raw) > run_archive.MAX_UPLOAD_BYTES:
             raise HTTPException(413, "Uploaded run archive too large")
-    return _load_from_bytes(bytes(raw))
+    return _load_from_bytes(bytes(raw), trust_normalized_provenance=False)
 
 
 # ── Static files (must be last) ──────────────────────────────────────────

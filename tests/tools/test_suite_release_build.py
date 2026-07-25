@@ -51,6 +51,7 @@ def test_generator_frontend_directory_contains_nested_module_and_style_assets() 
         app / "styles" / "diagnostics.css",
     ]
     assert all(path.is_file() for path in required)
+    assert not (app / "printers.json").exists()
     assert '(str(GENERATOR / "app"), "Prisma/generator/app")' in SPEC
 
 

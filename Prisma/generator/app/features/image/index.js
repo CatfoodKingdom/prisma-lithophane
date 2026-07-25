@@ -9,13 +9,16 @@ export function installFeaturesImageIndex(app) {
       return;
     }
 
-    const selectedBeforeRefresh = app.state.image.selectedImage?.filename || null;
-    const previousFilename = selectedBeforeRefresh || app.state.image.pendingSelectedFilename || null;
-    app.state.image.availableImages = await app.api.fetchImages();
-    const refreshedSelection = previousFilename
-      ? app.state.image.availableImages.find((img) => img.filename === previousFilename) || null
+    const selectedBeforeRefresh = app.state.image.selectedImage || null;
+    const privateSelection = selectedBeforeRefresh?.source_ref
+      ? selectedBeforeRefresh
       : null;
-    const selectionWasRemoved = !!previousFilename && !refreshedSelection;
+    const previousFilename = selectedBeforeRefresh?.filename || app.state.image.pendingSelectedFilename || null;
+    app.state.image.availableImages = await app.api.fetchImages();
+    const refreshedSelection = privateSelection || (previousFilename
+      ? app.state.image.availableImages.find((img) => img.filename === previousFilename) || null
+      : null);
+    const selectionWasRemoved = !privateSelection && !!previousFilename && !refreshedSelection;
     app.state.image.selectedImage = refreshedSelection;
     if (refreshedSelection) app.state.image.pendingSelectedFilename = null;
 
@@ -43,7 +46,9 @@ export function installFeaturesImageIndex(app) {
     grid.innerHTML = app.state.image.availableImages.map((img) => {
       const sizeKb = img.size_kb || 0;
       const sizeStr = sizeKb >= 1024 ? (sizeKb / 1024).toFixed(1) + " MB" : sizeKb.toFixed(0) + " KB";
-      return `<div class="image-card${app.state.image.selectedImage?.filename === img.filename ? " is-selected" : ""}"
+      const selected = app.state.image.selectedImage;
+      const isSelected = !selected?.source_ref && selected?.filename === img.filename;
+      return `<div class="image-card${isSelected ? " is-selected" : ""}"
            data-filename="${img.filename}" draggable="true">
         <img class="image-card-thumb" src="${app.api.imagePreviewUrl(img.filename)}" alt="${img.filename}"
              loading="lazy" onerror="this.style.display='none'">
@@ -56,9 +61,11 @@ export function installFeaturesImageIndex(app) {
 
     grid.querySelectorAll(".image-card").forEach((card) => {
       card.addEventListener("click", () => {
+        if (app.state.session.clearTempRunning) return;
         const filename = card.dataset.filename;
         const newImage = app.state.image.availableImages.find((i) => i.filename === filename) || null;
-        const isNewImage = newImage?.filename !== app.state.image.selectedImage?.filename;
+        const isNewImage = !!app.state.image.selectedImage?.source_ref
+          || newImage?.filename !== app.state.image.selectedImage?.filename;
         if (isNewImage) {
           app.state.image.frameState.scale = 100.0;
           app.state.image.frameState.rotation = 0;
@@ -75,6 +82,7 @@ export function installFeaturesImageIndex(app) {
         }
         app.commands.renderImageTab();
         app.commands.updateRail();
+        void app.commands.syncConfigToServer({ showErrorToast: true });
       });
       card.addEventListener("dragstart", (e) => {
         e.dataTransfer.setData("application/json", JSON.stringify({
@@ -455,7 +463,10 @@ export function installFeaturesImageIndex(app) {
     win.style.display = "";
 
     // Load image if src changed
-    const url = app.api.imagePreviewUrl(app.state.image.selectedImage.filename);
+    const url = app.api.imagePreviewUrl(
+      app.state.image.selectedImage.filename,
+      app.state.image.selectedImage.source_ref,
+    );
     if (img.src !== url && !img.src.endsWith(url)) {
       img.src = url;
     }
@@ -594,7 +605,10 @@ export function installFeaturesImageIndex(app) {
     if (placeholder) placeholder.style.display = "none";
     pImg.style.display = "";
 
-    const url = app.api.imagePreviewUrl(app.state.image.selectedImage.filename);
+    const url = app.api.imagePreviewUrl(
+      app.state.image.selectedImage.filename,
+      app.state.image.selectedImage.source_ref,
+    );
     if (pImg.src !== url && !pImg.src.endsWith(url)) {
       pImg.src = url;
     }
@@ -1246,6 +1260,7 @@ export function installFeaturesImageIndex(app) {
     canvas.addEventListener("drop", (e) => {
       e.preventDefault();
       canvas.classList.remove("drag-target");
+      if (app.state.session.clearTempRunning) return;
       try {
         const data = JSON.parse(e.dataTransfer.getData("application/json"));
         if (data.type === "image" && data.filename) {
@@ -1262,6 +1277,7 @@ export function installFeaturesImageIndex(app) {
           if (app.state.image.selectedImage && isNewImage) app.commands.applyImageAspectDefault();  // Stage 11: default to image aspect
           app.commands.renderImageTab();
           app.commands.updateRail();
+          void app.commands.syncConfigToServer({ showErrorToast: true });
         }
       } catch { /* ignore non-image drags */ }
     });

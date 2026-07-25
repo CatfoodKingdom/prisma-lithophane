@@ -43,6 +43,7 @@ export function initializeApplicationState(app) {
   app.state.solve.solveRunSettingsPanelContext = null;
   app.state.solve.solveRunSettingsAdvancedVisible = false;
   app.state.session.apiConnected = false;
+  app.state.session.clearTempRunning = false;
   app.state.session.modelLibraryAutoOpened = false;
   app.state.session.modelLibraryManager = {
   status: null,
@@ -111,6 +112,7 @@ export function initializeApplicationState(app) {
   app.state.palette.activeDeckId = null;
   app.state.solve.solveRuns = [];
   app.state.solve.solveRunCounter = 0;
+  app.state.solve.loadedRunApplyRunning = false;
   app.state.solve.selectedRunIds = new Set();
   app.state.solve.solveShowSourceImage = true;
   app.state.solve.solveColorRegionsView = "color_ceiling";
@@ -151,6 +153,7 @@ export function initializeApplicationState(app) {
 };
   app.state.session.printersData = null;
   app.state.session.activeNozzle = null;
+  app.state.session.activePrintability = null;
   app.state.settings.settingsProfiles = [];
   app.state.settings.temporarySettingsProfile = null;
   app.state.settings.loadedProfileRef = null;

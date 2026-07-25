@@ -46,3 +46,7 @@ def test_generator_spec_collects_heif_decoder_and_native_libraries() -> None:
     assert "binaries=pi_heif_binaries" in SPEC
     assert "*pi_heif_hiddenimports" in SPEC
     assert "pi_heif_datas" not in SPEC
+
+
+def test_generator_frontend_has_no_obsolete_bundled_printer_profile() -> None:
+    assert not (ROOT / "Prisma" / "generator" / "app" / "printers.json").exists()

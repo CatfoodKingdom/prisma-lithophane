@@ -86,6 +86,31 @@ def test_forbidden_private_file_aborts_before_destination_promotion(
     assert list(tmp_path.glob(".release.staging-*")) == []
 
 
+def test_obsolete_bundled_printer_profile_aborts_assembly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, library = _sources(tmp_path)
+    (app / "_internal" / "Prisma" / "generator" / "app" / "printers.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release, "validate_standard_model_library", _library_report)
+
+    with pytest.raises(
+        release.WindowsReleaseError,
+        match="obsolete bundled printer profile",
+    ):
+        release.assemble_windows_release(
+            pyinstaller_root=app,
+            model_library_root=library,
+            third_party_licenses_root=make_license_bundle(tmp_path / "licenses"),
+            destination=tmp_path / "release",
+            release_version="test",
+            app_version="0.1.0",
+        )
+
+
 def test_only_packaged_opencv_python_runtime_files_are_allowed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

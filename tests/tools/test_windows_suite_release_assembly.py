@@ -156,6 +156,29 @@ def test_forbidden_private_file_aborts_before_destination_promotion(
     assert list(tmp_path.glob(".release.staging-*")) == []
 
 
+def test_obsolete_bundled_printer_profile_aborts_assembly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, library = _sources(tmp_path)
+    (app / "_internal" / "Prisma" / "generator" / "app" / "printers.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        suite.WindowsSuiteReleaseError,
+        match="obsolete bundled printer profile",
+    ):
+        _assemble(
+            tmp_path,
+            monkeypatch,
+            app=app,
+            library=library,
+            destination_name="rejected",
+        )
+
+
 def test_only_asserted_packaged_python_source_locations_are_allowed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

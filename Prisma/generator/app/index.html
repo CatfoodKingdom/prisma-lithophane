@@ -175,6 +175,10 @@
                   <span id="imageImportProgressFill"></span>
                 </div>
               </div>
+              <div class="saved-run-source-notice is-hidden" id="savedRunSourceNotice" role="status">
+                <span class="saved-run-source-notice-label">Saved run source</span>
+                <span class="saved-run-source-notice-name" id="savedRunSourceNoticeName"></span>
+              </div>
               <div class="library-thumbs" id="imageGrid">
               </div>
             </div>
@@ -1183,14 +1187,16 @@
                 Nozzle Profiles
                 <button class="ghost-button xxs" id="pcAddNozzleBtn">+ Add</button>
               </div>
+              <p class="small-copy pc-nozzle-help" id="pcNozzleLengthHelp">
+                Minimum length is 2–10 whole nozzle diameters. The effective millimeter length shown below is what the solver receives. Minimum width is one nozzle diameter.
+              </p>
               <table class="pc-nozzle-table" id="pcNozzleTable">
                 <thead>
                   <tr>
                     <th>Nozzle</th>
                     <th>Min LH</th>
                     <th>Max LH</th>
-                    <th>Min W</th>
-                    <th>Min Len</th>
+                    <th title="Minimum printable line length, measured in whole nozzle diameters">Min Len (× nozzle)</th>
                     <th></th>
                   </tr>
                 </thead>

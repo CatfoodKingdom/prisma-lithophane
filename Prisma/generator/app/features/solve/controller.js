@@ -148,8 +148,8 @@ export function installFeaturesSolveController(app) {
     return true;
   }
 
-  function clearSolveHistory() {
-    if (app.state.solve.solveStatus.status === "running" || app.state.export.exportRunning) {
+  function clearSolveHistory({ force = false } = {}) {
+    if (!force && (app.state.solve.solveStatus.status === "running" || app.state.export.exportRunning)) {
       app.commands.showToast("Wait for the active solve or export to finish before clearing history.", "warn");
       return;
     }
@@ -158,6 +158,17 @@ export function installFeaturesSolveController(app) {
     app.state.solve.solveRuns = [];
     app.state.solve.solveRunCounter = 0;
     app.state.solve.solveStatus = { status: "idle", progress: "", elapsed_s: 0, result: null };
+    if (force) {
+      app.state.solve.activeSolveRunId = null;
+      app.state.solve.activeSolveJobId = null;
+      app.state.solve.solveStartPending = false;
+      app.state.solve.solveCancelPending = false;
+      app.state.export.exportRunning = false;
+      app.state.export.exportPollingOwner = null;
+      app.state.export.activeExportRunId = null;
+      app.state.export.activeExportJobId = "";
+      app.state.export.exportCancelPending = false;
+    }
     app.state.solve.selectedRunIds.clear();
     app.state.export.exportSelectedRunId = null;
     app.commands.renderSolveTab();
@@ -780,8 +791,54 @@ export function installFeaturesSolveController(app) {
     return null;
   }
 
+  function captureLoadedRunApplicationState() {
+    return {
+      solveRuns: [...app.state.solve.solveRuns],
+      solveRunCounter: app.state.solve.solveRunCounter,
+      selectedRunIds: new Set(app.state.solve.selectedRunIds),
+      selectedImage: app.state.image.selectedImage,
+      pendingSelectedFilename: app.state.image.pendingSelectedFilename,
+      config: app.commands._cloneValue(app.state.settings.config),
+      frameState: app.commands._cloneValue(app.state.image.frameState),
+      imageAdjust: app.commands._cloneValue(app.state.image.imageAdjust),
+      deck: app.commands._cloneValue(app.state.palette.deck),
+      activeDeckId: app.state.palette.activeDeckId,
+    };
+  }
+
+  function restoreLoadedRunApplicationState(previous) {
+    app.state.solve.solveRuns = previous.solveRuns;
+    app.state.solve.solveRunCounter = previous.solveRunCounter;
+    app.state.solve.selectedRunIds = previous.selectedRunIds;
+    app.state.image.selectedImage = previous.selectedImage;
+    app.state.image.pendingSelectedFilename = previous.pendingSelectedFilename;
+    for (const key of Object.keys(app.state.settings.config)) delete app.state.settings.config[key];
+    Object.assign(app.state.settings.config, previous.config);
+    for (const key of Object.keys(app.state.image.frameState)) delete app.state.image.frameState[key];
+    Object.assign(app.state.image.frameState, previous.frameState);
+    for (const key of Object.keys(app.state.image.imageAdjust)) delete app.state.image.imageAdjust[key];
+    Object.assign(app.state.image.imageAdjust, previous.imageAdjust);
+    app.state.palette.deck = previous.deck;
+    app.state.palette.activeDeckId = previous.activeDeckId;
+    app.commands.renderSettingsTab();
+    app.commands.renderImageTab();
+    app.commands.renderSolveTab();
+    if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
+    app.commands.renderFrameCanvas();
+    app.commands.updateRail();
+  }
+
   async function applyLoadedRun(body) {
-    const cfg = body.config || {};
+    if (app.state.session.clearTempRunning) {
+      throw new Error("Wait for Clear Temp Files to finish before loading a saved run.");
+    }
+    if (app.state.solve.loadedRunApplyRunning) {
+      throw new Error("Another saved run is still loading.");
+    }
+    const previous = app.commands.captureLoadedRunApplicationState();
+    app.state.solve.loadedRunApplyRunning = true;
+    try {
+      const cfg = body.config || {};
     const loadedPalette = app.commands.selectLoadedPalette(body, cfg);
     const loadedSupport = app.commands.normalizeSupportFromLoadedConfig(cfg);
     const normalizedConfig = {
@@ -798,7 +855,11 @@ export function installFeaturesSolveController(app) {
     app.state.solve.solveRuns.push({
       id: body.card_id,
       label: loadedLabel || `Loaded ${app.state.solve.solveRunCounter}`,
-      image: normalizedConfig.image_path ? { filename: normalizedConfig.image_path } : null,
+      image: body.source_image
+        ? app.commands._cloneValue(body.source_image)
+        : normalizedConfig.image_path
+          ? { filename: normalizedConfig.image_path }
+          : null,
       palette: [...loadedPalette],
       config: app.commands._cloneValue(normalizedConfig),
       ar: app.commands.getEffectiveAR(),
@@ -813,19 +874,27 @@ export function installFeaturesSolveController(app) {
     });
     app.state.solve.selectedRunIds.clear();
     app.state.solve.selectedRunIds.add(body.card_id);
-    // 2. Repopulate the active image. The server extracted the source image into
-    //    Prisma/photos/ under a save-scoped filename and rewrote config.image_path to
-    //    match, so refresh the image list (loadImages) BEFORE the find so the extracted
-    //    image is selectable.
+    // 2. Repopulate the active image. Exact library matches remain ordinary
+    //    library selections; otherwise source_image is a private, temporary
+    //    archive snapshot and must stay outside availableImages.
     if (normalizedConfig.image_path) {
       await app.commands.loadImages();
-      const match = (app.state.image.availableImages || []).find(i => i.filename === normalizedConfig.image_path);
-      if (match) { app.state.image.selectedImage = match; app.commands.applyImageAspectDefault(); }
+      const sourceImage = body.source_image || null;
+      if (sourceImage?.source_ref) {
+        app.state.image.selectedImage = app.commands._cloneValue(sourceImage);
+      } else {
+        const activeFilename = sourceImage?.filename || normalizedConfig.image_path;
+        app.state.image.selectedImage = (app.state.image.availableImages || [])
+          .find(i => i.filename === activeFilename) || null;
+      }
+      if (app.state.image.selectedImage) app.commands.applyImageAspectDefault();
     }
     // 3. Repopulate wizard settings so a re-solve reproduces the run. `config` is the
     //    source of truth (no inverse "read controls into config"), so copy loaded keys
     //    in, mirroring _applySettingsProfileToConfig.
     for (const [k, v] of Object.entries(normalizedConfig)) app.state.settings.config[k] = app.commands._cloneValue(v);
+    app.state.settings.config.image_path = app.state.image.selectedImage?.filename || null;
+    app.state.settings.config.image_source_ref = app.state.image.selectedImage?.source_ref || null;
     // 3b. Restore the live frame + image-adjust globals. The solve payload is built from
     //     these (see syncConfigToServer: cfg.frame ← frameState, cfg.image_adjust ←
     //     imageAdjust), NOT from `config`, so without this a re-solve would use stale
@@ -873,6 +942,19 @@ export function installFeaturesSolveController(app) {
     app.commands.renderFrameCanvas();
     app.commands.renderSolveTab();
     if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
+      await app.commands.syncConfigToServer({ throwOnError: true });
+    } catch (error) {
+      app.commands.restoreLoadedRunApplicationState(previous);
+      try {
+        await app.commands.syncConfigToServer({ throwOnError: true });
+      } catch {
+        // The original error remains authoritative. A later ordinary settings
+        // synchronization will retry the restored client configuration.
+      }
+      throw error;
+    } finally {
+      app.state.solve.loadedRunApplyRunning = false;
+    }
   }
 
   function showWhenRuleMatches(rule, getActualValue) {
@@ -1142,6 +1224,8 @@ export function installFeaturesSolveController(app) {
     openRenameSavedRunDialog,
     onLoadSavedRun,
     restoreLoadedRunPaletteToDeck,
+    captureLoadedRunApplicationState,
+    restoreLoadedRunApplicationState,
     applyLoadedRun,
     showWhenRuleMatches,
     isModuleParamVisibleInSummary,

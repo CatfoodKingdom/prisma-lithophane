@@ -1715,8 +1715,10 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.emit_pressure_diagnostics = false;
     app.state.settings.config.emit_geometry_attribution = false;
     app.state.settings.config.emit_blueprint_printability = true;
-    app.state.settings.config.printability_minimum_extrusion_width_mm = app.state.session.activeNozzle?.min_line_width ?? null;
-    app.state.settings.config.printability_minimum_line_length_mm = app.state.session.activeNozzle?.min_line_length ?? null;
+    app.state.settings.config.printability_minimum_extrusion_width_mm =
+      app.state.session.activePrintability?.minimum_extrusion_width_mm ?? null;
+    app.state.settings.config.printability_minimum_line_length_mm =
+      app.state.session.activePrintability?.minimum_line_length_mm ?? null;
     // Product printability enforcement is mandatory. Width multiplier remains
     // an internal/profile value and keeps whatever was loaded.
     app.state.settings.config.color_region_target_from_printability = true;
@@ -1763,6 +1765,7 @@ export function installFeaturesSettingsProfiles(app) {
     const payload = {
       ...app.state.settings.config,
       image_path: app.state.image.selectedImage?.filename || null,
+      image_source_ref: app.state.image.selectedImage?.source_ref || null,
       palette: app.commands.getActivePalette(),
       white_base: app.commands.getBaseFilament(),
       white_cap: null,

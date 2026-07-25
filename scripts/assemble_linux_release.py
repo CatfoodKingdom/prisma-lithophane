@@ -128,6 +128,8 @@ def _has_prefix(parts: tuple[str, ...], prefix: tuple[str, ...]) -> bool:
 
 def _forbidden_reason(relative_path: str) -> str | None:
     rel = PurePosixPath(relative_path)
+    if rel.as_posix().casefold() == "_internal/prisma/generator/app/printers.json":
+        return "obsolete bundled printer profile"
     lowered = tuple(part.casefold() for part in rel.parts)
     blocked_parts = sorted(set(lowered) & FORBIDDEN_PARTS)
     if blocked_parts:

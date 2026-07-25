@@ -1,4 +1,5 @@
 export { API_BASE, apiFetch, apiPost, createApiClient } from "./client.js";
+export { clearAllTempFiles } from "./cache.js";
 export {
   fetchImages, getImageImportStatus, imagePreviewUrl, importImages,
   openImagesFolder, refreshImages, uploadImage,

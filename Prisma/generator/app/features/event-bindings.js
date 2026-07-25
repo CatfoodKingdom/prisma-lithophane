@@ -3,6 +3,78 @@
  * @param {import("../core/types.js").ApplicationContext} app
  */
 export function installFeaturesEventBindings(app) {
+  function activeImageIdentity() {
+    const image = app.state.image.selectedImage;
+    return `${image?.source_ref || ""}\u0000${image?.filename || ""}`;
+  }
+
+  async function clearAllTempFiles() {
+    if (app.state.session.clearTempRunning) return;
+    if (app.state.solve.loadedRunApplyRunning) {
+      app.commands.showToast("Wait for the saved run to finish loading before clearing temporary files.", "warn");
+      return;
+    }
+    const ok = await app.commands.appConfirm(
+      "Delete ALL cached temp files (solve runs, LUTs, and prepared source images)? Your original images, exported files, and saved runs are kept.",
+      { ok: "Delete", cancel: "Cancel", title: "Clear Temp Files" },
+    );
+    if (!ok || app.state.session.clearTempRunning) return;
+    if (app.state.solve.loadedRunApplyRunning) {
+      app.commands.showToast("Wait for the saved run to finish loading before clearing temporary files.", "warn");
+      return;
+    }
+
+    const clearAllBtn = app.state.ui.$("#clearAllTempBtn");
+    app.state.session.clearTempRunning = true;
+    if (clearAllBtn) {
+      clearAllBtn.disabled = true;
+      clearAllBtn.setAttribute("aria-busy", "true");
+    }
+    try {
+      await app.state.settings._configSyncChain.catch(() => {});
+      await app.commands.syncConfigToServer({ throwOnError: true });
+      const selectionAtRequest = activeImageIdentity();
+      const privateSelectionAtRequest = app.state.image.selectedImage?.source_ref || null;
+      const body = await app.api.clearAllTempFiles();
+      app.commands.clearSolveHistory({ force: true });
+      const selectionUnchanged = activeImageIdentity() === selectionAtRequest;
+      if (selectionUnchanged && body.config) {
+        Object.assign(app.state.settings.config, body.config);
+      }
+      if (
+        privateSelectionAtRequest
+        && app.state.image.selectedImage?.source_ref === privateSelectionAtRequest
+      ) {
+        app.state.image.selectedImage = null;
+        app.state.image.pendingSelectedFilename = null;
+        app.state.settings.config.image_path = null;
+        app.state.settings.config.image_source_ref = null;
+      } else if (!selectionUnchanged) {
+        await app.commands.syncConfigToServer({ throwOnError: true });
+      }
+      app.commands.renderImageTab();
+      app.commands.updateRail();
+      app.commands.showToast(
+        privateSelectionAtRequest || body.cleared_source_ref
+          ? "Temporary saved-run source cleared. Load the saved run again to restore it."
+          : "Temporary files cleared",
+        "success",
+      );
+    } catch (error) {
+      if (error?.status === 409) {
+        app.commands.showToast("A solve, export, palette suggestion, or image import is still running — wait for it to finish before clearing.", "warn");
+      } else {
+        app.commands.showToast(error?.message || "Clear Temp Files failed", "error");
+      }
+    } finally {
+      app.state.session.clearTempRunning = false;
+      if (clearAllBtn) {
+        clearAllBtn.disabled = false;
+        clearAllBtn.removeAttribute("aria-busy");
+      }
+    }
+  }
+
 function bindEvents() {
     app.commands.bindImageImportEvents();
     app.lifecycle.listen(window, "resize", app.commands.refreshVisibleSolveContours);
@@ -660,20 +732,7 @@ function bindEvents() {
     // Clear all temp files (solve runs + LUTs)
     const clearAllBtn = app.state.ui.$("#clearAllTempBtn");
     if (clearAllBtn) {
-      app.lifecycle.listen(clearAllBtn, "click", async () => {
-        const ok = await app.commands.appConfirm(
-          "Delete ALL cached temp files (solve runs, LUTs, and prepared source images)? Your original images, exported files, and saved runs are kept.",
-          { ok: "Delete", cancel: "Cancel", title: "Clear Temp Files" });
-        if (!ok) return;
-        try {
-          const r = await fetch("/api/cache/clear-all", { method: "POST" });
-          if (r.status === 409) {
-            app.commands.showToast("A solve, export, or palette suggestion is still running — wait for it to finish before clearing.", "warn");
-          } else if (!r.ok) {
-            console.warn("clear-all failed", r.status);
-          }
-        } catch (e) { console.warn(e); }
-      });
+      app.lifecycle.listen(clearAllBtn, "click", app.commands.clearAllTempFiles);
     }
 
     // Saved Runs browser (Stage 9b)
@@ -887,7 +946,7 @@ function bindEvents() {
 
     const pcNew = app.state.ui.$("#pcNewPrinterBtn");
     if (pcNew) app.lifecycle.listen(pcNew, "click", () => {
-      app.commands._readPrinterFromConfigPage();
+      if (!app.commands._readPrinterFromConfigPage()) return;
       app.commands.resetPrinterDeleteConfirm();
       const id = "printer-" + Date.now();
       app.state.session.printersData.printers.push({
@@ -922,18 +981,37 @@ function bindEvents() {
         return;
       }
       app.commands.resetPrinterDeleteConfirm();
+      const previousPrintersData = structuredClone(app.state.session.printersData);
+      const previousEditingId = app.state.session.printerConfigEditingId;
       app.state.session.printersData.printers = app.state.session.printersData.printers.filter(p => p.id !== delId);
       app.state.session.printerConfigEditingId = app.state.session.printersData.printers[0]?.id || null;
       app.state.session.printersData.active_printer_id = app.state.session.printerConfigEditingId;
       app.commands.syncPrinterConfigActiveNozzle();
+      let saved;
       try {
-        await app.api.savePrinters(app.state.session.printersData);
-        await app.commands.loadPrinters();
+        saved = await app.api.savePrinters(app.state.session.printersData);
+      } catch (e) {
+        app.state.session.printersData = previousPrintersData;
+        app.state.session.printerConfigEditingId = previousEditingId;
+        app.commands.renderPrinterConfigPage();
+        app.commands.showToast("Delete failed: " + e.message, "error");
+        return;
+      }
+      try {
+        app.commands.applyAuthoritativePrinterState({
+          printers: saved.printers || [],
+          active_printer_id: saved.active_printer_id,
+          active_nozzle_size: saved.active_nozzle_size,
+        }, saved.active);
         app.state.session.printerConfigEditingId = app.state.session.printersData?.active_printer_id || app.state.session.printersData?.printers?.[0]?.id || null;
         app.commands.renderPrinterConfigPage();
         app.commands.showToast("Printer deleted", "success");
       } catch (e) {
-        app.commands.showToast("Delete failed: " + e.message, "error");
+        console.error("[printers] deleted state could not be rendered:", e);
+        app.commands.showToast(
+          "Printer was deleted, but the display could not refresh. Reload Prisma.",
+          "error",
+        );
       }
     });
 
@@ -942,7 +1020,7 @@ function bindEvents() {
       const printer = app.state.session.printersData.printers.find(p => p.id === app.commands.currentPrinterConfigId());
       if (!printer) return;
       // Read current table state before adding
-      app.commands._readPrinterFromConfigPage();
+      if (!app.commands._readPrinterFromConfigPage()) return;
       printer.nozzle_profiles.push({ size: 0.4, min_layer_height: 0.08, max_layer_height: 0.32, ...app.commands.defaultNozzleLineWidths(0.4) });
       app.commands.renderPrinterConfigPage();
     });
@@ -998,5 +1076,6 @@ function bindEvents() {
 
   Object.assign(app.commands, {
     bindEvents,
+    clearAllTempFiles,
   });
 }

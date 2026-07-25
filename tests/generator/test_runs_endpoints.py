@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import io
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ import data_paths
 import run_archive
 import run_store
 import server
+from source_images import SourceImageService
 from thickness_maps import MapKey
 from white_cap_contract import (
     PHYSICAL_GEOMETRY_METADATA_KEY,
@@ -62,7 +64,14 @@ def _env(tmp_path, monkeypatch):
     monkeypatch.setattr(data_paths, "RUN_CACHE_DIR", tmp_path / "runs")
     monkeypatch.setattr(server, "_IMAGES_DIR", tmp_path / "photos")
     (tmp_path / "saved").mkdir(); (tmp_path / "runs").mkdir(); (tmp_path / "photos").mkdir()
-    (server._IMAGES_DIR / "steve.jpg").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    image_buf = io.BytesIO()
+    Image.new("RGB", (8, 6), (32, 96, 160)).save(image_buf, format="JPEG")
+    (server._IMAGES_DIR / "steve.jpg").write_bytes(image_buf.getvalue())
+    monkeypatch.setattr(
+        server,
+        "_SOURCE_IMAGES",
+        SourceImageService(server._IMAGES_DIR, tmp_path / "source-cache"),
+    )
     yield
     server.session.update(copy.deepcopy(_TPL))
 
@@ -181,6 +190,8 @@ def test_settings_only_load_preserves_run_metadata_without_rehydrating(tmp_path)
     body = response.json()
     assert body["run_metadata"]["recipe_snapshot"]["profile_snapshot"]["name"] == "Portrait"
     assert body["config"]["image_path"] == "steve.jpg"
+    assert "image_source_ref" not in body["config"]
+    assert "image_source_ref" not in str(body["run_metadata"])
     assert set(server.session["solve_cache"]) == before_cache
     assert {path.name for path in server._IMAGES_DIR.iterdir()} == before_images
 
@@ -273,19 +284,278 @@ def test_load_from_list_rehydrates_fresh_card(tmp_path):
     assert (data_paths.RUN_CACHE_DIR / new_card / "post_solve_export_bundle" / "arrays.npz").exists()
 
 
-def test_load_extracts_image_and_rewrites_config_path(tmp_path):
+def test_load_retains_source_privately_without_mutating_image_library(tmp_path):
     _seed_cached_solve("run-1")
     save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
     server.session["solve_cache"].clear()
-    # A DIFFERENT pre-existing photo named steve.jpg must NOT be what the loaded run binds
-    # to. The overwrite happens AFTER save so the archive holds the original PNG; on load the
-    # image is extracted to a save-scoped unique name, never colliding with this foreign file.
-    (server._IMAGES_DIR / "steve.jpg").write_bytes(b"DIFFERENT-CONTENT")
+    archived = run_archive.read_run_archive(run_store.read_zip_bytes(save_id))
+    different = io.BytesIO()
+    Image.new("RGB", (8, 6), (180, 24, 50)).save(different, format="JPEG")
+    (server._IMAGES_DIR / "steve.jpg").write_bytes(different.getvalue())
+    before = {path.name: path.read_bytes() for path in server._IMAGES_DIR.iterdir()}
     body = client.post("/api/runs/load", json={"save_id": save_id}).json()
     new_card = body["card_id"]
-    new_path = server.session["solve_cache"][new_card]["config"]["image_path"]
-    assert new_path != "steve.jpg"  # rewritten to a save-scoped unique name
-    assert (server._IMAGES_DIR / Path(new_path).name).read_bytes().startswith(b"\x89PNG")
+    cached = server.session["solve_cache"][new_card]
+    private = cached["solve"]["_loaded_source"]
+    private_path = data_paths.RUN_CACHE_DIR / new_card / private["relative_path"]
+
+    assert body["config"]["image_path"] == "steve.jpg"
+    assert body["config"]["image_source_ref"] == f"loaded-run:{new_card}"
+    assert body["source_image"]["temporary"] is True
+    assert body["source_image"]["source_ref"] == f"loaded-run:{new_card}"
+    assert private_path.read_bytes() == archived.image_bytes
+    assert {path.name: path.read_bytes() for path in server._IMAGES_DIR.iterdir()} == before
+
+    second = client.post("/api/runs/load", json={"save_id": save_id})
+    assert second.status_code == 200
+    assert {path.name: path.read_bytes() for path in server._IMAGES_DIR.iterdir()} == before
+
+
+def test_load_reuses_exact_same_name_library_source_but_keeps_private_snapshot():
+    _seed_cached_solve("run-1")
+    save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
+    archived = run_archive.read_run_archive(run_store.read_zip_bytes(save_id))
+    server.session["solve_cache"].clear()
+
+    response = client.post("/api/runs/load", json={"save_id": save_id})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_image"]["filename"] == "steve.jpg"
+    assert body["source_image"]["source_ref"] is None
+    assert body["source_image"]["temporary"] is False
+    cached = server.session["solve_cache"][body["card_id"]]
+    assert cached["config"]["image_source_ref"] == f"loaded-run:{body['card_id']}"
+    private = cached["solve"]["_loaded_source"]
+    private_path = data_paths.RUN_CACHE_DIR / body["card_id"] / private["relative_path"]
+    assert private_path.read_bytes() == archived.image_bytes
+
+
+def test_load_reuses_deterministic_differently_named_exact_library_source():
+    _seed_cached_solve("run-1")
+    original = (server._IMAGES_DIR / "steve.jpg").read_bytes()
+    save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
+    server.session["solve_cache"].clear()
+    (server._IMAGES_DIR / "steve.jpg").unlink()
+    (server._IMAGES_DIR / "z-copy.jpg").write_bytes(original)
+    (server._IMAGES_DIR / "A-copy.jpg").write_bytes(original)
+
+    response = client.post("/api/runs/load", json={"save_id": save_id})
+
+    assert response.status_code == 200
+    source = response.json()["source_image"]
+    assert source["filename"] == "A-copy.jpg"
+    assert source["source_ref"] is None
+    assert source["temporary"] is False
+
+
+@pytest.mark.parametrize("library_mutation", ["modify", "delete"])
+def test_loaded_run_resave_preserves_archived_image_name_and_bytes(library_mutation):
+    _seed_cached_solve("run-1")
+    first_save_id = client.post(
+        "/api/runs/save",
+        json={"card_id": "run-1", "label": "Original"},
+    ).json()["save_id"]
+    first = run_archive.read_run_archive(run_store.read_zip_bytes(first_save_id))
+    server.session["solve_cache"].clear()
+    loaded = client.post("/api/runs/load", json={"save_id": first_save_id}).json()
+    assert loaded["source_image"]["temporary"] is False
+
+    if library_mutation == "modify":
+        replacement = io.BytesIO()
+        Image.new("RGB", (8, 6), (220, 190, 20)).save(replacement, format="JPEG")
+        (server._IMAGES_DIR / "steve.jpg").write_bytes(replacement.getvalue())
+    else:
+        (server._IMAGES_DIR / "steve.jpg").unlink()
+    second_save_id = client.post(
+        "/api/runs/save",
+        json={"card_id": loaded["card_id"], "label": "Resaved"},
+    ).json()["save_id"]
+    second = run_archive.read_run_archive(run_store.read_zip_bytes(second_save_id))
+
+    assert second.image_name == first.image_name
+    assert second.image_bytes == first.image_bytes
+    assert "image_source_ref" not in str(second.run_json)
+    assert not any(
+        rel == server._LOADED_SOURCE_PRIVATE_DIR
+        or rel.startswith(f"{server._LOADED_SOURCE_PRIVATE_DIR}/")
+        for rel in second.run_cache_files
+    )
+
+
+def test_private_loaded_source_preview_is_resized_and_generic_cache_route_is_blocked():
+    _seed_cached_solve("run-1")
+    save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
+    different = io.BytesIO()
+    Image.new("RGB", (8, 6), (180, 24, 50)).save(different, format="JPEG")
+    (server._IMAGES_DIR / "steve.jpg").write_bytes(different.getvalue())
+    body = client.post("/api/runs/load", json={"save_id": save_id}).json()
+    ref = body["source_image"]["source_ref"]
+
+    preview = client.get(
+        f"/api/images/preview/steve.jpg?image_source_ref={ref}"
+    )
+    direct = client.get(
+        f"/api/run-cache/files/{server._LOADED_SOURCE_PRIVATE_DIR}/steve.jpg"
+        f"?run={body['card_id']}"
+    )
+
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("image/jpeg")
+    assert direct.status_code == 404
+
+
+def test_loaded_source_reference_validation_and_reserved_archive_namespace():
+    assert client.get(
+        "/api/images/preview/steve.jpg?image_source_ref=loaded-run:../escape"
+    ).status_code == 400
+    assert client.get(
+        "/api/images/preview/steve.jpg?image_source_ref=loaded-run:missing"
+    ).status_code == 404
+
+    _seed_cached_solve("run-1")
+    save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
+    parsed = run_archive.read_run_archive(run_store.read_zip_bytes(save_id))
+    hostile = run_archive.pack_run_archive(
+        run_json=parsed.run_json,
+        thickness_arrays=parsed.thickness_arrays,
+        image_bytes=parsed.image_bytes,
+        image_name=parsed.image_name,
+        solve_state=parsed.solve_state,
+        run_cache_files={
+            **parsed.run_cache_files,
+            f"{server._LOADED_SOURCE_PRIVATE_DIR.upper()}/injected.jpg": parsed.image_bytes,
+        },
+    )
+
+    response = client.post(
+        "/api/runs/load-upload",
+        files={"file": ("reserved.zip", hostile, "application/zip")},
+    )
+    assert response.status_code == 400
+    assert "reserved loaded-source" in response.text
+
+
+def test_private_reference_requires_its_archived_display_name():
+    _seed_cached_solve("run-1")
+    save_id = client.post("/api/runs/save", json={"card_id": "run-1"}).json()["save_id"]
+    different = io.BytesIO()
+    Image.new("RGB", (8, 6), (180, 24, 50)).save(different, format="JPEG")
+    (server._IMAGES_DIR / "steve.jpg").write_bytes(different.getvalue())
+    body = client.post("/api/runs/load", json={"save_id": save_id}).json()
+
+    response = client.get(
+        "/api/images/preview/not-steve.jpg"
+        f"?image_source_ref={body['source_image']['source_ref']}"
+    )
+
+    assert response.status_code == 400
+    assert "does not match" in response.text
+
+
+def test_normalized_archive_provenance_uses_original_digest_and_legacy_falls_back_private():
+    original_digest = "a" * 64
+    parsed = SimpleNamespace(
+        image_name="portrait.prisma-source.png",
+        image_bytes=b"normalized PNG bytes",
+    )
+    run_json = {
+        "source_image_name": "portrait.heic",
+        "source_asset": {
+            "original_source_name": "portrait.heic",
+            "source_digest": original_digest,
+            "normalized": True,
+        },
+    }
+
+    assert server._loaded_archive_was_normalized(parsed, run_json, "portrait.heic") is True
+    assert server._loaded_archive_source_digest(
+        parsed,
+        run_json,
+        normalized=True,
+        trust_normalized_provenance=True,
+    ) == original_digest
+    assert server._loaded_archive_source_digest(
+        parsed,
+        run_json,
+        normalized=True,
+        trust_normalized_provenance=False,
+    ) is None
+    assert server._loaded_archive_source_digest(
+        parsed,
+        {"source_image_name": "portrait.heic"},
+        normalized=True,
+        trust_normalized_provenance=True,
+    ) is None
+    assert server._loaded_archive_source_digest(
+        parsed,
+        run_json,
+        normalized=False,
+        trust_normalized_provenance=False,
+    ) == hashlib.sha256(parsed.image_bytes).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("source_asset", "display_name", "member_name", "message"),
+    [
+        ({"normalized": False}, "portrait.heic", "portrait.prisma-source.png", "native-source"),
+        ({"normalized": True}, "portrait.jpg", "portrait.png", "normalized-source"),
+        ({"normalized": "false"}, "portrait.jpg", "portrait.jpg", "must be boolean"),
+    ],
+)
+def test_loaded_archive_rejects_contradictory_source_provenance(
+    source_asset,
+    display_name,
+    member_name,
+    message,
+):
+    from fastapi import HTTPException
+
+    parsed = SimpleNamespace(image_name=member_name, image_bytes=b"image")
+    with pytest.raises(HTTPException, match=message):
+        server._loaded_archive_was_normalized(
+            parsed,
+            {"source_asset": source_asset},
+            display_name,
+        )
+
+
+def test_uploaded_normalized_archive_does_not_trust_original_digest(monkeypatch):
+    image = io.BytesIO()
+    Image.new("RGB", (5, 4), (12, 34, 56)).save(image, format="PNG")
+    raw = run_archive.pack_run_archive(
+        run_json={
+            "schema_version": run_archive.SCHEMA_VERSION,
+            "source_image_name": "phone.heic",
+            "config": {},
+            "palette": [],
+            "result": {},
+            "source_asset": {
+                "original_source_name": "phone.heic",
+                "source_digest": "a" * 64,
+                "normalized": True,
+            },
+        },
+        thickness_arrays={},
+        image_bytes=image.getvalue(),
+        image_name="phone.prisma-source.png",
+    )
+    observed = []
+    original = server._matching_library_source
+
+    def capture_match(**kwargs):
+        observed.append(kwargs["expected_digest"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(server, "_matching_library_source", capture_match)
+    response = client.post(
+        "/api/runs/load-upload",
+        files={"file": ("normalized.zip", raw, "application/zip")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source_image"]["temporary"] is True
+    assert observed == [None]
 
 
 def test_load_409_while_solve_running(tmp_path):
