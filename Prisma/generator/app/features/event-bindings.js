@@ -498,49 +498,37 @@ function bindEvents() {
 
     // Staging-pad Clear: empties the staging pad only (never touches the persistent deck).
     const clearDeckBtn = app.state.ui.$("#clearDeckBtn");
-    if (clearDeckBtn) {
-      let confirmPending = false;
-      app.lifecycle.listen(clearDeckBtn, "click", () => {
-        if (app.state.palette.stagingDeck.length === 0) return;
-        if (!confirmPending) {
-          confirmPending = true;
-          clearDeckBtn.textContent = "Confirm";
-          clearDeckBtn.classList.add("danger");
-          setTimeout(() => {
-            confirmPending = false;
-            clearDeckBtn.textContent = "Clear";
-            clearDeckBtn.classList.remove("danger");
-          }, 3000);
-        } else {
-          confirmPending = false;
-          clearDeckBtn.textContent = "Clear";
-          clearDeckBtn.classList.remove("danger");
-          app.state.palette.stagingDeck = [];
-          app.state.palette.suggestCapacityNote = "";
-          app.commands.renderCreationTab();
-        }
-      });
-    }
+    if (clearDeckBtn) app.lifecycle.listen(clearDeckBtn, "click", app.commands.handleStagingClearClick);
 
     // Persistent-deck Clear (rail): empties the persistent deck only + clears the active palette.
     const railClearDeckBtn = app.state.ui.$("#railClearDeckBtn");
     if (railClearDeckBtn) {
       let confirmPending = false;
+      let confirmTimer = null;
       app.lifecycle.listen(railClearDeckBtn, "click", () => {
         if (app.state.palette.deck.length === 0) return;
         if (!confirmPending) {
           confirmPending = true;
-          railClearDeckBtn.textContent = "Confirm";
-          railClearDeckBtn.classList.add("danger");
-          setTimeout(() => {
+          railClearDeckBtn.textContent = "Confirm?";
+          railClearDeckBtn.classList.add("confirm-pending");
+          railClearDeckBtn.title = "Click again to clear all palette deck cards";
+          railClearDeckBtn.setAttribute("aria-label", "Confirm clearing all palette deck cards");
+          confirmTimer = setTimeout(() => {
+            confirmTimer = null;
             confirmPending = false;
             railClearDeckBtn.textContent = "Clear";
-            railClearDeckBtn.classList.remove("danger");
+            railClearDeckBtn.classList.remove("confirm-pending");
+            railClearDeckBtn.title = "Remove all palettes from the persistent deck";
+            railClearDeckBtn.setAttribute("aria-label", "Clear palette deck");
           }, 3000);
         } else {
+          if (confirmTimer) clearTimeout(confirmTimer);
+          confirmTimer = null;
           confirmPending = false;
           railClearDeckBtn.textContent = "Clear";
-          railClearDeckBtn.classList.remove("danger");
+          railClearDeckBtn.classList.remove("confirm-pending");
+          railClearDeckBtn.title = "No palettes to clear";
+          railClearDeckBtn.setAttribute("aria-label", "No palettes to clear");
           app.state.palette.deck = [];
           app.state.palette.activeDeckId = null;
           app.commands.renderDeckCards();

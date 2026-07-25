@@ -214,6 +214,76 @@ function removeStagingCard(cardId) {
     app.commands.renderDeckCards();
   }
 
+function syncStagingClearButton() {
+    const button = app.state.ui.$("#clearDeckBtn");
+    if (!button) return;
+    const empty = app.state.palette.stagingDeck.length === 0;
+    if (empty && app.state.palette.stagingClearConfirmPending) {
+      app.commands.resetStagingClearConfirm({ sync: false });
+    }
+    const armed = app.state.palette.stagingClearConfirmPending && !empty;
+    button.disabled = empty;
+    button.setAttribute("aria-disabled", empty ? "true" : "false");
+    button.textContent = armed ? "Confirm?" : "Clear";
+    button.classList.toggle("confirm-pending", armed);
+    button.classList.remove("danger");
+    button.title = armed
+      ? "Click again to clear all suggested palettes"
+      : empty
+        ? "No suggested palettes to clear"
+        : "Clear all suggested palettes";
+    button.setAttribute(
+      "aria-label",
+      armed
+        ? "Confirm clearing all suggested palettes"
+        : empty
+          ? "No suggested palettes to clear"
+          : "Clear suggested palettes",
+    );
+  }
+
+function resetStagingClearConfirm({ sync = true } = {}) {
+    if (app.state.palette.stagingClearConfirmTimer) {
+      clearTimeout(app.state.palette.stagingClearConfirmTimer);
+      app.state.palette.stagingClearConfirmTimer = null;
+    }
+    app.state.palette.stagingClearConfirmPending = false;
+    if (sync) app.commands.syncStagingClearButton();
+  }
+
+function armStagingClearConfirm() {
+    if (app.state.palette.stagingDeck.length === 0) {
+      app.commands.resetStagingClearConfirm();
+      return;
+    }
+    if (app.state.palette.stagingClearConfirmTimer) {
+      clearTimeout(app.state.palette.stagingClearConfirmTimer);
+    }
+    app.state.palette.stagingClearConfirmPending = true;
+    app.commands.syncStagingClearButton();
+    app.state.palette.stagingClearConfirmTimer = setTimeout(() => {
+      app.state.palette.stagingClearConfirmTimer = null;
+      app.state.palette.stagingClearConfirmPending = false;
+      app.commands.syncStagingClearButton();
+    }, 3000);
+  }
+
+function handleStagingClearClick() {
+    if (app.state.palette.stagingDeck.length === 0) {
+      app.commands.resetStagingClearConfirm();
+      return;
+    }
+    if (!app.state.palette.stagingClearConfirmPending) {
+      app.commands.armStagingClearConfirm();
+      return;
+    }
+    app.commands.resetStagingClearConfirm({ sync: false });
+    app.state.palette.stagingDeck = [];
+    app.state.palette.suggestCapacityNote = "";
+    app.commands.renderCreationTab();
+    app.commands.syncStagingClearButton();
+  }
+
 async function saveDeckCard(cardId) {
     const card = app.state.palette.deck.find(d => d.id === cardId);
     if (!card) return;
@@ -368,6 +438,7 @@ function loadPaletteByIndex(idx, { forceActive = true, sync = true, silent = fal
 
 function renderDeckCards() {
     const container = app.state.ui.$("#deckCards");
+    app.commands.syncStagingClearButton();
     if (app.state.palette.stagingDeck.length === 0) {
       container.innerHTML = `<p class="muted-line palette-empty-msg">Auto-suggest palettes to stage them here</p>`;
       app.commands.renderRailDeck();
@@ -384,30 +455,30 @@ function renderDeckCards() {
       if (card.gamut?.status === "checking") {
         const pct = card.gamut.pct != null ? ` · ${Math.round(card.gamut.pct)}%` : "";
         const elapsed = card.gamut.elapsed_s != null ? ` · ${Math.round(card.gamut.elapsed_s)}s` : "";
-        gamutHtml = `<div class="deck-card-gamut"><span class="muted-line">${app.commands.esc(card.gamut.progress || "Checking gamut...")}${pct}${elapsed}</span></div>`;
+        gamutHtml = `<div class="deck-card-gamut rail-deck-card-meta"><span>${app.commands.esc(card.gamut.progress || "Checking gamut...")}${pct}${elapsed}</span></div>`;
       } else if (card.gamut?.status === "done") {
         const g = card.gamut;
         const oogPart = g.total_pixels > 0 ? ` &middot; ${g.n_out_of_gamut.toLocaleString()} OOG` : "";
         gamutHtml = `
-          <div class="deck-card-gamut">
-            <span><strong>${app.commands.formatColorRmse(g)}</strong>${oogPart}</span>
+          <div class="deck-card-gamut rail-deck-card-meta">
+            <span>${app.commands.formatColorRmse(g)}${oogPart}</span>
           </div>
         `;
       } else if (card.gamut?.status === "error") {
-        gamutHtml = `<div class="deck-card-gamut" style="color:var(--error-ink)"><span>Gamut check failed</span></div>`;
+        gamutHtml = `<div class="deck-card-gamut rail-deck-card-meta" style="color:var(--error-ink)"><span>Gamut check failed</span></div>`;
       }
 
       return `
-        <div class="deck-card" data-card-id="${card.id}">
-          <div class="deck-card-header">
-            <span class="deck-card-title" title="${app.commands.escAttr(card.name)}">${app.commands.esc(card.name)} (${card.filament_ids.length})</span>
-            <div class="deck-card-actions">
-              <button class="ghost-button xxs deck-promote-btn" data-card-id="${card.id}" title="Add this palette to the palette deck">Add to Deck</button>
-              <button class="ghost-button xxs danger deck-delete-btn" data-card-id="${card.id}" aria-label="Remove staged palette" title="Remove staged palette">${app.commands.xIconSvg()}</button>
+        <div class="deck-card compact-deck-card" data-card-id="${card.id}">
+          <div class="deck-card-header compact-deck-card-header">
+            <span class="deck-card-title compact-deck-card-title" title="${app.commands.escAttr(card.name)}">${app.commands.esc(card.name)}</span>
+            <div class="deck-card-actions compact-deck-card-actions">
+              <button class="ghost-button xxs deck-promote-btn compact-deck-card-save" data-card-id="${card.id}" title="Add this palette to the palette deck">Add to Deck</button>
+              <button class="ghost-button xxs deck-delete-btn compact-deck-card-remove" data-card-id="${card.id}" aria-label="Remove ${app.commands.escAttr(card.name)} from suggestions" title="Remove from suggestions">${app.commands.xIconSvg()}</button>
             </div>
           </div>
-          <div class="deck-card-chips">
-            <div class="deck-card-palette-chips">${chips}</div>
+          <div class="deck-card-chips rail-deck-card-chips">
+            <div class="deck-card-palette-chips rail-deck-palette-chips">${chips}</div>
             ${supportChips}
           </div>
           ${gamutHtml}
@@ -428,13 +499,18 @@ function renderDeckCards() {
           app.commands.removeStagingCard(btn.dataset.cardId);
           return;
         }
+        const originalLabel = btn.getAttribute("aria-label");
         confirmPending = true;
-        btn.textContent = "Remove?";
+        btn.textContent = "!";
         btn.classList.add("confirm-pending");
+        btn.title = "Click again to remove";
+        btn.setAttribute("aria-label", `Confirm ${originalLabel}`);
         setTimeout(() => {
           confirmPending = false;
           btn.innerHTML = app.commands.xIconSvg();
           btn.classList.remove("confirm-pending");
+          btn.title = "Remove from suggestions";
+          btn.setAttribute("aria-label", originalLabel);
         }, 2000);
       });
     });
@@ -445,6 +521,16 @@ function renderRailDeck() {
     app.commands.hideRailDeckHoverPreview();
     const list = app.state.ui.$("#railDeckList");
     if (!list) return;
+    const clearButton = app.state.ui.$("#railClearDeckBtn");
+    if (clearButton) {
+      const empty = app.state.palette.deck.length === 0;
+      clearButton.disabled = empty;
+      clearButton.setAttribute("aria-disabled", empty ? "true" : "false");
+      clearButton.setAttribute("aria-label", empty ? "No palettes to clear" : "Clear palette deck");
+      clearButton.title = empty
+        ? "No palettes to clear"
+        : "Remove all palettes from the persistent deck";
+    }
     if (app.state.palette.deck.length === 0) {
       list.innerHTML = `<span class="rail-deck-empty">No palettes yet</span>`;
       return;
@@ -719,6 +805,10 @@ function hideRailDeckHoverPreview() {
     removeDeckCard,
     promoteStagedCard,
     removeStagingCard,
+    syncStagingClearButton,
+    resetStagingClearConfirm,
+    armStagingClearConfirm,
+    handleStagingClearClick,
     saveDeckCard,
     loadSavedPalettes,
     showLoadPaletteMenu,

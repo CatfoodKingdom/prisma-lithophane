@@ -37,11 +37,14 @@
       </div>
 
       <div class="rail-deck" id="railDeck">
-        <div class="rail-section-header">
+        <div class="rail-section-header compact-history-header">
           <p class="panel-kicker">Palette Deck</p>
           <div class="rail-section-actions">
             <button class="ghost-button xxs" id="railLoadPaletteBtn" title="Load a saved palette">Load</button>
-            <button class="ghost-button xxs" id="railClearDeckBtn" title="Remove all palettes from the persistent deck">Clear</button>
+            <span class="compact-history-clear-slot">
+              <button class="ghost-button xxs compact-history-clear" id="railClearDeckBtn"
+                      title="Remove all palettes from the persistent deck" aria-label="Clear palette deck">Clear</button>
+            </span>
           </div>
         </div>
         <div class="rail-deck-list" id="railDeckList"></div>
@@ -502,7 +505,7 @@
             <button type="button" class="segmented-btn is-active" id="paletteModeAuto" data-panel="auto" role="tab" aria-selected="true" aria-controls="panelAutoSuggest">Auto-Suggest</button>
             <button type="button" class="segmented-btn" id="paletteModeManual" data-panel="manual" role="tab" aria-selected="false" aria-controls="panelManualBuilder">Manual</button>
           </div>
-          <p class="creation-mode-note" id="creationModeNote">Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the target that matches the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.</p>
+          <p class="creation-mode-note" id="creationModeNote">Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.</p>
 
           <div class="creation-layout">
 
@@ -510,7 +513,7 @@
             <div class="creation-modes">
 
             <!-- Auto-Suggest -->
-            <div class="creation-panel creation-mode-panel is-expanded" id="panelAutoSuggest" role="tabpanel" aria-labeledby="paletteModeAuto">
+            <div class="creation-panel creation-mode-panel is-expanded" id="panelAutoSuggest" role="tabpanel" aria-labelledby="paletteModeAuto">
               <div class="creation-panel-header auto-suggest-header">
                 <span class="panel-kicker">Select Filaments for Auto-Suggest</span>
                 <span class="toolbar-chip muted auto-suggest-count" id="candidateCountChip">0 / 0 candidates</span>
@@ -540,10 +543,10 @@
                       <input type="number" id="targetSuggestCount" class="control-input" value="6" min="1" max="10" step="1">
                     </div>
                     <div class="suggest-field">
-                      <label>Target</label>
+                      <label for="paletteSuggestMode">Solve mode</label>
                       <select id="paletteSuggestMode" class="control-input">
-                        <option value="standard">Source color</option>
-                        <option value="luminance_detail">Luminance detail</option>
+                        <option value="standard">Color</option>
+                        <option value="luminance_detail">Luminance</option>
                       </select>
                     </div>
                     <div class="ams-preview" id="amsPreview"></div>
@@ -577,7 +580,7 @@
             </div>
 
             <!-- Manual Builder -->
-            <div class="creation-panel creation-mode-panel" id="panelManualBuilder" role="tabpanel" aria-labeledby="paletteModeManual" hidden>
+            <div class="creation-panel creation-mode-panel" id="panelManualBuilder" role="tabpanel" aria-labelledby="paletteModeManual" hidden>
               <div class="creation-panel-header manual-palette-header">
                 <span class="panel-kicker">Select Filaments for Palette</span>
                 <span class="toolbar-chip muted manual-palette-count" id="manualLibraryCountChip">0</span>
@@ -598,7 +601,9 @@
             <div class="creation-deck" id="creationDeckPanel">
               <div class="creation-panel-header deck-header">
                 <span class="panel-kicker">Suggested Palettes</span>
-                <button class="ghost-button xxs" id="clearDeckBtn" title="Clear the staging pad">Clear</button>
+                <button class="ghost-button xxs" id="clearDeckBtn"
+                        title="No suggested palettes to clear" aria-label="No suggested palettes to clear"
+                        aria-disabled="true" disabled>Clear</button>
               </div>
               <p class="small-copy" id="suggestCapacityNote" hidden></p>
               <div class="deck-cards" id="deckCards">
@@ -928,13 +933,17 @@
 
           <!-- ── Right: solve run sidebar ─────────────────────────── -->
           <div class="solve-deck-sidebar">
-            <div class="creation-panel-header deck-header">
+            <div class="rail-section-header compact-history-header deck-header solve-history-header">
               <span class="panel-kicker">Solve History</span>
-              <button class="ghost-button xxs" id="savedRunsBtn"
-                      title="Browse, load, download, or delete saved runs">Load</button>
-              <button class="ghost-button xxs solve-history-clear" id="clearSolveHistoryBtn"
-                      title="No solve runs to clear" aria-label="No solve runs to clear"
-                      aria-disabled="true" disabled>Clear</button>
+              <div class="rail-section-actions">
+                <button class="ghost-button xxs" id="savedRunsBtn"
+                        title="Browse, load, download, or delete saved runs">Load</button>
+                <span class="compact-history-clear-slot">
+                  <button class="ghost-button xxs compact-history-clear solve-history-clear" id="clearSolveHistoryBtn"
+                          title="No solve runs to clear" aria-label="No solve runs to clear"
+                          aria-disabled="true" disabled>Clear</button>
+                </span>
+              </div>
             </div>
             <div class="solve-run-cards" id="solveRunCards">
               <p class="muted-line" id="solveRunEmpty">No solves yet</p>
@@ -947,16 +956,20 @@
       <section class="tab-content is-hidden" id="tabExport">
         <div class="export-layout">
           <div class="solve-deck-sidebar export-run-sidebar">
-            <div class="creation-panel-header deck-header">
+            <div class="rail-section-header compact-history-header deck-header solve-history-header">
               <div class="export-panel-heading">
                 <span class="export-step-badge">1</span>
                 <h3>Select Run</h3>
               </div>
-              <button class="ghost-button xxs" id="exportSavedRunsBtn"
-                      title="Browse, load, download, or delete saved runs">Load</button>
-              <button class="ghost-button xxs solve-history-clear" id="exportClearSolveHistoryBtn"
-                      title="No solve runs to clear" aria-label="No solve runs to clear"
-                      aria-disabled="true" disabled>Clear</button>
+              <div class="rail-section-actions">
+                <button class="ghost-button xxs" id="exportSavedRunsBtn"
+                        title="Browse, load, download, or delete saved runs">Load</button>
+                <span class="compact-history-clear-slot">
+                  <button class="ghost-button xxs compact-history-clear solve-history-clear" id="exportClearSolveHistoryBtn"
+                          title="No solve runs to clear" aria-label="No solve runs to clear"
+                          aria-disabled="true" disabled>Clear</button>
+                </span>
+              </div>
             </div>
             <div class="solve-run-cards" id="exportRunCards">
               <p class="muted-line" id="exportRunEmpty">No completed solves yet</p>

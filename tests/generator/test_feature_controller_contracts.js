@@ -150,6 +150,52 @@ test("palette gating distinguishes missing, unavailable, and user-disabled filam
   assert.match(message, /Manage Filaments/);
 });
 
+test("palette suggestions use solve-mode names for newly generated cards", async () => {
+  const { app } = await harness();
+  app.state.palette.stagingDeck = [];
+  app.state.palette.nextDeckNum = 1;
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+
+  app.commands._processSuggestResults({
+    palette_mode: "standard",
+    candidates: [{ filament_ids: ["red"], mean_de: 1.2 }],
+  });
+  app.commands._processSuggestResults({
+    palette_mode: "luminance_detail",
+    candidates: [{ filament_ids: ["blue"], mean_de: 1.1 }],
+  });
+
+  assert.equal(app.state.palette.stagingDeck[0].name, "Color suggested 1");
+  assert.equal(app.state.palette.stagingDeck[1].name, "Luminance suggested 2");
+});
+
+test("suggestion clear confirmation cancels stale timers and synchronizes accessibility", async () => {
+  const clearButton = fakeElement();
+  const { app } = await harness({ elements: { "#clearDeckBtn": clearButton } });
+  app.commands.renderCreationTab = () => {};
+  app.state.palette.stagingDeck = [{ id: "suggest-1" }];
+
+  app.commands.syncStagingClearButton();
+  assert.equal(clearButton.disabled, false);
+  assert.equal(clearButton.textContent, "Clear");
+  assert.equal(clearButton["aria-label"], "Clear suggested palettes");
+
+  app.commands.armStagingClearConfirm();
+  assert.equal(clearButton.textContent, "Confirm?");
+  assert.equal(clearButton["aria-label"], "Confirm clearing all suggested palettes");
+  assert.ok(app.state.palette.stagingClearConfirmTimer);
+
+  app.commands.handleStagingClearClick();
+  assert.deepEqual(app.state.palette.stagingDeck, []);
+  assert.equal(app.state.palette.stagingClearConfirmTimer, null);
+  assert.equal(app.state.palette.stagingClearConfirmPending, false);
+  assert.equal(clearButton.disabled, true);
+  assert.equal(clearButton.textContent, "Clear");
+  assert.equal(clearButton.title, "No suggested palettes to clear");
+});
+
 test("runtime-scoped filament persistence never falls back to ambient legacy identity", async () => {
   const storage = memoryStorage({ prisma_enabled_filaments: '["red"]' });
   const { app } = await harness({ storage });
@@ -443,7 +489,8 @@ test("solve cards expose listbox semantics, omit loaded provenance, and gate Sav
   app.commands.escAttr = (value) => String(value);
   app.state.solve.solveRuns = [{
     id: "run-a", label: "Loaded portrait", loaded_from_archive: true,
-    palette: [], results: null,
+    palette: ["red"], results: null,
+    config: { base_filament: "white", cap_filament: "__same__" },
   }];
 
   app.commands.renderSolveRunSidebar();
@@ -453,6 +500,9 @@ test("solve cards expose listbox semantics, omit loaded provenance, and gate Sav
   assert.match(cards.innerHTML, /role="option"/);
   assert.match(cards.innerHTML, /aria-selected="false"/);
   assert.match(cards.innerHTML, /solve-run-save-btn[^>]+disabled/);
+  assert.match(cards.innerHTML, /solve-run-delete-slot/);
+  assert.match(cards.innerHTML, /solve-run-support-tray/);
+  assert.match(cards.innerHTML, /White Base\/Cap: White/);
   assert.doesNotMatch(cards.innerHTML, />Loaded<\/span>|solve-run-loaded-badge/);
 });
 

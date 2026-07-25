@@ -1299,6 +1299,8 @@ export function installFeaturesImageIndex(app) {
     const sidePanel = app.state.palette.creationMode === "manual" ? app.state.ui.$("#manualPalettePanel") : app.state.ui.$("#creationDeckPanel");
     if (!sourcePanel || !sidePanel || sidePanel.hidden) return;
     sidePanel.style.minHeight = "";
+    const layout = app.state.ui.$(".creation-layout");
+    if (layout && window.getComputedStyle(layout).flexDirection === "column") return;
     const sourceHeight = Math.ceil(sourcePanel.getBoundingClientRect().height);
     if (sourceHeight > 0) sidePanel.style.minHeight = `${sourceHeight}px`;
   }

@@ -477,7 +477,16 @@
   }
   .tab-content { padding: 8px; }
 
-  .creation-layout { grid-template-columns: 1fr; }
+  .creation-layout { flex-direction: column; }
+  .creation-modes,
+  .creation-deck,
+  #creationDeckPanel,
+  .manual-palette-panel {
+    width: 100%;
+  }
+  .creation-layout.is-manual-mode .creation-modes {
+    flex: 1 1 auto;
+  }
   .builder-halves { grid-template-columns: 1fr; }
 
   .solve-layout { flex-direction: column; }
