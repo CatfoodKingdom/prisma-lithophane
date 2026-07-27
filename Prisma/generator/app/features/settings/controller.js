@@ -294,7 +294,7 @@ export function installFeaturesSettingsController(app) {
     const capModeEl = app.state.ui.$("#cfgCapMode");
     if (capModeEl) capModeEl.value = app.state.settings.config.cap_mode || "appearance_bounded_smooth";
     const capDeBudgetEl = app.state.ui.$("#cfgBoundaryCapDeBudget");
-    if (capDeBudgetEl) capDeBudgetEl.value = app.state.settings.config.boundary_cap_de_budget ?? 0.008;
+    if (capDeBudgetEl) capDeBudgetEl.value = app.state.settings.config.boundary_cap_de_budget ?? 0.004;
     app.commands.syncChromaWeightControlFromConfig();
     _set("#cfgGamutMode", app.commands.normalizeActiveGamutMode(app.state.settings.config.gamut_mode || "hull"));
     _chk("#cfgGamutWhiteRescale", app.state.settings.config.gamut_white_rescale);
@@ -458,7 +458,7 @@ export function installFeaturesSettingsController(app) {
         app.commands.setSettingsSummary(
           "capSummary",
           "Detail Aware",
-          `Keeps the boundary cap structural, preserves appearance against the active model, and places the remaining tonal relief in detail where it stays within ${(app.state.settings.config.boundary_cap_de_budget ?? 0.008).toFixed(3)} dE.`
+          `Keeps the boundary cap structural, preserves appearance against the active model, and places the remaining tonal relief in detail where it stays within ${(app.state.settings.config.boundary_cap_de_budget ?? 0.004).toFixed(3)} dE.`
         );
       } else {
         app.commands.setSettingsSummary(

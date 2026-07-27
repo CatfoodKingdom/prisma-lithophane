@@ -70,6 +70,9 @@ EXCLUDED_ASSETS = (
     "Prisma/lib/photo_stack_model/bundles/runtime_bundle.json",
     "tests/generator/preprocessing/fixtures/wing_d/",
 )
+PUBLIC_DATA_PREFIXES = (
+    "Prisma/data/generator/settings_profiles/",
+)
 
 PERSONAL_PATTERNS = {
     "personal_name": re.compile(b"bran" + b"don", re.IGNORECASE),
@@ -132,7 +135,8 @@ def _collect_allowlist(project_root: Path) -> list[Path]:
         rel = path.relative_to(project_root).as_posix()
         if _is_link(path):
             raise SourcePreparationError(f"Prisma source may not contain filesystem links: {rel}")
-        if any(rel.startswith(prefix) for prefix in EXCLUDED_ASSETS):
+        is_public_data = any(rel.startswith(prefix) for prefix in PUBLIC_DATA_PREFIXES)
+        if any(rel.startswith(prefix) for prefix in EXCLUDED_ASSETS) and not is_public_data:
             continue
         if path.suffix.casefold() in PRISMA_SUFFIXES:
             selected[rel] = path
@@ -206,7 +210,12 @@ def validate_source_tree(source_root: str | Path) -> dict[str, Any]:
         normalized = rel.as_posix()
         if normalized == SOURCE_MANIFEST or normalized in expected:
             raise SourcePreparationError(f"source manifest contains duplicate or reserved path: {normalized}")
-        if normalized.startswith(EXCLUDED_PREFIXES + EXCLUDED_ASSETS):
+        is_public_data = any(
+            normalized.startswith(prefix) for prefix in PUBLIC_DATA_PREFIXES
+        )
+        if normalized.startswith(EXCLUDED_PREFIXES) or (
+            normalized.startswith(EXCLUDED_ASSETS) and not is_public_data
+        ):
             raise SourcePreparationError(f"source manifest contains an excluded path: {normalized}")
         path = root.joinpath(*rel.parts)
         if _is_link(path) or not path.is_file():

@@ -188,6 +188,13 @@ _SETTINGS_PROFILE_SCHEMA_VERSION = 1
 _SYSTEM_SETTINGS_PROFILE_ID = "system-default"
 _SYSTEM_SETTINGS_PROFILE_NAME = "Basic"
 _SETTINGS_PROFILE_STATE_NAME = "state.json"
+_BUNDLED_SETTINGS_PROFILES_DIR = (
+    _PRISMA_DIR / "data" / "generator" / "settings_profiles"
+)
+_BUNDLED_SETTINGS_PROFILE_REVISION = 1
+_DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS = frozenset(
+    {"wing-c-minimal", "wing-c-standard"}
+)
 _SETTINGS_PROFILE_FORBIDDEN_NAME_CHARS = set('<>:"/\\|?*')
 
 _MIN_LINE_LENGTH_MULTIPLIER = 2
@@ -644,7 +651,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "stage4_printability_gate_detail": True,
     "luminance_detail_authoring_printability": "off",
     "d_wb": 0.20,
-    "d_wc_min": 0.08,
+    "d_wc_min": 0.16,
     "t_max": 3.0,
     "k_max": 3,
     "de_threshold": 0.01,
@@ -687,7 +694,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     # Per-operator preprocessing params keyed by preprocessing module id.
     "preprocessing_params": {},
     "cap_mode": "appearance_bounded_smooth",
-    "boundary_cap_de_budget": 0.008,
+    "boundary_cap_de_budget": 0.004,
     "cap_continuity_cleanup": True,
     "cell_mode": "felzenszwalb",
     "smooth_boundaries": False,
@@ -799,7 +806,7 @@ class ConfigPayload(BaseModel):
     white_cap: Optional[str] = None
     layer_height: float = 0.08
     d_wb: float = 0.20
-    d_wc_min: float = 0.08
+    d_wc_min: float = 0.16
     t_max: float = 3.0
     k_max: int = 3
     de_threshold: float = 0.01
@@ -868,7 +875,7 @@ class ConfigPayload(BaseModel):
     source_resample_kernel: str = "lanczos"
     preprocessing_params: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     cap_mode: str = "appearance_bounded_smooth"
-    boundary_cap_de_budget: float = 0.008
+    boundary_cap_de_budget: float = 0.004
     cap_continuity_cleanup: bool = True
     cell_mode: str = "felzenszwalb"
     smooth_boundaries: bool = False
@@ -1187,7 +1194,10 @@ def _force_mandatory_product_settings(cfg: dict) -> dict:
     for key in _QUIET_DROPPED_CONFIG_EXTRAS:
         resolved.pop(key, None)
     layer_height = max(float(resolved.get("layer_height", 0.08) or 0.08), 1e-9)
-    min_cap = max(float(resolved.get("d_wc_min", layer_height) or layer_height), layer_height)
+    raw_min_cap = resolved.get("d_wc_min")
+    if raw_min_cap is None:
+        raw_min_cap = 2.0 * layer_height
+    min_cap = max(float(raw_min_cap), layer_height)
     min_cap_layers = max(1, int(math.ceil(min_cap / layer_height - 1e-9)))
     resolved["d_wc_min"] = round(min_cap_layers * layer_height, 6)
     resolved["model_domain_ingress"] = True
@@ -1520,7 +1530,7 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
         ),
         preprocessing_params=deepcopy(cfg.get("preprocessing_params", {})),
         cap_mode=cfg.get("cap_mode", "appearance_bounded_smooth"),
-        boundary_cap_de_budget=cfg.get("boundary_cap_de_budget", 0.008),
+        boundary_cap_de_budget=cfg.get("boundary_cap_de_budget", 0.004),
         cap_continuity_cleanup=True,
         cell_mode=cfg.get("cell_mode", "felzenszwalb"),
         smooth_boundaries=cfg.get("smooth_boundaries", False),
@@ -3754,9 +3764,16 @@ def _load_settings_profile_state() -> dict:
             data = {}
     else:
         data = {}
+    try:
+        bundled_profile_revision = max(
+            0, int(data.get("bundled_profile_revision") or 0)
+        )
+    except (TypeError, ValueError):
+        bundled_profile_revision = 0
     return {
         "schema_version": _SETTINGS_PROFILE_SCHEMA_VERSION,
         "user_default_profile_id": data.get("user_default_profile_id") or _SYSTEM_SETTINGS_PROFILE_ID,
+        "bundled_profile_revision": bundled_profile_revision,
     }
 
 
@@ -3764,9 +3781,59 @@ def _save_settings_profile_state(state: dict) -> dict:
     payload = {
         "schema_version": _SETTINGS_PROFILE_SCHEMA_VERSION,
         "user_default_profile_id": state.get("user_default_profile_id") or _SYSTEM_SETTINGS_PROFILE_ID,
+        "bundled_profile_revision": max(
+            0, int(state.get("bundled_profile_revision") or 0)
+        ),
     }
     _write_json_atomic(_settings_profile_state_path(), payload)
     return payload
+
+
+def _install_bundled_settings_profiles() -> dict:
+    """Apply the current one-time bundled-profile migration to a Workspace."""
+    state = _load_settings_profile_state()
+    if (
+        state["bundled_profile_revision"]
+        >= _BUNDLED_SETTINGS_PROFILE_REVISION
+    ):
+        return state
+    if not _BUNDLED_SETTINGS_PROFILES_DIR.exists():
+        return state
+
+    for path in _settings_profile_named_paths():
+        try:
+            with open(path, encoding="utf-8") as f:
+                payload = json.load(f)
+            profile_id = str(
+                payload.get("id") or _settings_profile_fallback_id(path)
+            )
+        except Exception as exc:
+            logger.warning(
+                "Skipping invalid settings profile during bundled migration %s: %s",
+                path.name,
+                exc,
+            )
+            continue
+        if profile_id in _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS:
+            path.unlink()
+
+    bundled_paths = sorted(_BUNDLED_SETTINGS_PROFILES_DIR.rglob("*.json"))
+    for source in bundled_paths:
+        with open(source, encoding="utf-8") as f:
+            payload = json.load(f)
+        profile_id = str(payload.get("id") or "").strip()
+        if (
+            not profile_id
+            or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", profile_id)
+            is None
+            or profile_id == _SYSTEM_SETTINGS_PROFILE_ID
+            or profile_id in _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS
+        ):
+            raise RuntimeError(f"Invalid bundled settings profile id in {source}")
+        _write_json_atomic(_settings_profile_path(profile_id), payload)
+
+    state["bundled_profile_revision"] = _BUNDLED_SETTINGS_PROFILE_REVISION
+    return _save_settings_profile_state(state)
 
 
 def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
@@ -3797,6 +3864,7 @@ def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
 
 def _ensure_settings_profile_store() -> dict:
     _SETTINGS_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    _install_bundled_settings_profiles()
     _ensure_system_settings_profile()
     if not _settings_profile_state_path().exists() and not _settings_profile_named_paths():
         _save_settings_profile_state({})
@@ -3901,7 +3969,9 @@ def set_user_default_settings_profile(payload: dict) -> dict:
     if not profile_id:
         raise HTTPException(400, "profile_id required")
     _ = _find_settings_profile(profile_id)
-    _save_settings_profile_state({"user_default_profile_id": profile_id})
+    state = _load_settings_profile_state()
+    state["user_default_profile_id"] = profile_id
+    _save_settings_profile_state(state)
     logger.info("Settings profile user default set: %s", profile_id)
     return {"ok": True, **_settings_profiles_response()}
 
@@ -3957,7 +4027,8 @@ def delete_settings_profile(profile_id: str) -> dict:
 
     state = _load_settings_profile_state()
     if state["user_default_profile_id"] == profile_id:
-        _save_settings_profile_state({"user_default_profile_id": _SYSTEM_SETTINGS_PROFILE_ID})
+        state["user_default_profile_id"] = _SYSTEM_SETTINGS_PROFILE_ID
+        _save_settings_profile_state(state)
     logger.info("Settings profile deleted: %s", existing.name)
     return {"ok": True, **_settings_profiles_response()}
 

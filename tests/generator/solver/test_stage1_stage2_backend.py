@@ -13,80 +13,49 @@ if str(_GEN_DIR) not in sys.path:
 
 from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 from tests.generator.support.staged_backend import (
-    assert_final_visible_white_cap_export_contract as _assert_final_visible_white_cap_export_contract,
     offline_solve_config as _offline_solve_config,
 )
 
-from facade import SolveConfig, solve_full, solve_preview
-from model import to_oklab
-from pipeline import staged_runner
-from pipeline.staged_bridge import build_compatibility_bundle
-from pipeline.staged_artifacts import (
-    FillerGeometryPlan,
-    LateralZonePlan,
-    PlanningDiagnosticsStream,
-    Stage2ObjectiveSummary,
-    VisibleRecipe,
-    VisibleRecipeRawGeometryPlan,
-)
-from pipeline.staged_solver_helpers import (
-    _vectorized_stack_ids,
-    generate_stage1_zone_labels,
-)
-from pipeline.staged_runner import (
-    _ZoneCandidateSet,
+from facade import SolveConfig, solve_preview
+from pipeline.staged.stage2 import objective as stage2_objective
+from pipeline.staged_artifacts import LateralZonePlan
+from pipeline.staged_solver_helpers import generate_stage1_zone_labels
+from pipeline.staged.stage2.contracts import _ZoneCandidateSet
+from pipeline.staged.stage2.refinement import (
     _apply_stage2_boundary_recipe_mutation,
     _iterate_stage2_boundary_recipe_mutation,
-    _apply_stage2_final_color_printability_gate,
     _apply_stage2_fine_override_seam_gate,
-    _apply_stage2_fine_override_printability_gate,
-    _apply_stage4_luminance_detail_authoring_printability,
-    _apply_stage2_localized_width_loss_boundary_nudge,
-    _apply_stage4_boundary_cap_printability_gate,
-    _apply_stage4_detail_printability_gate,
-    _apply_stage4_edge_aware_boundary_restore,
-    _augment_zone_candidates_with_neighbor_local_bests,
-    _author_stage4_detail_zones,
-    _build_stage4_boundary_edge_guard,
-    _build_stage4_boundary_smoothing_guide,
     _build_stage2_fine_recipe_assignments,
-    _build_stage2_objective_summary,
-    _summarize_zone_targets,
-    _compute_stage2_recipe_pressure,
-    _downsample_rgb_image,
-    _effective_color_region_target_mm,
-    _optimize_zone_recipe_labels,
-    _project_zone_labels_to_fine,
-    _prune_zone_candidate_frontiers,
-    _requested_stage4_cap_maps,
-    _run_coord_descent,
-    _rescue_stage2_optical_frontier_candidates,
-    _seed_zone_recipe_labels_with_beam,
-    _shape_stage4_detail_stack_layers,
-    _score_pixels_against_stack_ids,
-    _score_zone_pixels_against_candidates,
-    _smooth_stage4_boundary_cap,
-    _split_stage2_source_edge_subzones,
-    _stage4_boundary_edge_restore_weight,
-    _stage4_lookup_oklab_by_count,
+)
+from pipeline.staged.stage2.printability import (
+    _apply_stage2_final_color_printability_gate,
+    _apply_stage2_fine_override_printability_gate,
+    _apply_stage2_localized_width_loss_boundary_nudge,
     _stage2_printability_failure_snapshot_from_stack_ids,
 )
-from pipeline.staged_printability import (
-    BlueprintPrintabilitySettings,
-    build_layered_blueprint_view,
-    opening_width_loss,
-    opening_width_structure,
-    run_blueprint_printability_diagnostic,
+from pipeline.staged.stage2.candidates import (
+    _augment_zone_candidates_with_neighbor_local_bests,
+    _prune_zone_candidate_frontiers,
+    _rescue_stage2_optical_frontier_candidates,
 )
-from white_cap_contract import (
-    PHYSICAL_GEOMETRY_METADATA_KEY,
-    POLICY_LUMINANCE_DETAIL_CANONICAL,
-    POLICY_STANDARD_APPEARANCE_BOUNDED_STRUCTURAL_SPLIT,
-    POLICY_STANDARD_SMOOTH_VARIABLE_CANONICAL,
-    WHITE_CAP_FIELD_TARGET_METADATA_KEY,
-    WHITE_CAP_FIELD_TARGET_UPPER_SURFACE_KEY,
-    quantized_cover_floor_mm,
+from pipeline.staged.stage2.optimization import (
+    _build_stage2_objective_summary,
+    _optimize_zone_recipe_labels,
+    _run_coord_descent,
+    _seed_zone_recipe_labels_with_beam,
 )
+from pipeline.staged.zone_geometry import _summarize_zone_targets
+from pipeline.staged.coarse_grid import (
+    _downsample_rgb_image,
+    _project_zone_labels_to_fine,
+)
+from pipeline.staged.stage1_zones import _effective_color_region_target_mm
+from pipeline.staged.stage2.objective import (
+    _score_pixels_against_stack_ids,
+    _score_zone_pixels_against_candidates,
+)
+from pipeline.staged.cap_prediction import _stage4_lookup_oklab_by_count
+from pipeline.staged_printability import BlueprintPrintabilitySettings
 
 
 def test_generate_stage1_zone_labels_returns_dense_grid_labels():
@@ -938,12 +907,12 @@ def test_stage2_objective_summary_matches_full_breakdown_reference() -> None:
         local_cost_weights=local_weights,
     )
 
-    neighbors = staged_runner._build_zone_neighbors(3, adjacency, edge_lengths)
+    neighbors = stage2_objective._build_zone_neighbors(3, adjacency, edge_lengths)
     before = []
     after = []
     for zone_id in range(3):
         before.append(
-            staged_runner._zone_objective_breakdown(
+            stage2_objective._zone_objective_breakdown(
                 zone_id=zone_id,
                 candidate_index=int(initial[zone_id]),
                 selected_stack_ids=initial,
@@ -955,7 +924,7 @@ def test_stage2_objective_summary_matches_full_breakdown_reference() -> None:
             )
         )
         after.append(
-            staged_runner._zone_objective_breakdown(
+            stage2_objective._zone_objective_breakdown(
                 zone_id=zone_id,
                 candidate_index=int(selected[zone_id]),
                 selected_stack_ids=selected,
@@ -997,11 +966,11 @@ def test_coordinate_descent_prepared_inputs_match_legacy_loop_exactly() -> None:
         local_cost_weights=None,
     ):
         selected = selected_stack_ids.astype(np.int32, copy=True)
-        selected_totals = staged_runner._selected_total_thicknesses(
+        selected_totals = stage2_objective._selected_total_thicknesses(
             selected,
             candidate_sets,
         )
-        retaining_penalties = staged_runner._candidate_retaining_penalties(
+        retaining_penalties = stage2_objective._candidate_retaining_penalties(
             candidate_sets
         )
         local_weights = (

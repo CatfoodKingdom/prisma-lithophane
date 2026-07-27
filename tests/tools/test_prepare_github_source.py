@@ -20,10 +20,17 @@ def test_source_allowlist_excludes_generator_runtime_scratch(tmp_path: Path) -> 
         _write(tmp_path, relative)
     public_module = _write(tmp_path, "Prisma/generator/app/bootstrap.js")
     public_test = _write(tmp_path, "tests/generator/test_public.py")
+    public_profile = _write(
+        tmp_path,
+        "Prisma/data/generator/settings_profiles/refinement/balanced.json",
+    )
+    private_data = _write(tmp_path, "Prisma/data/private.json")
     _write(tmp_path, "Prisma/generator/.tmp/cache/run.json")
 
     selected = set(_collect_allowlist(tmp_path))
 
     assert public_module in selected
     assert public_test in selected
+    assert public_profile in selected
+    assert private_data not in selected
     assert not any(".tmp" in path.parts for path in selected)

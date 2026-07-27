@@ -292,8 +292,9 @@ def test_run_history_cards_save_naming_and_stable_controls(page: Page):
     delete_button = card.locator(".solve-run-delete-btn")
     header_before_delete = card_header.bounding_box()
     delete_before = delete_button.bounding_box()
+    assert delete_before["width"] == 18
     delete_button.click()
-    assert delete_button.text_content() == "Confirm?"
+    assert delete_button.text_content() == "!"
     header_after_delete = card_header.bounding_box()
     delete_after = delete_button.bounding_box()
     assert header_before_delete == header_after_delete
@@ -303,9 +304,11 @@ def test_run_history_cards_save_naming_and_stable_controls(page: Page):
     solve_header = page.locator("#tabSolve .solve-deck-sidebar .deck-header")
     header_before_clear = solve_header.bounding_box()
     clear_before = clear_button.bounding_box()
+    assert clear_before["width"] == 42
     clear_button.click()
-    assert clear_button.text_content() == "Confirm?"
-    assert page.locator("#exportClearSolveHistoryBtn").text_content() == "Confirm?"
+    assert clear_button.text_content() == "Clear?"
+    assert page.locator("#exportClearSolveHistoryBtn").text_content() == "Clear?"
+    assert clear_button.evaluate("element => element.scrollWidth <= element.clientWidth")
     assert solve_header.bounding_box() == header_before_clear
     assert clear_button.bounding_box() == clear_before
     clear_button.click()
@@ -444,7 +447,16 @@ def test_image_palette_solve_and_diagnostic_lightbox_workflow(
     first_filament.click()
     assert page.locator("#mintPaletteBtn").is_enabled()
     page.locator("#mintPaletteBtn").click()
-    page.locator("#railDeckList .rail-deck-card.is-active").wait_for(state="visible")
+    active_palette_card = page.locator("#railDeckList .rail-deck-card.is-active")
+    active_palette_card.wait_for(state="visible")
+    assert active_palette_card.locator(".rail-deck-remove").bounding_box()["width"] == 18
+    palette_clear = page.locator("#railClearDeckBtn")
+    palette_clear_before = palette_clear.bounding_box()
+    assert palette_clear_before["width"] == 42
+    palette_clear.click()
+    assert palette_clear.text_content() == "Clear?"
+    assert palette_clear.bounding_box() == palette_clear_before
+    assert palette_clear.evaluate("element => element.scrollWidth <= element.clientWidth")
     assert page.locator("#startSolveBtn").is_enabled()
 
     state: dict[str, str] = {}
@@ -474,6 +486,23 @@ def test_image_palette_solve_and_diagnostic_lightbox_workflow(
     result_card = page.locator('.solve-grid-column[data-solve-card-kind="run"]')
     result_card.wait_for(state="visible")
     assert page.locator("#tabSolve").is_visible()
+    remove_button_styles = page.evaluate(
+        """() => {
+            const properties = [
+                "width", "height", "padding", "border", "borderRadius",
+                "backgroundColor", "color",
+            ];
+            const stylesFor = (selector) => {
+                const style = getComputedStyle(document.querySelector(selector));
+                return Object.fromEntries(properties.map((property) => [property, style[property]]));
+            };
+            return {
+                palette: stylesFor(".rail-deck-remove"),
+                solve: stylesFor(".solve-run-delete-btn"),
+            };
+        }"""
+    )
+    assert remove_button_styles["solve"] == remove_button_styles["palette"]
     result_card.click()
     page.locator("#compLightbox").wait_for(state="visible")
     header = page.locator("#compLightbox .comp-lightbox-topbar")

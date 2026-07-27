@@ -32,6 +32,10 @@ analysis = Analysis(
     binaries=pi_heif_binaries,
     datas=[
         (str(GENERATOR / "app"), "Prisma/generator/app"),
+        (
+            str(PRISMA / "data" / "generator" / "settings_profiles"),
+            "Prisma/data/generator/settings_profiles",
+        ),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

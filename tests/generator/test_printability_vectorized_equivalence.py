@@ -21,7 +21,11 @@ _PRISMA_DIR = _GEN_DIR.parent
 if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
-import pipeline.staged_runner as exr  # noqa: E402
+from pipeline.staged import printability_enforcement  # noqa: E402
+from pipeline.staged.stage2 import objective as stage2_objective  # noqa: E402
+from pipeline.staged.stage2 import printability as stage2_printability  # noqa: E402
+from pipeline.staged.stage2 import refinement as stage2_refinement  # noqa: E402
+from pipeline.staged.stage4 import printability as stage4_printability  # noqa: E402
 from pipeline.staged_printability import (  # noqa: E402
     grade_blueprint_component,
     opening_width_loss,
@@ -175,7 +179,7 @@ def _ref_gate(detail_height_mm, settings, base_top_mm=None):
         for _ in range(5):
             removed = 0
             for L in range(max_layer, 0, -1):
-                mask = exr._stage4_absolute_layer_mask(
+                mask = stage4_printability._stage4_absolute_layer_mask(
                     boundary_layers=layers, layer_index=L, ceiling_layers=base_layers
                 )
                 if not np.any(mask):
@@ -200,7 +204,7 @@ def _ref_gate(detail_height_mm, settings, base_top_mm=None):
                         else:
                             limit = np.maximum((L - fb[i64] - 1).astype(np.int32), 0)
                         flat_layers[i64] = np.minimum(flat_layers[i64], limit)
-                        flat_rej[i64] |= np.uint8(exr._stage2_printability_reason_bits(tuple(reasons)))
+                        flat_rej[i64] |= np.uint8(printability_enforcement._stage2_printability_reason_bits(tuple(reasons)))
                         counters["suppressed_layer_pixels"] += int(fi.size)
                         counters["suppressed_components"] += 1
                         removed += int(fi.size)
@@ -222,7 +226,7 @@ def _ref_mutation(**kwargs):
     targets = np.asarray(kwargs["targets"], dtype=np.float32)
     all_oklabs = kwargs["all_oklabs"]
     shape = original.shape
-    current = exr._score_pixels_against_stack_ids(targets, original.reshape(-1), all_oklabs).reshape(shape)
+    current = stage2_objective._score_pixels_against_stack_ids(targets, original.reshape(-1), all_oklabs).reshape(shape)
     best_gain = np.zeros(shape, dtype=np.float32)
     best_stack = original.copy()
     candidate_mask = np.zeros(shape, dtype=bool)
@@ -233,7 +237,7 @@ def _ref_mutation(**kwargs):
         if not np.any(cand):
             return
         candidate_mask |= cand
-        scores = exr._score_pixels_against_stack_ids(targets, neighbor.reshape(-1), all_oklabs).reshape(shape)
+        scores = stage2_objective._score_pixels_against_stack_ids(targets, neighbor.reshape(-1), all_oklabs).reshape(shape)
         gain = (current - scores).astype(np.float32)
         better = cand & (gain > best_gain + np.float32(1e-9))
         best_gain[better] = gain[better]
@@ -325,7 +329,7 @@ def _random_mutation_inputs(rng, shape=(30, 24), n_stacks=6, n_caps=5):
 
 def _ref_color_layer_hard_fail(**kwargs):
     """Reference copy of the original per-component color hard-fail scan."""
-    stack_ids, layer_table = exr._stack_color_layer_labels(
+    stack_ids, layer_table = stage2_printability._stack_color_layer_labels(
         unique_stack_dicts=kwargs["unique_stack_dicts"],
         palette_order=kwargs["palette_order"],
         layer_height_mm=float(kwargs["layer_height_mm"]),
@@ -355,13 +359,13 @@ def _ref_color_layer_hard_fail(**kwargs):
                 idx = np.flatnonzero(fl == cid).astype(np.int32)
                 if idx.size == 0:
                     continue
-                grade, reasons, _h, _w = exr._stage2_component_physical_grade(
+                grade, reasons, _h, _w = printability_enforcement._stage2_component_physical_grade(
                     component_indices=idx, width_px=int(shape[1]), settings=settings)
                 if str(grade) == "hard_fail":
                     hard[idx.astype(np.int64)] = True
                     comps.append((idx, tuple(reasons)))
                 elif kwargs.get("localize_opening_width_loss"):
-                    loss = exr._opening_width_loss_components_for_indices(
+                    loss = printability_enforcement._opening_width_loss_components_for_indices(
                         component_indices=idx, shape=shape, width_structure=ws,
                         structural_only=bool(kwargs.get("structural_opening_width_loss")))
                     if not loss:
@@ -389,7 +393,7 @@ def _ref_mandatory_cap_hard_fail(**kwargs):
     if stack_ids.size == 0:
         return []
     totals = np.asarray(
-        [max(0, int(np.rint(np.float32(exr._stack_total_thickness_mm(uds[int(s)])) / np.float32(lh))))
+        [max(0, int(np.rint(np.float32(stage2_printability._stack_total_thickness_mm(uds[int(s)])) / np.float32(lh))))
          for s in stack_ids.tolist()], dtype=np.int32)
     row_by_pixel = np.full(flat.shape[0], -1, dtype=np.int32)
     for row, sid in enumerate(stack_ids.tolist()):
@@ -415,7 +419,7 @@ def _ref_mandatory_cap_hard_fail(**kwargs):
             idx = np.flatnonzero(fl == cid).astype(np.int32)
             if idx.size == 0:
                 continue
-            grade, reasons, _h, _w = exr._stage2_component_physical_grade(
+            grade, reasons, _h, _w = printability_enforcement._stage2_component_physical_grade(
                 component_indices=idx, width_px=int(shape[1]), settings=settings)
             if str(grade) == "hard_fail":
                 key = np.sort(idx).tobytes()
@@ -426,7 +430,7 @@ def _ref_mandatory_cap_hard_fail(**kwargs):
                 continue
             if not kwargs.get("localize_opening_width_loss"):
                 continue
-            loss = exr._opening_width_loss_components_for_indices(
+            loss = printability_enforcement._opening_width_loss_components_for_indices(
                 component_indices=idx, shape=shape, width_structure=ws,
                 structural_only=bool(kwargs.get("structural_opening_width_loss")))
             if not loss:
@@ -477,7 +481,7 @@ def test_color_layer_hard_fail_matches_reference() -> None:
                 structural_opening_width_loss=structural,
             )
             ref_map, ref_comps = _ref_color_layer_hard_fail(**kwargs)
-            got_map, got_comps = exr._color_layer_hard_fail_components_from_stack_ids(**kwargs)
+            got_map, got_comps = stage2_printability._color_layer_hard_fail_components_from_stack_ids(**kwargs)
             np.testing.assert_array_equal(got_map, ref_map, err_msg=f"case {case} map")
             _assert_components_equal(got_comps, ref_comps, f"case {case} loc={localize}")
 
@@ -494,7 +498,7 @@ def test_mandatory_cap_hard_fail_matches_reference() -> None:
                 structural_opening_width_loss=structural,
             )
             ref_comps = _ref_mandatory_cap_hard_fail(**kwargs)
-            got_comps = exr._mandatory_cap_hard_fail_components_from_stack_ids(**kwargs)
+            got_comps = stage2_printability._mandatory_cap_hard_fail_components_from_stack_ids(**kwargs)
             _assert_components_equal(got_comps, ref_comps, f"case {case} loc={localize}")
 
 
@@ -535,7 +539,7 @@ def test_stage4_layer_failure_batch_matches_component_reference() -> None:
                 localize_opening_width_loss=localize,
                 structural_opening_width_loss=structural,
             )
-            got_failures, got_accepted = exr._stage4_layer_failures_vectorized(
+            got_failures, got_accepted = printability_enforcement._stage4_layer_failures_vectorized(
                 layer_mask=layer_mask,
                 shape=shape,
                 settings=SETTINGS,
@@ -558,10 +562,10 @@ def test_stage4_boundary_gate_clean_layers_skip_component_fallback(monkeypatch) 
     def unexpected_component_scan(**_kwargs):
         raise AssertionError("clean boundary layers should use the batch classifier")
 
-    monkeypatch.setattr(exr, "_stage4_layer_component_failures", unexpected_component_scan)
+    monkeypatch.setattr(stage4_printability, "_stage4_layer_component_failures", unexpected_component_scan)
     height = np.full((12, 10), 0.16, dtype=np.float32)
 
-    result = exr._apply_stage4_boundary_cap_printability_gate(
+    result = stage4_printability._apply_stage4_boundary_cap_printability_gate(
         boundary_cap_height_mm=height,
         settings=SETTINGS,
         apply_changes=True,
@@ -573,7 +577,7 @@ def test_stage4_boundary_gate_clean_layers_skip_component_fallback(monkeypatch) 
 
 
 def test_stage4_boundary_gate_failure_uses_component_repair_fallback(monkeypatch) -> None:
-    original = exr._stage4_layer_component_failures
+    original = stage4_printability._stage4_layer_component_failures
     calls = 0
 
     def recording_component_scan(**kwargs):
@@ -581,11 +585,11 @@ def test_stage4_boundary_gate_failure_uses_component_repair_fallback(monkeypatch
         calls += 1
         return original(**kwargs)
 
-    monkeypatch.setattr(exr, "_stage4_layer_component_failures", recording_component_scan)
+    monkeypatch.setattr(stage4_printability, "_stage4_layer_component_failures", recording_component_scan)
     height = np.zeros((12, 10), dtype=np.float32)
     height[5, 5] = np.float32(0.08)
 
-    result = exr._apply_stage4_boundary_cap_printability_gate(
+    result = stage4_printability._apply_stage4_boundary_cap_printability_gate(
         boundary_cap_height_mm=height,
         settings=SETTINGS,
         apply_changes=False,
@@ -597,7 +601,7 @@ def test_stage4_boundary_gate_failure_uses_component_repair_fallback(monkeypatch
 
 
 def test_stage4_boundary_gate_skips_recursive_cleanup_when_unchanged(monkeypatch) -> None:
-    original = exr._apply_stage4_boundary_cap_printability_gate
+    original = stage4_printability._apply_stage4_boundary_cap_printability_gate
     recursive_calls = 0
 
     def recording_recursive_call(**kwargs):
@@ -606,7 +610,7 @@ def test_stage4_boundary_gate_skips_recursive_cleanup_when_unchanged(monkeypatch
         return original(**kwargs)
 
     monkeypatch.setattr(
-        exr,
+        stage4_printability,
         "_apply_stage4_boundary_cap_printability_gate",
         recording_recursive_call,
     )
@@ -624,7 +628,7 @@ def test_stage4_boundary_gate_skips_recursive_cleanup_when_unchanged(monkeypatch
 
 
 def test_stage4_boundary_gate_keeps_recursive_cleanup_after_mutation(monkeypatch) -> None:
-    original = exr._apply_stage4_boundary_cap_printability_gate
+    original = stage4_printability._apply_stage4_boundary_cap_printability_gate
     recursive_calls = 0
 
     def recording_recursive_call(**kwargs):
@@ -633,7 +637,7 @@ def test_stage4_boundary_gate_keeps_recursive_cleanup_after_mutation(monkeypatch
         return original(**kwargs)
 
     monkeypatch.setattr(
-        exr,
+        stage4_printability,
         "_apply_stage4_boundary_cap_printability_gate",
         recording_recursive_call,
     )
@@ -656,7 +660,7 @@ def test_stage4_boundary_gate_keeps_recursive_cleanup_after_mutation(monkeypatch
 def test_stage4_boundary_gate_keeps_recursive_cleanup_after_unchanged_failure(
     monkeypatch,
 ) -> None:
-    original = exr._apply_stage4_boundary_cap_printability_gate
+    original = stage4_printability._apply_stage4_boundary_cap_printability_gate
     recursive_calls = 0
 
     def recording_recursive_call(**kwargs):
@@ -665,7 +669,7 @@ def test_stage4_boundary_gate_keeps_recursive_cleanup_after_unchanged_failure(
         return original(**kwargs)
 
     monkeypatch.setattr(
-        exr,
+        stage4_printability,
         "_apply_stage4_boundary_cap_printability_gate",
         recording_recursive_call,
     )
@@ -692,7 +696,7 @@ def test_stage4_detail_gate_matches_reference() -> None:
     for case in range(6):
         height, base = _random_heights(rng, (36, 28), with_base=case % 2 == 1)
         ref_h, ref_r, ref_c = _ref_gate(height.copy(), SETTINGS, None if base is None else base.copy())
-        got = exr._apply_stage4_detail_printability_gate(
+        got = stage4_printability._apply_stage4_detail_printability_gate(
             detail_height_mm=height.copy(),
             settings=SETTINGS,
             base_top_mm=None if base is None else base.copy(),
@@ -714,7 +718,7 @@ def test_boundary_mutation_matches_reference() -> None:
         ids, targets, oklab = _random_mutation_inputs(rng)
         kwargs = dict(fine_stack_id_map=ids, targets=targets, all_oklabs=oklab, min_gain=0.01, **mode)
         ref_map, ref_mut, ref_cand, ref_components, ref_counters = _ref_mutation(**kwargs)
-        got = exr._apply_stage2_boundary_recipe_mutation(
+        got = stage2_refinement._apply_stage2_boundary_recipe_mutation(
             **{k: (v.copy() if hasattr(v, "copy") else v) for k, v in kwargs.items()}
         )
         np.testing.assert_array_equal(got.fine_stack_id_map, ref_map, err_msg=f"case {case} map")

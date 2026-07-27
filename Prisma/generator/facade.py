@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import sys
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-import data_paths
 
 # Path setup — Prisma/generator/facade.py
 _GEN_DIR = Path(__file__).resolve().parent
@@ -30,7 +29,7 @@ if str(_PRISMA_DIR) not in sys.path:
 from lut import query_luts_batch
 from solve import predict_image_fast
 from thickness_maps import MapKey, ThicknessMaps
-from filament_order import canonical_palette_order, load_filament_order_registry
+from config.solve_settings import SolveSettings
 from progress import coerce_progress_reporter
 
 if TYPE_CHECKING:
@@ -41,137 +40,13 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class SolveConfig:
-    """All parameters needed for a single solve invocation."""
-    palette: List[str]
-    white_base: str
-    white_cap: Optional[str] = None        # defaults to white_base
-    layer_height: float = 0.08
-    image_sample_pitch_mm: float = 0.20
-    solver_fine_pitch_mm: float = 0.20
-    stage1_coarsening_factor: int = 1
-    stage1_lattice_offset_y_px: int = 0
-    stage1_lattice_offset_x_px: int = 0
-    emit_pressure_diagnostics: bool = False
-    emit_geometry_attribution: bool = False
-    emit_blueprint_printability: bool = True
-    printability_minimum_extrusion_width_mm: float | None = None
-    printability_minimum_line_length_mm: float | None = None
-    enforce_printability: bool = False
-    color_region_target_from_printability: bool = False
-    color_region_target_width_multiplier: float = 2.0
-    stage2_continuity_weight: float | None = None
-    stage2_area_weighted_zone_choice: bool = False
-    stage2_pressure_frontier_rescue: bool = False
-    stage2_source_edge_subzones: bool = False
-    stage2_fine_override_enabled: bool = True
-    stage2_seam_aware_fine_override: bool = False
-    stage2_printability_gate_fine_override: bool = False
-    stage2_final_printability_gate_fine_override: bool = False
-    stage2_printability_repair_fine_override: bool = False
-    stage2_printability_repair_min_mean_gain: float | None = None
-    stage2_fine_override_seam_penalty_weight: float | None = None
-    stage2_boundary_mutation_enabled: bool = True
-    stage2_boundary_mutation_min_gain: float | None = None
-    stage2_boundary_mutation_min_component_mm: float | None = None
-    stage2_boundary_mutation_current_de_percentile: float | None = None
-    stage2_boundary_mutation_max_passes: int | None = 1
-    stage4_printability_gate_detail: bool = False
-    luminance_detail_authoring_printability: str = "off"
-    detail_cap_enabled: bool = True
-    detail_cap_max_layers: int = 5
-    detail_cap_smoothing_enabled: bool = True
-    detail_cap_smoothing_exact_speckle_max_px: int = 1
-    detail_cap_smoothing_cumulative_component_max_px: int = 2
-    detail_cap_smoothing_cumulative_hole_max_px: int = 2
-    max_layers: Optional[int] = None       # auto-derived from t_max if None
-    d_wb: float = 0.20
-    d_wc_min: float = 0.08
-    d_wc_max: Optional[float] = None       # auto-derived if None
-    boundary_cap_authority_mm: float | None = None
-    t_max: float = 3.0
-    k_max: int = 3
-    de_threshold: float = 0.01
-    gamut_mode: str = "hull"              # "hull", "chroma", or "hue_preserving"
-    gamut_white_rescale: bool = False
-    model_domain_ingress: bool = True
-    model_domain_ingress_lut_path: str = str(data_paths.DATA_DIR / "camera_transform")
-    chroma_weight: float = 1.0           # >1 prioritizes color over lightness in KD-tree
-    luminance_handler_enabled: bool = False
-    luminance_handler_mode: str = "boundary_prior"
-    luminance_handler_strength: float = 1.0
-    luminance_handler_optical_authority_fraction: float | None = 0.75
-    luminance_handler_boundary_percentile: float = 95.0
-    luminance_handler_boundary_sigma_px: float | None = None
-    luminance_handler_response_curve: str = "linear"
-    luminance_handler_response_gamma: float = 1.0
-    luminance_handler_detail_residual: bool = True
-    luminance_handler_include_solver_detail: bool = True
-    smooth_kernel: float = 7.5
-    ams_slots: int = 4
-    white_slots: int = 1
-    use_corrections: bool = True
-    corrections: Optional[dict] = None
-    profiles_dir: Optional[Path] = None    # overrides PROFILES_DIR if set
-    appearance_model_provider: str = "photo_stack_bundle"
-    photo_stack_bundle_path: Optional[Path] = None
-    nozzle_diameter: float = 0.20         # mm — physical nozzle size
-    printer_min_line_width_mm: float | None = None
-    cap_mode: str = "smooth_variable"     # "smooth_variable" | "appearance_bounded_smooth"
-    boundary_cap_de_budget: float = 0.008
-    cap_continuity_cleanup: bool = True   # fill single-pixel cap pinholes
-    color_region_target_mm: float = 0.60
-    cell_mode: str = "felzenszwalb"
-    smooth_boundaries: bool = False
-    boundary_smooth_radius: int = 1
+class SolveConfig(SolveSettings):
+    """Public solve request plus facade-owned preprocessing parameters."""
+
     # F1 preprocessing slot: per-operator parameter values keyed by module name.
     # Every registered operator's params block materializes here at its default
     # per R2-F, regardless of enablement. Enablement lives in `module_state`.
     preprocessing_params: Dict[str, Dict[str, object]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        from config.resolution_schema import _apply_resolution_backstop
-
-        self.palette = canonical_palette_order(
-            self.palette,
-            load_filament_order_registry(),
-        )
-        _apply_resolution_backstop(self)
-
-    def effective_white_cap(self) -> str:
-        return self.white_cap if self.white_cap else self.white_base
-
-    def effective_max_layers(self) -> int:
-        if self.max_layers is not None:
-            return self.max_layers
-        return int((self.t_max - self.d_wb - self.d_wc_min) / self.layer_height)
-
-    def effective_d_wc_max(self) -> float:
-        if self.d_wc_max is not None:
-            return self.d_wc_max
-        return self.t_max - self.d_wb - self.d_wc_min
-
-    def effective_boundary_d_wc_max(self) -> float:
-        cap = self.effective_d_wc_max()
-        runtime = getattr(self, "_runtime_luminance_boundary_cap_authority_mm", None)
-        if runtime is not None:
-            cap = min(cap, float(runtime))
-        if self.boundary_cap_authority_mm is None:
-            return max(float(self.d_wc_min), cap)
-        return max(float(self.d_wc_min), min(float(self.boundary_cap_authority_mm), cap))
-
-    def effective_detail_cap_max_layers(self) -> int:
-        if not self.detail_cap_enabled:
-            return 0
-        return max(0, int(self.detail_cap_max_layers))
-
-    def effective_white_slots(self) -> int:
-        if self.white_base != self.effective_white_cap():
-            return max(self.white_slots, 2)
-        return self.white_slots
-
-    def color_slots(self) -> int:
-        return self.ams_slots - self.effective_white_slots()
 
 
 @dataclass
@@ -207,6 +82,7 @@ class SolveResult:
     wc_profile: dict
     stats: SolveStats
     config: SolveConfig
+    resolved_max_layers: Optional[int] = None
     appearance_provider: object | None = None
     reference_image: Optional[np.ndarray] = None
     palette_fit_image: Optional[np.ndarray] = None
@@ -290,7 +166,12 @@ class SolveResult:
         the white-cap term zeroed. When ``None`` (default), the solved maps are
         used, preserving the historical behavior byte-for-byte.
         """
-        ml = max_layers if max_layers is not None else self.config.effective_max_layers()
+        if max_layers is not None:
+            ml = max_layers
+        elif self.resolved_max_layers is not None:
+            ml = self.resolved_max_layers
+        else:
+            ml = self.config.effective_max_layers()
         maps = self.thickness_maps if thickness_maps is None else thickness_maps
         if (
             self.appearance_provider is not None
@@ -461,12 +342,18 @@ def _resolve_pipeline_slots(
     return module_state, preprocessors
 
 
-def _to_pipeline_config(
+def _effective_solve_config(config: SolveConfig) -> SolveConfig:
+    """Return the facade-normalized request without mutating the caller."""
+
+    return replace(config, detail_cap_enabled=True)
+
+
+def _compile_pipeline_config(
     config: SolveConfig,
     preset,
     preprocessors=None,
 ):
-    """Translate SolveConfig to PipelineConfig for the new runner.
+    """Compile an already-normalized facade request for the pipeline.
 
     Resolution is communicated via canonical pitch fields only. The
     `preprocessors` list is the ordered, already-resolved chain constructed
@@ -474,123 +361,24 @@ def _to_pipeline_config(
     """
     from pipeline.state import PipelineConfig
 
-    return PipelineConfig(
-        palette=config.palette,
-        white_base=config.white_base,
-        white_cap=config.white_cap,
-        layer_height=config.layer_height,
-        d_wb=config.d_wb,
-        d_wc_min=config.d_wc_min,
-        d_wc_max=config.d_wc_max,
-        boundary_cap_authority_mm=config.boundary_cap_authority_mm,
-        t_max=config.t_max,
-        k_max=config.k_max,
-        de_threshold=config.de_threshold,
-        smooth_kernel=config.smooth_kernel,
-        gamut_mode=config.gamut_mode,
-        gamut_white_rescale=config.gamut_white_rescale,
-        # Pass the configured Camera Transform ingress path through to image_to_target.
-        model_domain_ingress=config.model_domain_ingress,
-        model_domain_ingress_lut_path=config.model_domain_ingress_lut_path,
-        chroma_weight=config.chroma_weight,
-        luminance_handler_enabled=config.luminance_handler_enabled,
-        luminance_handler_mode=config.luminance_handler_mode,
-        luminance_handler_strength=config.luminance_handler_strength,
-        luminance_handler_optical_authority_fraction=(
-            config.luminance_handler_optical_authority_fraction
-        ),
-        luminance_handler_boundary_percentile=(
-            config.luminance_handler_boundary_percentile
-        ),
-        luminance_handler_boundary_sigma_px=(
-            config.luminance_handler_boundary_sigma_px
-        ),
-        luminance_handler_response_curve=(
-            config.luminance_handler_response_curve
-        ),
-        luminance_handler_response_gamma=(
-            config.luminance_handler_response_gamma
-        ),
-        luminance_handler_detail_residual=(
-            config.luminance_handler_detail_residual
-        ),
-        luminance_handler_include_solver_detail=(
-            config.luminance_handler_include_solver_detail
-        ),
-        ams_slots=config.ams_slots,
-        white_slots=config.white_slots,
-        use_corrections=config.use_corrections,
-        corrections=config.corrections,
-        profiles_dir=config.profiles_dir,
-        appearance_model_provider=config.appearance_model_provider,
-        photo_stack_bundle_path=config.photo_stack_bundle_path,
-        nozzle_diameter=config.nozzle_diameter,
-        printer_min_line_width_mm=config.printer_min_line_width_mm,
-        # Canonical solve-resolution fields only.
-        image_sample_pitch_mm=config.image_sample_pitch_mm,
-        solver_fine_pitch_mm=config.solver_fine_pitch_mm,
-        stage1_coarsening_factor=config.stage1_coarsening_factor,
-        stage1_lattice_offset_y_px=config.stage1_lattice_offset_y_px,
-        stage1_lattice_offset_x_px=config.stage1_lattice_offset_x_px,
-        emit_pressure_diagnostics=config.emit_pressure_diagnostics,
-        emit_geometry_attribution=config.emit_geometry_attribution,
-        emit_blueprint_printability=config.emit_blueprint_printability,
-        printability_minimum_extrusion_width_mm=config.printability_minimum_extrusion_width_mm,
-        printability_minimum_line_length_mm=config.printability_minimum_line_length_mm,
-        enforce_printability=config.enforce_printability,
-        color_region_target_from_printability=(
-            config.color_region_target_from_printability
-        ),
-        color_region_target_width_multiplier=(
-            config.color_region_target_width_multiplier
-        ),
-        stage2_continuity_weight=config.stage2_continuity_weight,
-        stage2_area_weighted_zone_choice=config.stage2_area_weighted_zone_choice,
-        stage2_pressure_frontier_rescue=config.stage2_pressure_frontier_rescue,
-        stage2_source_edge_subzones=config.stage2_source_edge_subzones,
-        stage2_fine_override_enabled=config.stage2_fine_override_enabled,
-        stage2_seam_aware_fine_override=config.stage2_seam_aware_fine_override,
-        stage2_printability_gate_fine_override=config.stage2_printability_gate_fine_override,
-        stage2_final_printability_gate_fine_override=config.stage2_final_printability_gate_fine_override,
-        stage2_printability_repair_fine_override=config.stage2_printability_repair_fine_override,
-        stage2_printability_repair_min_mean_gain=config.stage2_printability_repair_min_mean_gain,
-        stage2_fine_override_seam_penalty_weight=config.stage2_fine_override_seam_penalty_weight,
-        stage2_boundary_mutation_enabled=config.stage2_boundary_mutation_enabled,
-        stage2_boundary_mutation_min_gain=config.stage2_boundary_mutation_min_gain,
-        stage2_boundary_mutation_min_component_mm=(
-            config.stage2_boundary_mutation_min_component_mm
-        ),
-        stage2_boundary_mutation_current_de_percentile=(
-            config.stage2_boundary_mutation_current_de_percentile
-        ),
-        stage2_boundary_mutation_max_passes=(
-            config.stage2_boundary_mutation_max_passes
-        ),
-        stage4_printability_gate_detail=config.stage4_printability_gate_detail,
-        luminance_detail_authoring_printability=(
-            config.luminance_detail_authoring_printability
-        ),
-        detail_cap_enabled=True,
-        detail_cap_max_layers=config.detail_cap_max_layers,
-        detail_cap_smoothing_enabled=config.detail_cap_smoothing_enabled,
-        detail_cap_smoothing_exact_speckle_max_px=(
-            config.detail_cap_smoothing_exact_speckle_max_px
-        ),
-        detail_cap_smoothing_cumulative_component_max_px=(
-            config.detail_cap_smoothing_cumulative_component_max_px
-        ),
-        detail_cap_smoothing_cumulative_hole_max_px=(
-            config.detail_cap_smoothing_cumulative_hole_max_px
-        ),
-        color_region_target_mm=config.color_region_target_mm,
-        cell_mode=config.cell_mode,
-        smooth_boundaries=config.smooth_boundaries,
-        boundary_smooth_radius=config.boundary_smooth_radius,
-        cap_mode=config.cap_mode,
-        boundary_cap_de_budget=config.boundary_cap_de_budget,
-        cap_continuity_cleanup=config.cap_continuity_cleanup,
+    return PipelineConfig.from_solve_settings(
+        config,
         preprocessors=list(preprocessors or []),
         preset=preset,
+    )
+
+
+def _to_pipeline_config(
+    config: SolveConfig,
+    preset,
+    preprocessors=None,
+):
+    """Compatibility helper that normalizes and compiles a facade request."""
+
+    return _compile_pipeline_config(
+        _effective_solve_config(config),
+        preset,
+        preprocessors=preprocessors,
     )
 
 
@@ -602,8 +390,9 @@ def _rms(values: np.ndarray) -> float | None:
     return float(np.sqrt(np.mean(np.square(finite, dtype=np.float64))))
 
 
-def _compute_palette_fit_diagnostics(state, config: SolveConfig) -> Dict[str, object]:
+def _compute_palette_fit_diagnostics(state) -> Dict[str, object]:
     """Compute local best-case palette fit diagnostics for full solve runs."""
+    config = state.config
     preset_name = getattr(getattr(state.config, "preset", None), "name", "")
     if preset_name != "full":
         return {}
@@ -723,7 +512,7 @@ def _compute_palette_fit_diagnostics(state, config: SolveConfig) -> Dict[str, ob
 
 def _state_to_solve_result(state, config: SolveConfig) -> SolveResult:
     """Convert PipelineState back to SolveResult for backward compatibility."""
-    palette_fit = _compute_palette_fit_diagnostics(state, config)
+    palette_fit = _compute_palette_fit_diagnostics(state)
     return SolveResult(
         thickness_maps=state.thickness_maps,
         color_profiles=state.profiles.color_profiles,
@@ -731,6 +520,7 @@ def _state_to_solve_result(state, config: SolveConfig) -> SolveResult:
         wc_profile=state.profiles.wc_profile,
         stats=state.stats,
         config=config,
+        resolved_max_layers=state.config.effective_max_layers(),
         appearance_provider=getattr(state, "appearance_provider", None),
         reference_image=np.array(state.image, copy=True),
         palette_fit_image=palette_fit.get("palette_fit_image"),
@@ -769,19 +559,20 @@ def solve_preview(
     from pipeline.state import PREVIEW_PRESET
     from pipeline.runner import run_pipeline
 
+    effective_config = _effective_solve_config(config)
     _, preprocessors = _resolve_pipeline_slots(
-        config,
+        effective_config,
         PREVIEW_PRESET,
         modules_path=modules_path,
         module_state=module_state,
     )
-    pcfg = _to_pipeline_config(
-        config,
+    pcfg = _compile_pipeline_config(
+        effective_config,
         PREVIEW_PRESET,
         preprocessors=preprocessors,
     )
     state = run_pipeline(img, pcfg, progress=progress)
-    return _state_to_solve_result(state, config)
+    return _state_to_solve_result(state, effective_config)
 
 def solve_full(
     img: np.ndarray,
@@ -794,14 +585,18 @@ def solve_full(
     from pipeline.state import FULL_PRESET
     from pipeline.runner import run_pipeline
 
+    effective_config = _effective_solve_config(config)
     _, preprocessors = _resolve_pipeline_slots(
-        config,
+        effective_config,
         FULL_PRESET,
         modules_path=modules_path,
         module_state=module_state,
     )
 
-    pcfg = _to_pipeline_config(config, FULL_PRESET,
-                                preprocessors=preprocessors)
+    pcfg = _compile_pipeline_config(
+        effective_config,
+        FULL_PRESET,
+        preprocessors=preprocessors,
+    )
     state = run_pipeline(img, pcfg, progress=progress)
-    return _state_to_solve_result(state, config)
+    return _state_to_solve_result(state, effective_config)

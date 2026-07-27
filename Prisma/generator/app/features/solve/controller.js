@@ -43,7 +43,7 @@ export function installFeaturesSolveController(app) {
     const blockReason = app.commands.getSolveRunDeleteBlockReason(run);
     const armed = !blockReason && app.state.solve.solveRunDeleteArmedId === run.id;
     const label = armed ? "Click again to delete this run" : (blockReason || "Delete this run");
-    return `<span class="solve-run-delete-slot"><button class="solve-run-delete-btn compact-deck-card-remove ghost-button xxs${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "Confirm?" : app.commands.xIconSvg()}</button></span>`;
+    return `<span class="solve-run-delete-slot"><button class="solve-run-delete-btn compact-deck-card-remove ghost-button xxs${armed ? " confirm-pending" : ""}" data-run-id="${app.commands.escAttr(run.id)}" title="${app.commands.escAttr(label)}" aria-label="${app.commands.escAttr(label)}"${blockReason ? " disabled aria-disabled=\"true\"" : ""}>${armed ? "!" : app.commands.xIconSvg()}</button></span>`;
   }
 
   function buildSolveRunSupportChipsHtml(run) {
@@ -210,7 +210,7 @@ export function installFeaturesSolveController(app) {
         ? "Confirm clearing all solve runs"
         : "Clear all solve runs";
     app.commands.getSolveHistoryClearButtons().forEach((btn) => {
-      btn.textContent = armed ? "Confirm?" : "Clear";
+      btn.textContent = armed ? "Clear?" : "Clear";
       btn.classList.toggle("confirm-pending", armed);
       btn.title = title;
       btn.setAttribute("aria-label", accessibleLabel);

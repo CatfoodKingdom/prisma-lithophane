@@ -399,8 +399,6 @@ function _processSuggestResults(suggestions) {
           coverage_pct: cand.coverage_pct || 0,
           mean_de: cand.mean_de || 0,
           suggestion_mean_de: cand.suggestion_mean_de ?? cand.mean_de ?? 0,
-          n_out_of_gamut: 0,
-          total_pixels: 0,
         },
         quality_metrics: null,
         saved: false,

@@ -1,0 +1,9 @@
+"""Shared recipe-pressure thresholds used by solving and diagnostics."""
+
+_STAGE2_PRESSURE_ACTIVE_THRESHOLD = 0.01
+_STAGE2_GEOMETRY_ATTR_SOURCE_EDGE_PERCENTILE = 85.0
+
+__all__ = (
+    "_STAGE2_PRESSURE_ACTIVE_THRESHOLD",
+    "_STAGE2_GEOMETRY_ATTR_SOURCE_EDGE_PERCENTILE",
+)

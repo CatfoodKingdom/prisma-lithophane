@@ -44,9 +44,10 @@ _SWAP_SCOUT_MAX_LONG_SIDE = 384
 
 
 def _swap_banding_requested(config: PipelineConfig) -> bool:
+    runtime = getattr(config, "runtime", None)
     return (
         str(getattr(config.preset, "name", "")) == "full"
-        and not bool(getattr(config, "_swap_banding_scout", False))
+        and not bool(getattr(runtime, "swap_banding_scout", False))
         and len(config.palette) > config.color_slots()
     )
 
@@ -85,7 +86,7 @@ def _run_swap_banding_scout(
 ) -> PipelineState:
     """Run the existing full spline flow at bounded resolution without banding."""
     scout_config = replace(config)
-    setattr(scout_config, "_swap_banding_scout", True)
+    scout_config.runtime.swap_banding_scout = True
     return run_pipeline(
         _downsample_swap_scout_image(image),
         scout_config,
@@ -949,7 +950,7 @@ def run_pipeline(
             - float(config.d_wb)
             - sum(plan.band_layers) * float(config.layer_height)
         )
-        setattr(config, "_runtime_swap_band_cap_limit_mm", cap_limit_mm)
+        config.runtime.swap_band_cap_limit_mm = cap_limit_mm
         state.swap_grouping["cap_limit_mm"] = float(cap_limit_mm)
         state.diagnostics["__solve_identity__"]["d_wc_max"] = float(
             config.effective_boundary_d_wc_max()

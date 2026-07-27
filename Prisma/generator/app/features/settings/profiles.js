@@ -1694,7 +1694,7 @@ export function installFeaturesSettingsProfiles(app) {
       const capModeEl = app.state.ui.$("#cfgCapMode");
       if (capModeEl) capModeEl.value = "smooth_variable";
     }
-    app.state.settings.config.boundary_cap_de_budget = app.commands.readBoundedNumberInput("cfgBoundaryCapDeBudget", app.state.settings.config.boundary_cap_de_budget ?? 0.008, { min: 0 });
+    app.state.settings.config.boundary_cap_de_budget = app.commands.readBoundedNumberInput("cfgBoundaryCapDeBudget", app.state.settings.config.boundary_cap_de_budget ?? 0.004, { min: 0 });
     app.state.settings.config.detail_cap_enabled = true;
     {
       const detailLayerRaw = String(app.state.ui.$("#cfgDetailCapMaxLayers")?.value || "").trim();

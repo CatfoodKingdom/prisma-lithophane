@@ -1,6 +1,7 @@
 """Regression tests for generator settings parsing."""
 
 from copy import deepcopy
+import json
 from pathlib import Path
 import re
 
@@ -9,11 +10,112 @@ import pytest
 from PIL import Image
 
 
-def test_default_smoothing_radius_is_1mm_at_default_pitch():
+def test_reviewed_solve_quality_defaults_are_consistent():
+    import server
+    from facade import SolveConfig
+    from pipeline.state import PipelineConfig
+
+    configs = [
+        server._DEFAULT_CONFIG,
+        server.ConfigPayload().model_dump(),
+        vars(SolveConfig(palette=[], white_base="bambu-tough-white")),
+        vars(PipelineConfig(palette=[], white_base="bambu-tough-white")),
+    ]
+    assert server._DEFAULT_CONFIG["solver_fine_pitch_mm"] == 0.2
+    for config in configs:
+        assert config["d_wc_min"] == 0.16
+        assert config["smooth_kernel"] == 5.0
+        assert config["boundary_cap_de_budget"] == 0.004
+        assert config["gamut_white_rescale"] is False
+        assert config["stage2_boundary_mutation_enabled"] is True
+
+
+def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
+    generator_root = Path(__file__).resolve().parents[2] / "Prisma" / "generator"
+    application_context = (
+        generator_root / "app" / "core" / "application-context.js"
+    ).read_text(encoding="utf-8")
+    index_html = (generator_root / "app" / "index.html").read_text(encoding="utf-8")
+
+    assert "d_wc_min: 0.16," in application_context
+    assert "smooth_kernel: 5.0," in application_context
+    assert "boundary_cap_de_budget: 0.004," in application_context
+    assert 'id="cfgDWcMin" class="unit-input" value="2"' in index_html
+    assert 'id="cfgSmoothKernel" class="unit-input" value="1"' in index_html
+    assert 'id="cfgBoundaryCapDeBudget" class="unit-input" value="0.004"' in index_html
+
+
+def test_missing_product_min_cap_defaults_to_two_layers_but_one_remains_allowed():
     import server
 
-    assert server._DEFAULT_CONFIG["solver_fine_pitch_mm"] == 0.2
-    assert server._DEFAULT_CONFIG["smooth_kernel"] == 5.0
+    defaulted = server._force_mandatory_product_settings({"layer_height": 0.12})
+    explicit_one = server._force_mandatory_product_settings(
+        {"layer_height": 0.12, "d_wc_min": 0.12}
+    )
+
+    assert defaulted["d_wc_min"] == 0.24
+    assert explicit_one["d_wc_min"] == 0.12
+
+
+def test_bundled_named_profiles_are_only_the_reviewed_refinement_recipes():
+    profile_root = (
+        Path(__file__).resolve().parents[2]
+        / "Prisma"
+        / "data"
+        / "generator"
+        / "settings_profiles"
+    )
+    payloads = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(profile_root.rglob("*.json"))
+    ]
+
+    assert {payload["id"] for payload in payloads} == {
+        "refinement-balanced",
+        "refinement-strong",
+    }
+    assert {payload["name"] for payload in payloads} == {
+        "Refinement — Balanced",
+        "Refinement — Strong",
+    }
+
+    by_id = {payload["id"]: payload for payload in payloads}
+    expected_factors = {
+        "refinement-balanced": {
+            "t_max": 3.5,
+            "k_max": 3,
+            "detail_cap_max_layers": 9,
+            "stage1_coarsening_factor": 1,
+            "stage2_boundary_mutation_max_passes": 2,
+        },
+        "refinement-strong": {
+            "t_max": 3.0,
+            "k_max": 4,
+            "detail_cap_max_layers": 5,
+            "stage1_coarsening_factor": 2,
+            "stage2_boundary_mutation_max_passes": 3,
+        },
+    }
+    for profile_id, factors in expected_factors.items():
+        payload = by_id[profile_id]
+        settings = payload["settings"]
+        modules = payload["modules"]
+
+        assert payload["kind"] == "named"
+        assert settings["boundary_cap_de_budget"] == 0.004
+        assert settings["d_wc_min"] == 0.16
+        assert settings["image_sample_pitch_mm"] == 0.4
+        assert settings["solver_fine_pitch_mm"] == 0.4
+        assert settings["smooth_kernel"] * settings["solver_fine_pitch_mm"] == 2.0
+        assert settings["color_region_target_mm"] == 0.8
+        assert settings["cell_mode"] == "felzenszwalb"
+        assert settings["gamut_mode"] == "hull"
+        assert settings["gamut_white_rescale"] is False
+        assert settings["luminance_mode"] == "standard"
+        assert modules["b1_printscale_bilateral"] is True
+        assert sum(bool(enabled) for enabled in modules.values()) == 1
+        for key, expected in factors.items():
+            assert settings[key] == expected
 
 
 def test_default_detail_cap_depth_is_5_layers():
@@ -36,6 +138,7 @@ def test_retired_luminance_tiebreak_has_no_active_configuration_surface():
         generator_root / "pipeline" / "staged_runner.py",
         generator_root / "pipeline" / "luminance_handler.py",
     ]
+    active_paths.extend((generator_root / "pipeline" / "staged").rglob("*.py"))
     active_paths.extend((generator_root / "app").rglob("*.js"))
 
     for path in active_paths:
@@ -761,7 +864,9 @@ def test_settings_profile_normalizer_drops_retired_module_and_setting_keys(tmp_p
     assert record.modules["a1_bilateral_denoise"] is True
 
 
-def test_settings_profile_store_bootstraps_system_default_without_legacy_import(tmp_path, monkeypatch):
+def test_settings_profile_store_bootstraps_system_and_reviewed_bundled_profiles(
+    tmp_path, monkeypatch
+):
     import server
 
     settings_dir = tmp_path / "settings_profiles"
@@ -769,8 +874,26 @@ def test_settings_profile_store_bootstraps_system_default_without_legacy_import(
 
     store = server._ensure_settings_profile_store()
 
-    assert [profile.kind for profile in store["profiles"]] == ["system"]
+    assert {profile.id for profile in store["profiles"]} == {
+        server._SYSTEM_SETTINGS_PROFILE_ID,
+        "refinement-balanced",
+        "refinement-strong",
+    }
     assert store["state"]["user_default_profile_id"] == server._SYSTEM_SETTINGS_PROFILE_ID
+    assert (
+        store["state"]["bundled_profile_revision"]
+        == server._BUNDLED_SETTINGS_PROFILE_REVISION
+    )
+
+    (settings_dir / "refinement-balanced.json").unlink()
+    after_user_delete = server._ensure_settings_profile_store()
+
+    assert "refinement-balanced" not in {
+        profile.id for profile in after_user_delete["profiles"]
+    }
+    assert "refinement-strong" in {
+        profile.id for profile in after_user_delete["profiles"]
+    }
 
 
 def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_overrides(tmp_path, monkeypatch):
@@ -851,32 +974,32 @@ def test_delete_nested_settings_profile_removes_source_and_overrides(tmp_path, m
     settings_dir = tmp_path / "settings_profiles"
     monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
 
-    nested_path = settings_dir / "wing-c" / "standard.json"
-    top_level_path = settings_dir / "wing-c-standard.json"
+    nested_path = settings_dir / "custom" / "standard.json"
+    top_level_path = settings_dir / "custom-standard.json"
     nested_path.parent.mkdir(parents=True, exist_ok=True)
     nested_path.write_text(server.json.dumps({
-        "id": "wing-c-standard",
+        "id": "custom-standard",
         "kind": "named",
-        "name": "Wing C Standard",
+        "name": "Custom Standard",
         "settings": {},
         "modules": {},
     }), encoding="utf-8")
     top_level_path.write_text(server.json.dumps({
-        "id": "wing-c-standard",
+        "id": "custom-standard",
         "kind": "named",
-        "name": "Wing C Standard Override",
+        "name": "Custom Standard Override",
         "settings": {},
         "modules": {},
     }), encoding="utf-8")
     (settings_dir / "state.json").write_text(server.json.dumps({
-        "user_default_profile_id": "wing-c-standard",
+        "user_default_profile_id": "custom-standard",
     }), encoding="utf-8")
 
-    deleted = server.delete_settings_profile("wing-c-standard")
+    deleted = server.delete_settings_profile("custom-standard")
 
     assert not top_level_path.exists()
     assert not nested_path.exists()
-    assert all(p["id"] != "wing-c-standard" for p in deleted["profiles"])
+    assert all(p["id"] != "custom-standard" for p in deleted["profiles"])
     assert deleted["user_default_profile_id"] == server._SYSTEM_SETTINGS_PROFILE_ID
 
 

@@ -379,6 +379,26 @@ test("palette suggestions use solve-mode names for newly generated cards", async
 
   assert.equal(app.state.palette.stagingDeck[0].name, "Color suggested 1");
   assert.equal(app.state.palette.stagingDeck[1].name, "Luminance suggested 2");
+  assert.equal("n_out_of_gamut" in app.state.palette.stagingDeck[0].gamut, false);
+  assert.equal("total_pixels" in app.state.palette.stagingDeck[0].gamut, false);
+});
+
+test("palette hover preview omits the internal out-of-gamut diagnostic", async () => {
+  const { app } = await harness();
+  app.commands.esc = (value) => String(value);
+  const html = app.commands.buildRailDeckHoverPreview({
+    name: "Preview palette",
+    filament_ids: ["red"],
+    gamut: {
+      status: "done",
+      suggestion_mean_de: 0.024,
+      n_out_of_gamut: 37,
+      total_pixels: 100,
+    },
+  });
+
+  assert.match(html, /Suggest dE 0\.024/);
+  assert.doesNotMatch(html, /\bOOG\b|>37</);
 });
 
 test("suggestion clear confirmation cancels stale timers and synchronizes accessibility", async () => {
@@ -675,8 +695,8 @@ test("solve-history clear controls stay synchronized and disable invalid actions
   assert.equal(solveClear.disabled, false);
   assert.equal(exportClear.disabled, false);
   app.commands.armSolveHistoryClearConfirm();
-  assert.equal(solveClear.textContent, "Confirm?");
-  assert.equal(exportClear.textContent, "Confirm?");
+  assert.equal(solveClear.textContent, "Clear?");
+  assert.equal(exportClear.textContent, "Clear?");
   assert.equal(solveClear["aria-label"], "Confirm clearing all solve runs");
   app.commands.resetSolveHistoryClearConfirm();
   assert.equal(solveClear.textContent, "Clear");
@@ -711,6 +731,7 @@ test("solve cards expose listbox semantics, omit loaded provenance, and gate Sav
   assert.match(cards.innerHTML, /aria-selected="false"/);
   assert.match(cards.innerHTML, /solve-run-save-btn[^>]+disabled/);
   assert.match(cards.innerHTML, /solve-run-delete-slot/);
+  assert.doesNotMatch(cards.innerHTML, />Confirm\?</);
   assert.match(cards.innerHTML, /solve-run-support-tray/);
   assert.match(cards.innerHTML, /White Base\/Cap: White/);
   assert.doesNotMatch(cards.innerHTML, />Loaded<\/span>|solve-run-loaded-badge/);

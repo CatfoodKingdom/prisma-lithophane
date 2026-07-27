@@ -50,3 +50,7 @@ def test_generator_spec_collects_heif_decoder_and_native_libraries() -> None:
 
 def test_generator_frontend_has_no_obsolete_bundled_printer_profile() -> None:
     assert not (ROOT / "Prisma" / "generator" / "app" / "printers.json").exists()
+
+
+def test_generator_spec_bundles_reviewed_settings_profiles() -> None:
+    assert '"Prisma/data/generator/settings_profiles"' in SPEC
