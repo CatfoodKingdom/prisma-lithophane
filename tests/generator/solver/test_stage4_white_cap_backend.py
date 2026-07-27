@@ -11,66 +11,33 @@ _GEN_DIR = Path(__file__).resolve().parents[3] / "Prisma" / "generator"
 if str(_GEN_DIR) not in sys.path:
     sys.path.insert(0, str(_GEN_DIR))
 
-from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 from tests.generator.support.staged_backend import (
     assert_final_visible_white_cap_export_contract as _assert_final_visible_white_cap_export_contract,
-    offline_solve_config as _offline_solve_config,
 )
 
-from facade import SolveConfig, solve_full, solve_preview
+from facade import SolveConfig
 from model import to_oklab
-from pipeline import staged_runner
+from pipeline.staged import postsolve_diagnostics
+from pipeline.staged.stage2 import service as stage2_service
+from pipeline.staged.stage4 import boundary as stage4_boundary
+from pipeline.staged.stage4 import detail as stage4_detail
+from pipeline.staged.stage4 import requests as stage4_requests
+from pipeline.staged.stage4 import service as stage4_service
 from pipeline.staged_bridge import build_compatibility_bundle
 from pipeline.staged_artifacts import (
     FillerGeometryPlan,
-    LateralZonePlan,
     PlanningDiagnosticsStream,
     Stage2ObjectiveSummary,
     VisibleRecipe,
     VisibleRecipeRawGeometryPlan,
 )
-from pipeline.staged_solver_helpers import (
-    _vectorized_stack_ids,
-    generate_stage1_zone_labels,
-)
-from pipeline.staged_runner import (
-    _ZoneCandidateSet,
-    _apply_stage2_boundary_recipe_mutation,
-    _iterate_stage2_boundary_recipe_mutation,
-    _apply_stage2_final_color_printability_gate,
-    _apply_stage2_fine_override_seam_gate,
-    _apply_stage2_fine_override_printability_gate,
+from pipeline.staged_solver_helpers import _vectorized_stack_ids
+from pipeline.staged.stage4.printability import (
     _apply_stage4_luminance_detail_authoring_printability,
-    _apply_stage2_localized_width_loss_boundary_nudge,
     _apply_stage4_boundary_cap_printability_gate,
     _apply_stage4_detail_printability_gate,
-    _apply_stage4_edge_aware_boundary_restore,
-    _augment_zone_candidates_with_neighbor_local_bests,
-    _author_stage4_detail_zones,
-    _build_stage4_boundary_edge_guard,
-    _build_stage4_boundary_smoothing_guide,
-    _build_stage2_fine_recipe_assignments,
-    _build_stage2_objective_summary,
-    _summarize_zone_targets,
-    _compute_stage2_recipe_pressure,
-    _downsample_rgb_image,
-    _effective_color_region_target_mm,
-    _optimize_zone_recipe_labels,
-    _project_zone_labels_to_fine,
-    _prune_zone_candidate_frontiers,
-    _requested_stage4_cap_maps,
-    _run_coord_descent,
-    _rescue_stage2_optical_frontier_candidates,
-    _seed_zone_recipe_labels_with_beam,
-    _shape_stage4_detail_stack_layers,
-    _score_pixels_against_stack_ids,
-    _score_zone_pixels_against_candidates,
-    _smooth_stage4_boundary_cap,
-    _split_stage2_source_edge_subzones,
-    _stage4_boundary_edge_restore_weight,
-    _stage4_lookup_oklab_by_count,
-    _stage2_printability_failure_snapshot_from_stack_ids,
 )
+from pipeline.staged.stage4.requests import _requested_stage4_cap_maps
 from pipeline.staged_printability import (
     BlueprintPrintabilitySettings,
     build_layered_blueprint_view,
@@ -79,13 +46,8 @@ from pipeline.staged_printability import (
     run_blueprint_printability_diagnostic,
 )
 from white_cap_contract import (
-    PHYSICAL_GEOMETRY_METADATA_KEY,
-    POLICY_LUMINANCE_DETAIL_CANONICAL,
     POLICY_STANDARD_APPEARANCE_BOUNDED_STRUCTURAL_SPLIT,
-    POLICY_STANDARD_SMOOTH_VARIABLE_CANONICAL,
-    WHITE_CAP_FIELD_TARGET_METADATA_KEY,
     WHITE_CAP_FIELD_TARGET_UPPER_SURFACE_KEY,
-    quantized_cover_floor_mm,
 )
 
 
@@ -243,12 +205,12 @@ def _stage4_boundary_plan_from_requested_cap(
         )
 
     monkeypatch.setattr(
-        staged_runner,
+        stage4_service,
         "_requested_stage4_cap_maps",
         fake_requested_stage4_cap_maps,
     )
     diagnostics = PlanningDiagnosticsStream()
-    cap_plan = staged_runner._build_stage4_cap_plan(
+    cap_plan = stage4_service.build_cap_plan(
         SimpleNamespace(config=config),
         visible_plan,
         filler_plan,
@@ -309,20 +271,20 @@ def _stage4_split_plan_from_requested_cap(
         return np.asarray(detail_mask, dtype=np.float32)
 
     monkeypatch.setattr(
-        staged_runner,
+        stage4_service,
         "_requested_stage4_cap_maps",
         fake_requested_stage4_cap_maps,
     )
     monkeypatch.setattr(
-        staged_runner,
+        stage4_service,
         "_compute_stage4_detail_optical_gain_map",
         fake_optical_gain_map,
     )
     if luminance_enabled:
-        monkeypatch.setattr(staged_runner, "luminance_handler_enabled", lambda cfg: True)
+        monkeypatch.setattr(stage4_service, "luminance_handler_enabled", lambda cfg: True)
     diagnostics = PlanningDiagnosticsStream()
     state = SimpleNamespace(config=config, debug_maps={})
-    cap_plan = staged_runner._build_stage4_cap_plan(
+    cap_plan = stage4_service.build_cap_plan(
         state,
         visible_plan,
         filler_plan,
@@ -332,8 +294,8 @@ def _stage4_split_plan_from_requested_cap(
 
 
 def test_stage4_appearance_bounded_mode_is_registered():
-    assert "appearance_bounded_smooth" in staged_runner._STAGE4_SUPPORTED_CAP_MODES
-    assert "fixed" not in staged_runner._STAGE4_SUPPORTED_CAP_MODES
+    assert "appearance_bounded_smooth" in stage4_requests._STAGE4_SUPPORTED_CAP_MODES
+    assert "fixed" not in stage4_requests._STAGE4_SUPPORTED_CAP_MODES
 
 
 def test_stage4_appearance_bound_accepts_visually_cheap_smoothing():
@@ -347,7 +309,7 @@ def test_stage4_appearance_bound_accepts_visually_cheap_smoothing():
         dtype=np.float32,
     )
     visible_plan = _appearance_bound_visible_plan(shape=(1, 1), cap_oklab_rows=rows)
-    accepted, debug_maps, summary = staged_runner._apply_stage4_boundary_appearance_bound(
+    accepted, debug_maps, summary = stage4_boundary._apply_stage4_boundary_appearance_bound(
         state=_appearance_bound_state(de_budget=0.008),
         visible_plan=visible_plan,
         raw_cap=np.asarray([[0.08]], dtype=np.float32),
@@ -375,7 +337,7 @@ def test_stage4_appearance_bound_rejects_damaging_smooth_cap():
         dtype=np.float32,
     )
     visible_plan = _appearance_bound_visible_plan(shape=(1, 1), cap_oklab_rows=rows)
-    accepted, debug_maps, summary = staged_runner._apply_stage4_boundary_appearance_bound(
+    accepted, debug_maps, summary = stage4_boundary._apply_stage4_boundary_appearance_bound(
         state=_appearance_bound_state(de_budget=0.001),
         visible_plan=visible_plan,
         raw_cap=np.asarray([[0.08]], dtype=np.float32),
@@ -407,7 +369,7 @@ def test_stage4_appearance_bound_chooses_intermediate_layer():
         dtype=np.float32,
     )
     visible_plan = _appearance_bound_visible_plan(shape=(1, 1), cap_oklab_rows=rows)
-    accepted, debug_maps, summary = staged_runner._apply_stage4_boundary_appearance_bound(
+    accepted, debug_maps, summary = stage4_boundary._apply_stage4_boundary_appearance_bound(
         state=_appearance_bound_state(de_budget=0.008),
         visible_plan=visible_plan,
         raw_cap=np.asarray([[0.08]], dtype=np.float32),
@@ -439,7 +401,7 @@ def test_stage4_appearance_bound_records_debug_maps():
         dtype=np.float32,
     )
     visible_plan = _appearance_bound_visible_plan(shape=(2, 2), cap_oklab_rows=rows)
-    accepted, debug_maps, summary = staged_runner._apply_stage4_boundary_appearance_bound(
+    accepted, debug_maps, summary = stage4_boundary._apply_stage4_boundary_appearance_bound(
         state=_appearance_bound_state(de_budget=0.008),
         visible_plan=visible_plan,
         raw_cap=np.full((2, 2), 0.08, dtype=np.float32),
@@ -515,7 +477,7 @@ def test_stage4_appearance_bound_wires_through_requested_cap_maps(monkeypatch):
         return np.full((1, 1), 0.32, dtype=np.float32)
 
     monkeypatch.setattr(
-        staged_runner,
+        stage4_requests,
         "_smooth_stage4_boundary_cap",
         fake_smooth_stage4_boundary_cap,
     )
@@ -586,8 +548,8 @@ def test_stage4_appearance_bound_skips_luminance_handler(monkeypatch):
     state.profiles = SimpleNamespace()
     diagnostics = PlanningDiagnosticsStream()
 
-    monkeypatch.setattr(staged_runner, "luminance_handler_enabled", lambda cfg: True)
-    monkeypatch.setattr(staged_runner, "LuminanceHandler", _FakeLuminanceHandler)
+    monkeypatch.setattr(stage4_requests, "luminance_handler_enabled", lambda cfg: True)
+    monkeypatch.setattr(stage4_requests, "LuminanceHandler", _FakeLuminanceHandler)
 
     requested, detail_reference, _ = _requested_stage4_cap_maps(
         state,
@@ -622,6 +584,7 @@ def test_luminance_handler_requires_active_photo_stack_provider():
 
 def test_luminance_runtime_records_authority_pass_and_provider(monkeypatch):
     from pipeline import luminance_handler as luminance_mod
+    from pipeline.state import PipelineRuntime
 
     reference = luminance_mod.LuminanceReference(
         source_l=np.asarray([[0.1]], dtype=np.float32),
@@ -645,7 +608,10 @@ def test_luminance_runtime_records_authority_pass_and_provider(monkeypatch):
             return reference
 
     monkeypatch.setattr(luminance_mod, "LuminanceHandler", _FakeRuntimeHandler)
-    cfg = SimpleNamespace(luminance_handler_enabled=True)
+    cfg = SimpleNamespace(
+        luminance_handler_enabled=True,
+        runtime=PipelineRuntime(),
+    )
     state = SimpleNamespace(
         config=cfg,
         profiles=SimpleNamespace(),
@@ -912,7 +878,7 @@ def test_stage4_optical_gain_uses_active_appearance_provider():
     )
     state = SimpleNamespace(config=_Config(), appearance_provider=provider)
 
-    gain = staged_runner._compute_stage4_detail_optical_gain_map(
+    gain = stage4_detail._compute_stage4_detail_optical_gain_map(
         state=state,
         visible_plan=visible_plan,
         boundary_cap_height=np.asarray([[0.20]], dtype=np.float32),
@@ -965,7 +931,7 @@ def test_stage4_predicted_oklab_map_uses_active_appearance_provider():
     )
     state = SimpleNamespace(config=_Config(), appearance_provider=provider)
 
-    predicted = staged_runner._predict_stage4_oklab_map(
+    predicted = postsolve_diagnostics._predict_stage4_oklab_map(
         state=state,
         visible_plan=visible_plan,
         cap_height_mm=np.asarray([[0.40]], dtype=np.float32),
@@ -1019,7 +985,7 @@ def test_stage4_provider_path_reuses_stage2_cap_curves_when_available():
     )
     state = SimpleNamespace(config=_Config(), appearance_provider=_Provider())
 
-    gain = staged_runner._compute_stage4_detail_optical_gain_map(
+    gain = stage4_detail._compute_stage4_detail_optical_gain_map(
         state=state,
         visible_plan=visible_plan,
         boundary_cap_height=np.asarray([[0.20]], dtype=np.float32),
@@ -1031,7 +997,7 @@ def test_stage4_provider_path_reuses_stage2_cap_curves_when_available():
 
 
 def test_recipe_materialization_preserves_supplied_filament_order():
-    _zone_labels, _fine_labels, recipes, recipe_stack_ids = staged_runner._materialize_recipe_assignments(
+    _zone_labels, _fine_labels, recipes, recipe_stack_ids = stage2_service._materialize_recipe_assignments(
         zone_selected_stack_ids=np.asarray([0], dtype=np.int32),
         fine_stack_id_map=np.asarray([[0]], dtype=np.int32),
         unique_stack_dicts={0: {"b-filament": 0.2, "a-filament": 0.1}},
@@ -1551,22 +1517,22 @@ def test_stage4_luminance_authoring_flag_moves_detail_cleanup_earlier(monkeypatc
             return np.asarray(detail_mask, dtype=np.float32)
 
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_requested_stage4_cap_maps",
             fake_requested_stage4_cap_maps,
         )
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_build_stage4_optical_detail_surface",
             fake_optical_detail_surface,
         )
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_compute_stage4_detail_optical_gain_map",
             fake_optical_gain_map,
         )
         diagnostics = PlanningDiagnosticsStream()
-        return staged_runner._build_stage4_cap_plan(
+        return stage4_service.build_cap_plan(
             SimpleNamespace(config=config),
             visible_plan,
             filler_plan,
@@ -1648,23 +1614,23 @@ def test_stage4_luminance_uses_layer_limited_optical_detail(monkeypatch):
             return np.asarray(detail_mask, dtype=np.float32)
 
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_requested_stage4_cap_maps",
             fake_requested_stage4_cap_maps,
         )
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_build_stage4_optical_detail_surface",
             fake_optical_detail_surface,
         )
         monkeypatch.setattr(
-            staged_runner,
+            stage4_service,
             "_compute_stage4_detail_optical_gain_map",
             fake_optical_gain_map,
         )
-        monkeypatch.setattr(staged_runner, "luminance_handler_enabled", lambda cfg: True)
+        monkeypatch.setattr(stage4_service, "luminance_handler_enabled", lambda cfg: True)
         state = SimpleNamespace(config=config, debug_maps={})
-        cap_plan = staged_runner._build_stage4_cap_plan(
+        cap_plan = stage4_service.build_cap_plan(
             state,
             visible_plan,
             filler_plan,
@@ -1792,7 +1758,7 @@ def test_stage4_boundary_cap_printability_gate_grows_dumbbell_neck():
     # The narrow-width reason is localized to the bridge pixels, not the lobes.
     rejection_pixels = result.rejection_map[mask]
     # Reason bits are an OR-mask; the narrow_width bit must be present.
-    from pipeline.staged_runner import _stage2_printability_reason_bits
+    from pipeline.staged.printability_enforcement import _stage2_printability_reason_bits
     narrow_bit = _stage2_printability_reason_bits(("narrow_width",))
     assert int(np.count_nonzero(rejection_pixels & narrow_bit)) == 3
 
@@ -1816,7 +1782,7 @@ def test_stage4_detail_printability_gate_rejects_dumbbell_neck():
         result.detail_height_mm,
         np.zeros_like(detail),
     )
-    from pipeline.staged_runner import _stage2_printability_reason_bits
+    from pipeline.staged.printability_enforcement import _stage2_printability_reason_bits
     narrow_bit = _stage2_printability_reason_bits(("narrow_width",))
     rejection_pixels = result.rejection_map[mask]
     assert int(np.count_nonzero(rejection_pixels & narrow_bit)) == 3

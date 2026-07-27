@@ -806,7 +806,7 @@
           <div class="settings-group" data-bucket="white-cap" data-settings-group="white-cap">
             <h4 class="settings-section-head">White Cap</h4>
             <table class="settings-table">
-              <tr><td title="Minimum number of white cap layers above color layers. The millimeter thickness is this layer count multiplied by the current layer height.">Min Cap Layers <span class="stg-range">1+</span></td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDWcMin" class="unit-input" value="1" min="1" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
+              <tr><td title="Minimum number of white cap layers above color layers. The millimeter thickness is this layer count multiplied by the current layer height.">Min Cap Layers <span class="stg-range">1+</span></td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDWcMin" class="unit-input" value="2" min="1" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
             </table>
             <h5 class="settings-subsection-head">Boundary</h5>
             <div class="settings-summary advanced-setting" id="capSummary"></div>
@@ -818,7 +818,7 @@
                   <option value="smooth_variable">Smooth</option>
                 </select>
               </td></tr>
-              <tr class="cap-appearance-bound-field advanced-setting"><td title="Maximum extra model-domain color error allowed when the smoothed boundary cap moves away from the raw optical cap. Lower values preserve appearance more aggressively.">Appearance budget <span class="stg-range">0–0.05</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgBoundaryCapDeBudget" class="unit-input" value="0.008"><span class="unit-suffix">dE</span></div></td></tr>
+              <tr class="cap-appearance-bound-field advanced-setting"><td title="Maximum extra model-domain color error allowed when the smoothed boundary cap moves away from the raw optical cap. Lower values preserve appearance more aggressively.">Appearance budget <span class="stg-range">0–0.05</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgBoundaryCapDeBudget" class="unit-input" value="0.004"><span class="unit-suffix">dE</span></div></td></tr>
               <tr class="cap-smooth-field"><td title="Physical smoothing radius for the boundary cap's upper surface. Lower values preserve more tonal relief; higher values create a cleaner contiguous white cap. The underside still fits the color stack exactly.">Smoothing radius <span class="stg-range">0–20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgSmoothKernel" class="unit-input" value="1"><span class="unit-suffix">mm</span></div></td></tr>
             </table>
             <h5 class="settings-subsection-head detail-section-head">Detail</h5>

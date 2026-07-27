@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from pipeline.staged_runner import (
+from pipeline.staged.stage2.contracts import (
     _BeamSeedResult,
     _ZoneCandidateSet,
-    _build_zone_neighbors,
+)
+from pipeline.staged.stage2.objective import _build_zone_neighbors
+from pipeline.staged.stage2.optimization import (
     _global_assignment_cost,
     _seed_zone_recipe_labels_with_beam,
     _zone_assignment_order,

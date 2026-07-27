@@ -679,8 +679,8 @@
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  flex: 0 0 84px;
-  width: 84px;
+  flex: 0 0 54px;
+  width: 54px;
   opacity: 0.82;
 }
 .solve-run-save-btn {
@@ -697,42 +697,9 @@
   align-items: center;
   justify-content: flex-end;
   flex: 0 0 auto;
-  width: 48px;
-  min-width: 48px;
+  width: 18px;
+  min-width: 18px;
   height: 18px;
-}
-.solve-run-delete-btn {
-  width: 48px;
-  min-width: 48px;
-  height: 18px;
-  min-height: 18px;
-  padding: 0;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-color: transparent;
-  background: transparent;
-}
-.solve-run-delete-btn svg {
-  width: 8px;
-  height: 8px;
-}
-.solve-run-delete-btn.confirm-pending {
-  border: 1px solid color-mix(in srgb, var(--error-ink) 65%, var(--line));
-  background: color-mix(in srgb, var(--error-ink) 8%, var(--panel));
-  color: var(--error-ink);
-  font-size: 9px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.solve-run-delete-btn:hover {
-  background: color-mix(in srgb, var(--error-ink) 20%, transparent);
-  color: var(--error-ink);
 }
 .solve-run-delete-btn:disabled {
   opacity: 0.35;

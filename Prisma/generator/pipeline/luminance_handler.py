@@ -19,9 +19,6 @@ from model import compose_stack, to_oklab
 from .staged_solver_helpers import _predict_transmission_batch
 
 
-_RUNTIME_BOUNDARY_AUTHORITY_ATTR = "_runtime_luminance_boundary_cap_authority_mm"
-
-
 @dataclass(frozen=True)
 class LuminanceReference:
     """Source-derived cap references before Stage 4 budget clipping."""
@@ -51,7 +48,7 @@ def luminance_handler_enabled(cfg: Any) -> bool:
 
 def clear_luminance_handler_runtime(cfg: Any) -> None:
     """Clear runtime authority derived from a previous solve."""
-    setattr(cfg, _RUNTIME_BOUNDARY_AUTHORITY_ATTR, None)
+    cfg.runtime.luminance_boundary_cap_authority_mm = None
 
 
 def _quantized_cap_floor(d_wc_min: float, layer_height: float) -> float:
@@ -627,7 +624,9 @@ def configure_luminance_handler_runtime(
         target_oklab=target_oklab,
         shape=shape,
     )
-    setattr(cfg, _RUNTIME_BOUNDARY_AUTHORITY_ATTR, float(reference.boundary_authority_mm))
+    cfg.runtime.luminance_boundary_cap_authority_mm = float(
+        reference.boundary_authority_mm
+    )
     debug_maps = getattr(state, "debug_maps", None)
     if isinstance(debug_maps, dict):
         debug_maps["luminance_handler_source_l"] = np.array(

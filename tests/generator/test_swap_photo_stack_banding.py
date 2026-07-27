@@ -23,7 +23,7 @@ from mesh.post_solve_export import (
 )
 from model import load_profile, predict_transmission, to_oklab
 from pipeline.runner import _swap_banding_route, run_pipeline
-from pipeline.staged_runner import _score_candidates_batch
+from pipeline.staged_solver_helpers import _score_candidates_batch
 from pipeline.staged_solver_helpers import _precompute_cap_oklabs_vectorized
 from pipeline.state import FULL_PRESET, PipelineConfig
 from scipy.spatial import KDTree

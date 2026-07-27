@@ -303,7 +303,7 @@ def test_palette_fit_image_folds_fill_without_changing_palette_fit_de() -> None:
     })
     expected_banded = _srgb8_from_linear(_fill_folded_rgb(state, best_maps))
 
-    banded = _compute_palette_fit_diagnostics(state, config)
+    banded = _compute_palette_fit_diagnostics(state)
     np.testing.assert_array_equal(banded["palette_fit_image"], expected_banded)
     np.testing.assert_allclose(banded["palette_fit_de"], expected_de, atol=1e-7, rtol=0.0)
 
@@ -316,6 +316,6 @@ def test_palette_fit_image_folds_fill_without_changing_palette_fit_de() -> None:
         max_layers=int(config.effective_max_layers()),
         color_order=list(config.palette),
     )
-    unbanded = _compute_palette_fit_diagnostics(state, config)
+    unbanded = _compute_palette_fit_diagnostics(state)
     np.testing.assert_array_equal(unbanded["palette_fit_image"], direct_unbanded)
     np.testing.assert_array_equal(unbanded["palette_fit_de"], banded["palette_fit_de"])

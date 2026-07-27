@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from Prisma.generator.pipeline.staged_runner import _apply_stage4_detail_cap_smoothing
+from Prisma.generator.pipeline.staged.stage4.detail import _apply_stage4_detail_cap_smoothing
 from Prisma.generator.pipeline.detail_cap_smoothing import (
     DetailCapSmoothingSettings,
     cleanup_cumulative_detail_masks,

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 _GEN_DIR = Path(__file__).resolve().parents[3] / "Prisma" / "generator"
 if str(_GEN_DIR) not in sys.path:
@@ -18,74 +17,28 @@ from tests.generator.support.staged_backend import (
 )
 
 from facade import SolveConfig, solve_full, solve_preview
-from model import to_oklab
-from pipeline import staged_runner
-from pipeline.staged_bridge import build_compatibility_bundle
-from pipeline.staged_artifacts import (
-    FillerGeometryPlan,
-    LateralZonePlan,
-    PlanningDiagnosticsStream,
-    Stage2ObjectiveSummary,
-    VisibleRecipe,
-    VisibleRecipeRawGeometryPlan,
-)
-from pipeline.staged_solver_helpers import (
-    _vectorized_stack_ids,
-    generate_stage1_zone_labels,
-)
-from pipeline.staged_runner import (
-    _ZoneCandidateSet,
-    _apply_stage2_boundary_recipe_mutation,
-    _iterate_stage2_boundary_recipe_mutation,
-    _apply_stage2_final_color_printability_gate,
-    _apply_stage2_fine_override_seam_gate,
-    _apply_stage2_fine_override_printability_gate,
-    _apply_stage4_luminance_detail_authoring_printability,
-    _apply_stage2_localized_width_loss_boundary_nudge,
-    _apply_stage4_boundary_cap_printability_gate,
-    _apply_stage4_detail_printability_gate,
+from pipeline.staged.stage4 import detail as stage4_detail
+from pipeline.staged.stage4 import service as stage4_service
+from pipeline.staged_artifacts import PlanningDiagnosticsStream
+from pipeline.staged.stage2.contracts import _ZoneCandidateSet
+from pipeline.staged.stage2.refinement import _split_stage2_source_edge_subzones
+from pipeline.staged.stage4.boundary import (
     _apply_stage4_edge_aware_boundary_restore,
-    _augment_zone_candidates_with_neighbor_local_bests,
-    _author_stage4_detail_zones,
     _build_stage4_boundary_edge_guard,
     _build_stage4_boundary_smoothing_guide,
-    _build_stage2_fine_recipe_assignments,
-    _build_stage2_objective_summary,
-    _summarize_zone_targets,
-    _compute_stage2_recipe_pressure,
-    _downsample_rgb_image,
-    _effective_color_region_target_mm,
-    _optimize_zone_recipe_labels,
-    _project_zone_labels_to_fine,
-    _prune_zone_candidate_frontiers,
-    _requested_stage4_cap_maps,
-    _run_coord_descent,
-    _rescue_stage2_optical_frontier_candidates,
-    _seed_zone_recipe_labels_with_beam,
-    _shape_stage4_detail_stack_layers,
-    _score_pixels_against_stack_ids,
-    _score_zone_pixels_against_candidates,
     _smooth_stage4_boundary_cap,
-    _split_stage2_source_edge_subzones,
     _stage4_boundary_edge_restore_weight,
-    _stage4_lookup_oklab_by_count,
-    _stage2_printability_failure_snapshot_from_stack_ids,
 )
-from pipeline.staged_printability import (
-    BlueprintPrintabilitySettings,
-    build_layered_blueprint_view,
-    opening_width_loss,
-    opening_width_structure,
-    run_blueprint_printability_diagnostic,
+from pipeline.staged.stage4.detail import (
+    _author_stage4_detail_zones,
+    _shape_stage4_detail_stack_layers,
 )
+from pipeline.staged.stage2.pressure import _compute_stage2_recipe_pressure
+from pipeline.staged.stage4.requests import _requested_stage4_cap_maps
 from white_cap_contract import (
-    PHYSICAL_GEOMETRY_METADATA_KEY,
     POLICY_LUMINANCE_DETAIL_CANONICAL,
-    POLICY_STANDARD_APPEARANCE_BOUNDED_STRUCTURAL_SPLIT,
     POLICY_STANDARD_SMOOTH_VARIABLE_CANONICAL,
     WHITE_CAP_FIELD_TARGET_METADATA_KEY,
-    WHITE_CAP_FIELD_TARGET_UPPER_SURFACE_KEY,
-    quantized_cover_floor_mm,
 )
 
 
@@ -475,7 +428,7 @@ def test_stage4_independent_detail_layer_limiter_honors_user_layer_cap():
     requested = np.array([[0.08, 0.16, 0.32]], dtype=np.float32)
     available = np.full_like(requested, 0.40, dtype=np.float32)
 
-    independent_limited = staged_runner._limit_stage4_independent_detail_layers(
+    independent_limited = stage4_detail._limit_stage4_independent_detail_layers(
         requested,
         available_detail_mm=available,
         layer_height=0.08,
@@ -724,7 +677,7 @@ def test_stage4_detail_smoothing_summary_reaches_preview_and_export_metadata(mon
         }
 
     monkeypatch.setattr(
-        staged_runner,
+        stage4_service,
         "_apply_stage4_detail_cap_smoothing",
         fake_smoothing,
     )

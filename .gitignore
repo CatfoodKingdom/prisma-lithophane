@@ -99,18 +99,13 @@ Prisma/data/previews/
 Prisma/data/blanks/
 Prisma/data/generator/
 
-# Wing C / Wing D pinned presets ARE under version control.
-# Re-include the wing-* subdirectories of settings_profiles after the
-# blanket Prisma/data/generator/ exclusion above.
+# Evidence-backed refinement profiles are shipped with the product.
+# Re-include only that directory after the blanket generator-data exclusion.
 !Prisma/data/generator/
 !Prisma/data/generator/settings_profiles/
 Prisma/data/generator/settings_profiles/*
-!Prisma/data/generator/settings_profiles/wing-c/
-!Prisma/data/generator/settings_profiles/wing-c/**
-!Prisma/data/generator/settings_profiles/wing-d/
-!Prisma/data/generator/settings_profiles/wing-d/**
-!Prisma/data/generator/settings_profiles/wing-b+d/
-!Prisma/data/generator/settings_profiles/wing-b+d/**
+!Prisma/data/generator/settings_profiles/refinement/
+!Prisma/data/generator/settings_profiles/refinement/**
 
 # Stage 9a: generated/clearable generator data — never tracked (regenerated on
 # demand). These sit under the re-included Prisma/data/generator/ above, so they

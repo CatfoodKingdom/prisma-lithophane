@@ -322,7 +322,7 @@ def test_update_settings_profile_rejects_legacy_aliases(client):
         client.delete(f"/api/settings-profiles/{profile_id}")
 
 
-def test_settings_profiles_api_surfaces_nested_profiles_and_keeps_top_level_crud_working(
+def test_settings_profiles_api_migrates_legacy_bundles_and_keeps_top_level_crud_working(
     client, tmp_path, monkeypatch
 ):
     settings_dir = tmp_path / "settings_profiles"
@@ -349,8 +349,12 @@ def test_settings_profiles_api_surfaces_nested_profiles_and_keeps_top_level_crud
     assert initial.status_code == 200, initial.text
     initial_ids = {profile["id"] for profile in initial.json()["profiles"]}
     assert server._SYSTEM_SETTINGS_PROFILE_ID in initial_ids
-    assert "wing-c-minimal" in initial_ids
-    assert "wing-c-standard" in initial_ids
+    assert "wing-c-minimal" not in initial_ids
+    assert "wing-c-standard" not in initial_ids
+    assert "refinement-balanced" in initial_ids
+    assert "refinement-strong" in initial_ids
+    assert not (wing_c_dir / "minimal.json").exists()
+    assert not (wing_c_dir / "standard.json").exists()
 
     created = client.post("/api/settings-profiles", json={
         "name": "top-level-profile",
@@ -382,8 +386,8 @@ def test_settings_profiles_api_surfaces_nested_profiles_and_keeps_top_level_crud
     assert deleted.status_code == 200, deleted.text
     deleted_ids = {profile["id"] for profile in deleted.json()["profiles"]}
     assert created_profile["id"] not in deleted_ids
-    assert "wing-c-minimal" in deleted_ids
-    assert "wing-c-standard" in deleted_ids
+    assert "refinement-balanced" in deleted_ids
+    assert "refinement-strong" in deleted_ids
 
 
 def test_run_json_contains_canonical_resolution_block(tmp_path):

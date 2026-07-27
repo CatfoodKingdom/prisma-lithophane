@@ -3,10 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from facade import SolveConfig
-from pipeline.staged_runner import (
-    _stage2_printability_ledger_diagnostics_enabled,
-    _zone_flat_indices,
-)
+from pipeline.staged.stage2.printability import _stage2_printability_ledger_diagnostics_enabled
+from pipeline.staged.zone_geometry import _zone_flat_indices
 
 
 def _reference_zone_flat_indices(labels: np.ndarray) -> tuple[np.ndarray, ...]:

@@ -19,7 +19,7 @@ from pipeline.material_exposure import (  # noqa: E402
     positive_layer_counts,
 )
 
-from pipeline.staged_runner import (  # noqa: E402
+from pipeline.staged.stage2.refinement import (
     _apply_stage2_exterior_white_guard,
     _infer_implied_cap_heights,
 )

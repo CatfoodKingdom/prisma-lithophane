@@ -687,9 +687,6 @@ function buildRailDeckHoverPreview(card) {
       metricHtml += `<span>Checking gamut</span>`;
     } else if (card.gamut?.status === "done") {
       metricHtml += `<span>${app.commands.formatColorRmse(card.gamut)}</span>`;
-      if (Number.isFinite(card.gamut.n_out_of_gamut)) {
-        metricHtml += `<span>${card.gamut.n_out_of_gamut.toLocaleString()} OOG</span>`;
-      }
     } else if (card.gamut?.status === "error") {
       metricHtml += `<span>Gamut check failed</span>`;
     }

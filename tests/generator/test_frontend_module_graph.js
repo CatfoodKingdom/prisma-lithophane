@@ -150,7 +150,7 @@ test("light headers use the blue semantic token without changing dark mode or vi
   ]);
 });
 
-test("solve history controls and cards reserve stable confirmation geometry", () => {
+test("solve history controls and cards keep compact stable confirmation geometry", () => {
   const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
   const css = fs.readFileSync(path.join(appDir, "styles", "solve.css"), "utf8");
   const shellCss = fs.readFileSync(path.join(appDir, "styles", "shell.css"), "utf8");
@@ -165,13 +165,17 @@ test("solve history controls and cards reserve stable confirmation geometry", ()
 
   assert.equal((html.match(/solve-history-clear/g) || []).length, 2);
   assert.match(html, /compact-history-header deck-header solve-history-header/);
-  assert.match(shellCss, /\.compact-history-clear\s*{[\s\S]*?width:\s*60px;[\s\S]*?min-width:\s*60px;[\s\S]*?white-space:\s*nowrap;/);
-  assert.match(css, /\.solve-run-card-actions\s*{[\s\S]*?flex:\s*0 0 84px;[\s\S]*?width:\s*84px;/);
-  assert.match(css, /\.solve-run-delete-slot\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;/);
-  assert.match(css, /\.solve-run-delete-btn\s*{[\s\S]*?width:\s*48px;[\s\S]*?min-width:\s*48px;[\s\S]*?border-color:\s*transparent;/);
+  assert.match(shellCss, /\.compact-history-clear-slot\s*{[\s\S]*?flex:\s*0 0 42px;[\s\S]*?width:\s*42px;/);
+  assert.match(shellCss, /\.compact-history-clear\s*{[\s\S]*?width:\s*42px;[\s\S]*?min-width:\s*42px;[\s\S]*?white-space:\s*nowrap;/);
+  assert.match(css, /\.solve-run-card-actions\s*{[\s\S]*?flex:\s*0 0 54px;[\s\S]*?width:\s*54px;/);
+  assert.match(css, /\.solve-run-delete-slot\s*{[\s\S]*?width:\s*18px;[\s\S]*?min-width:\s*18px;/);
+  assert.match(shellCss, /\.rail-deck-remove,\s*\.compact-deck-card-remove\s*{[\s\S]*?width:\s*18px;[\s\S]*?min-width:\s*18px;[\s\S]*?color:\s*var\(--muted\);/);
+  assert.doesNotMatch(css, /\.solve-run-delete-btn\s*{[\s\S]*?(?:border-color:\s*transparent|background:\s*transparent);/);
   assert.doesNotMatch(css.match(/\.solve-run-card\s*{[\s\S]*?\}/)?.[0] || "", /transition:/);
   assert.doesNotMatch(controller, /loaded_from_archive|solve-run-loaded-badge/);
-  assert.match(events, /railClearDeckBtn\.textContent = "Confirm\?"/);
+  assert.match(controller, /armed \? "!" : app\.commands\.xIconSvg\(\)/);
+  assert.match(controller, /btn\.textContent = armed \? "Clear\?" : "Clear"/);
+  assert.match(events, /railClearDeckBtn\.textContent = "Clear\?"/);
   assert.match(events, /clearTimeout\(confirmTimer\)/);
 });
 

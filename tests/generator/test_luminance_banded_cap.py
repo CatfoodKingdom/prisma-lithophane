@@ -10,7 +10,7 @@ _GEN_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "generator
 if str(_GEN_DIR) not in sys.path:
     sys.path.insert(0, str(_GEN_DIR))
 
-from pipeline import staged_runner
+from pipeline.staged.stage4 import requests as stage4_requests
 from pipeline.luminance_handler import LuminanceHandler
 from pipeline.staged_artifacts import PlanningDiagnosticsStream, VisibleRecipe
 
@@ -185,9 +185,9 @@ def test_stage4_threads_authoritative_total_band_fill_to_handler(monkeypatch):
     filler_plan = SimpleNamespace(
         color_ceiling_mm=np.asarray([[0.5, 0.5]], dtype=np.float32),
     )
-    monkeypatch.setattr(staged_runner, "LuminanceHandler", _FakeLuminanceHandler)
+    monkeypatch.setattr(stage4_requests, "LuminanceHandler", _FakeLuminanceHandler)
 
-    staged_runner._requested_stage4_cap_maps(
+    stage4_requests._requested_stage4_cap_maps(
         state,
         visible_plan,
         filler_plan,

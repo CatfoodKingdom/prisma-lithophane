@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
-import data_paths
+from config.solve_settings import SolveSettings, shared_solve_settings_values
 
 if TYPE_CHECKING:
     from .base import PreprocessingModule
@@ -42,147 +42,71 @@ FULL_PRESET = QualityPreset(
     max_layers=None,
 )
 
+
 @dataclass
-class PipelineConfig:
-    """All parameters needed to run the pipeline."""
-    palette: List[str]
-    white_base: str
-    white_cap: str | None = None
-    layer_height: float = 0.08
-    max_layers: int | None = None
-    d_wb: float = 0.20
-    d_wc_min: float = 0.08
-    d_wc_max: float | None = None
-    boundary_cap_authority_mm: float | None = None
-    t_max: float = 3.0
-    k_max: int = 3
+class PipelineRuntime:
+    """Runtime-derived limits and flags that are not solve input settings."""
+
+    luminance_boundary_cap_authority_mm: float | None = None
+    swap_band_cap_limit_mm: float | None = None
+    swap_banding_scout: bool = False
+
+
+@dataclass
+class PipelineConfig(SolveSettings):
+    """Resolved execution envelope for one pipeline run."""
+
+    # Retained only for direct lower-level construction compatibility. Facade
+    # compilation copies the request value (normally the product default 0.01).
     de_threshold: float = 0.05
-    smooth_kernel: float = 7.5
-    gamut_mode: str = "hull"
-    gamut_white_rescale: bool = False
-    model_domain_ingress: bool = True
-    model_domain_ingress_lut_path: str = str(data_paths.DATA_DIR / "camera_transform")
-    chroma_weight: float = 1.0
-    luminance_handler_enabled: bool = False
-    luminance_handler_mode: str = "boundary_prior"
-    luminance_handler_strength: float = 1.0
-    luminance_handler_optical_authority_fraction: float | None = 0.75
-    luminance_handler_boundary_percentile: float = 95.0
-    luminance_handler_boundary_sigma_px: float | None = None
-    luminance_handler_response_curve: str = "linear"
-    luminance_handler_response_gamma: float = 1.0
-    luminance_handler_detail_residual: bool = True
-    luminance_handler_include_solver_detail: bool = True
-    ams_slots: int = 4
-    white_slots: int = 1
-    use_corrections: bool = True
-    corrections: dict | None = None
-    profiles_dir: Path | None = None
-    appearance_model_provider: str = "photo_stack_bundle"
-    photo_stack_bundle_path: Path | None = None
-    nozzle_diameter: float = 0.20
-    printer_min_line_width_mm: float | None = None
-    image_sample_pitch_mm: float = 0.20
-    solver_fine_pitch_mm: float = 0.20
-    stage1_coarsening_factor: int = 1
-    stage1_lattice_offset_y_px: int = 0
-    stage1_lattice_offset_x_px: int = 0
-    emit_pressure_diagnostics: bool = False
-    emit_geometry_attribution: bool = False
-    emit_blueprint_printability: bool = True
-    printability_minimum_extrusion_width_mm: float | None = None
-    printability_minimum_line_length_mm: float | None = None
-    enforce_printability: bool = False
-    color_region_target_from_printability: bool = False
-    color_region_target_width_multiplier: float = 2.0
-    stage2_continuity_weight: float | None = None
-    stage2_area_weighted_zone_choice: bool = False
-    stage2_pressure_frontier_rescue: bool = False
-    stage2_source_edge_subzones: bool = False
-    stage2_fine_override_enabled: bool = True
-    stage2_seam_aware_fine_override: bool = False
-    stage2_printability_gate_fine_override: bool = False
-    stage2_final_printability_gate_fine_override: bool = False
-    stage2_printability_repair_fine_override: bool = False
-    stage2_printability_repair_min_mean_gain: float | None = None
-    stage2_fine_override_seam_penalty_weight: float | None = None
-    stage2_boundary_mutation_enabled: bool = True
-    stage2_boundary_mutation_min_gain: float | None = None
-    stage2_boundary_mutation_min_component_mm: float | None = None
-    stage2_boundary_mutation_current_de_percentile: float | None = None
-    stage2_boundary_mutation_max_passes: int | None = 1
-    stage4_printability_gate_detail: bool = False
-    luminance_detail_authoring_printability: str = "off"
-    detail_cap_enabled: bool = True
-    detail_cap_max_layers: int = 5
-    detail_cap_smoothing_enabled: bool = True
-    detail_cap_smoothing_exact_speckle_max_px: int = 1
-    detail_cap_smoothing_cumulative_component_max_px: int = 2
-    detail_cap_smoothing_cumulative_hole_max_px: int = 2
-    color_region_target_mm: float = 0.60
-    cell_mode: str = "felzenszwalb"
-    smooth_boundaries: bool = False
-    boundary_smooth_radius: int = 1
-    cap_mode: str = "smooth_variable"
-    boundary_cap_de_budget: float = 0.008
-    cap_continuity_cleanup: bool = True
+
     # F1 preprocessing slot. `preprocessors` holds the ordered list of
     # enabled operator instances the runner will execute. The facade consumes
     # SolveConfig.preprocessing_params while constructing these instances and
     # sorts them before the pipeline receives them.
     preprocessors: List[Any] = field(default_factory=list)
-
     preset: QualityPreset = field(default_factory=lambda: FULL_PRESET)
+    # Excluded from construction and comparison. In particular,
+    # dataclasses.replace(config) gives swap scouts an independent carrier.
+    runtime: PipelineRuntime = field(
+        default_factory=PipelineRuntime,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
-    def __post_init__(self) -> None:
-        from config.resolution_schema import _apply_resolution_backstop
-        from filament_order import canonical_palette_order, load_filament_order_registry
+    @classmethod
+    def from_solve_settings(
+        cls,
+        settings: SolveSettings,
+        *,
+        preprocessors: List[Any] | None = None,
+        preset: QualityPreset = FULL_PRESET,
+    ) -> "PipelineConfig":
+        """Compile shared solve settings into a resolved pipeline envelope."""
 
-        self.palette = canonical_palette_order(
-            self.palette,
-            load_filament_order_registry(),
+        return cls(
+            **shared_solve_settings_values(settings),
+            preprocessors=list(preprocessors or []),
+            preset=preset,
         )
-        _apply_resolution_backstop(self)
-
-    def effective_white_cap(self) -> str:
-        return self.white_cap if self.white_cap else self.white_base
 
     def effective_max_layers(self) -> int:
-        if self.preset.max_layers is not None:
-            return self.preset.max_layers
-        if self.max_layers is not None:
-            return self.max_layers
-        return int((self.t_max - self.d_wb - self.d_wc_min) / self.layer_height)
-
-    def effective_d_wc_max(self) -> float:
-        if self.d_wc_max is not None:
-            return self.d_wc_max
-        return self.t_max - self.d_wb - self.d_wc_min
+        configured = super().effective_max_layers()
+        if self.preset.max_layers is None:
+            return configured
+        return min(configured, int(self.preset.max_layers))
 
     def effective_boundary_d_wc_max(self) -> float:
-        cap = self.effective_d_wc_max()
-        runtime = getattr(self, "_runtime_luminance_boundary_cap_authority_mm", None)
-        if runtime is not None:
-            cap = min(cap, float(runtime))
-        swap_band_limit = getattr(self, "_runtime_swap_band_cap_limit_mm", None)
-        if swap_band_limit is not None:
-            cap = min(cap, float(swap_band_limit))
-        if self.boundary_cap_authority_mm is None:
-            return max(float(self.d_wc_min), cap)
-        return max(float(self.d_wc_min), min(float(self.boundary_cap_authority_mm), cap))
-
-    def effective_detail_cap_max_layers(self) -> int:
-        if not self.detail_cap_enabled:
-            return 0
-        return max(0, int(self.detail_cap_max_layers))
-
-    def effective_white_slots(self) -> int:
-        if self.white_base != self.effective_white_cap():
-            return max(self.white_slots, 2)
-        return self.white_slots
-
-    def color_slots(self) -> int:
-        return self.ams_slots - self.effective_white_slots()
+        cap = super().effective_boundary_d_wc_max()
+        if self.runtime.luminance_boundary_cap_authority_mm is not None:
+            cap = min(
+                cap,
+                float(self.runtime.luminance_boundary_cap_authority_mm),
+            )
+        if self.runtime.swap_band_cap_limit_mm is not None:
+            cap = min(cap, float(self.runtime.swap_band_cap_limit_mm))
+        return max(float(self.d_wc_min), cap)
 
 
 @dataclass

@@ -581,7 +581,7 @@ function bindEvents() {
         if (app.state.palette.deck.length === 0) return;
         if (!confirmPending) {
           confirmPending = true;
-          railClearDeckBtn.textContent = "Confirm?";
+          railClearDeckBtn.textContent = "Clear?";
           railClearDeckBtn.classList.add("confirm-pending");
           railClearDeckBtn.title = "Click again to clear all palette deck cards";
           railClearDeckBtn.setAttribute("aria-label", "Confirm clearing all palette deck cards");
