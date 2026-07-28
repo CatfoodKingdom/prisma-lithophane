@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 import pytest
-from cache_admin import safe_clear_dir, OutsideRootError
+from cache_admin import safe_clear_dir, safe_clear_dir_except, OutsideRootError
 
 
 def _make_junction(link: Path, target: Path) -> bool:
@@ -133,3 +133,70 @@ def test_does_not_follow_nested_junction(tmp_path):
     safe_clear_dir(root / "runs", root=root)
     assert not (root / "runs" / "real_sub").exists()       # real subtree gone
     assert precious.exists() and (precious / "keep.txt").exists()  # junction target survived
+
+
+def test_clear_except_preserves_only_named_direct_child(tmp_path):
+    root = tmp_path / "cache"
+    (root / "source-images").mkdir(parents=True)
+    (root / "source-images" / "manifest.json").write_text("keep")
+    (root / "runs").mkdir()
+    (root / "runs" / "result.bin").write_text("remove")
+    (root / "luts").mkdir()
+    (root / "loose.tmp").write_text("remove")
+
+    report = safe_clear_dir_except(
+        root,
+        root=root,
+        preserve_names={"source-images"},
+    )
+
+    assert report == {
+        "removed": 3,
+        "preserved": ["source-images"],
+        "failures": [],
+    }
+    assert (root / "source-images" / "manifest.json").read_text() == "keep"
+    assert sorted(path.name for path in root.iterdir()) == ["source-images"]
+
+
+def test_clear_except_removes_same_named_junction_instead_of_preserving(tmp_path):
+    root = tmp_path / "cache"
+    root.mkdir()
+    precious = tmp_path / "precious"
+    precious.mkdir()
+    (precious / "keep.txt").write_text("keep")
+    link = root / "source-images"
+    if not _make_junction(link, precious):
+        pytest.skip("directory junctions not available in this environment")
+
+    report = safe_clear_dir_except(
+        root,
+        root=root,
+        preserve_names={"source-images"},
+    )
+
+    assert report["removed"] == 1
+    assert report["preserved"] == []
+    assert not link.exists()
+    assert (precious / "keep.txt").read_text() == "keep"
+
+
+def test_clear_except_refuses_filesystem_root():
+    anchor = Path(Path.cwd().anchor)
+    with pytest.raises(OutsideRootError, match="unsafe clear root"):
+        safe_clear_dir_except(anchor, root=anchor, preserve_names={"source-images"})
+
+
+def test_clear_except_does_not_preserve_same_named_file(tmp_path):
+    root = tmp_path / "cache"
+    root.mkdir()
+    (root / "source-images").write_text("not a subtree")
+
+    report = safe_clear_dir_except(
+        root,
+        root=root,
+        preserve_names={"source-images"},
+    )
+
+    assert report["removed"] == 1
+    assert not (root / "source-images").exists()

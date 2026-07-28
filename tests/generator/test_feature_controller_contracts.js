@@ -383,6 +383,428 @@ test("palette suggestions use solve-mode names for newly generated cards", async
   assert.equal("total_pixels" in app.state.palette.stagingDeck[0].gamut, false);
 });
 
+test("auto-suggest shows the reserved base/cap filament without selecting it", async () => {
+  const candidateGrid = fakeElement();
+  const baseFilament = fakeElement();
+  baseFilament.value = "white";
+  const paletteFilaments = [
+    { filament_id: "white", display_name: "Tough White", color_name: "Tough White", manufacturer: "Bambu", hex: "#ffffff", has_profile: true },
+    { filament_id: "red", display_name: "Red", color_name: "Red", manufacturer: "Bambu", hex: "#ff0000", has_profile: true },
+    { filament_id: "blue", display_name: "Blue", color_name: "Blue", manufacturer: "Bambu", hex: "#0000ff", has_profile: true },
+  ];
+  const { app } = await createFeatureHarness({
+    filaments: paletteFilaments,
+    elements: {
+      "#candidateGrid": candidateGrid,
+      "#cfgBaseFilament": baseFilament,
+    },
+  });
+  app.state.palette.enabledFilaments = new Set(["white", "red", "blue"]);
+  app.state.palette.candidateInitialized = false;
+  app.commands.esc = value => String(value);
+
+  app.commands.renderCandidateLibrary();
+
+  assert.deepEqual([...app.state.palette.candidateSelection].sort(), ["blue", "red"]);
+  assert.match(candidateGrid.innerHTML, /is-base-cap-reserved/);
+  assert.match(candidateGrid.innerHTML, /aria-disabled="true"/);
+  assert.match(candidateGrid.innerHTML, /BASE\/CAP/);
+  assert.match(candidateGrid.innerHTML, /reserved for the white base and cap/);
+});
+
+test("Batch mode seeds the active palette and preserves deck-order selection", async () => {
+  const { app } = await harness();
+  app.commands.renderDeckCards = () => {};
+  app.commands.updateSolveReadiness = () => {};
+  app.state.palette.deck = Array.from({ length: 11 }, (_, index) => ({
+    id: `deck-${index + 1}`,
+    name: `Palette ${index + 1}`,
+    filament_ids: index % 2 ? ["red"] : ["blue"],
+  }));
+  app.state.palette.activeDeckId = "deck-3";
+
+  assert.equal(app.commands.setSolveMode("batch"), true);
+  assert.deepEqual([...app.state.solve.batchSelectedDeckIds], ["deck-3"]);
+  app.commands.toggleBatchDeckSelection("deck-2");
+  app.commands.toggleBatchDeckSelection("deck-1");
+  assert.deepEqual(
+    app.commands.selectedBatchDeckCards().map(card => card.id),
+    ["deck-1", "deck-2", "deck-3"],
+  );
+
+  for (let index = 4; index <= 10; index += 1) {
+    app.commands.toggleBatchDeckSelection(`deck-${index}`);
+  }
+  assert.equal(app.state.solve.batchSelectedDeckIds.size, 10);
+  assert.equal(app.commands.toggleBatchDeckSelection("deck-11"), false);
+  assert.equal(app.state.solve.batchSelectedDeckIds.has("deck-11"), false);
+
+  app.commands.setSolveMode("single");
+  app.commands.setSolveMode("batch");
+  assert.equal(app.state.solve.batchSelectedDeckIds.size, 10);
+});
+
+test("palette variants preserve the source, slot order, and manual draft on cancel", async () => {
+  const { app } = await harness();
+  app.state.session.allFilaments.push({
+    filament_id: "green",
+    display_name: "Green",
+    has_profile: true,
+  });
+  app.state.palette.enabledFilaments = new Set(["white", "red", "blue", "green"]);
+  app.state.palette.deck = [{
+    id: "source",
+    name: "Cloud Study",
+    filament_ids: ["red", "blue"],
+    saved: true,
+  }];
+  app.state.palette.activeDeckId = "source";
+  app.state.palette.manualSlots = ["green"];
+  app.commands.appConfirm = async () => true;
+  app.commands.switchTab = () => {};
+  app.commands.toggleCreationMode = mode => { app.state.palette.creationMode = mode; };
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+  app.commands.syncConfigToServer = async () => {};
+
+  assert.equal(await app.commands.beginPaletteVariant("source"), true);
+  assert.deepEqual(app.state.palette.manualSlots, ["green"]);
+  assert.deepEqual(app.commands.manualVariantFilamentIds(), ["red", "blue"]);
+
+  assert.equal(app.commands.removeManualFilamentAt(0), true);
+  assert.deepEqual(app.state.palette.manualVariantDraft.workingSlots, [null, "blue"]);
+  assert.equal(app.commands.addManualFilament("green"), true);
+  assert.deepEqual(app.commands.manualVariantFilamentIds(), ["green", "blue"]);
+  assert.equal(app.commands.manualVariantHasChanged(), true);
+
+  assert.equal(app.commands.cancelPaletteVariant(), true);
+  assert.deepEqual(app.state.palette.manualSlots, ["green"]);
+  assert.deepEqual(app.state.palette.deck[0].filament_ids, ["red", "blue"]);
+  assert.equal(app.state.palette.manualVariantDraft, null);
+});
+
+test("committing a palette variant inserts an independent active card beside its source", async () => {
+  const { app } = await harness();
+  app.state.session.allFilaments.push({
+    filament_id: "green",
+    display_name: "Green",
+    has_profile: true,
+  });
+  app.state.palette.enabledFilaments = new Set(["white", "red", "blue", "green"]);
+  app.state.palette.deck = [
+    { id: "source", name: "Cloud Study", filament_ids: ["red", "blue"], saved: true },
+    { id: "later", name: "Later", filament_ids: ["blue"], saved: false },
+  ];
+  app.state.palette.activeDeckId = "source";
+  app.commands.switchTab = () => {};
+  app.commands.toggleCreationMode = mode => { app.state.palette.creationMode = mode; };
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+  app.commands.syncConfigToServer = async () => {};
+
+  await app.commands.beginPaletteVariant("source");
+  assert.equal(await app.commands.commitPaletteVariant(), null);
+  app.commands.removeManualFilamentAt(0);
+  app.commands.addManualFilament("green");
+  const variant = await app.commands.commitPaletteVariant();
+
+  assert.ok(variant);
+  assert.equal(variant.name, "Cloud Study Variant");
+  assert.equal(variant.saved, false);
+  assert.equal(variant.gamut, null);
+  assert.deepEqual(variant.filament_ids, ["green", "blue"]);
+  assert.deepEqual(app.state.palette.deck.map(card => card.id), [
+    "source",
+    variant.id,
+    "later",
+  ]);
+  assert.deepEqual(app.state.palette.deck[0].filament_ids, ["red", "blue"]);
+  assert.equal(app.state.palette.activeDeckId, variant.id);
+  assert.equal(app.state.palette.manualVariantDraft, null);
+});
+
+test("committing a palette variant leaves Batch Solve membership unchanged", async () => {
+  const { app } = await harness();
+  app.state.session.allFilaments.push({
+    filament_id: "green",
+    display_name: "Green",
+    has_profile: true,
+  });
+  app.state.palette.enabledFilaments = new Set(["white", "red", "blue", "green"]);
+  app.state.palette.deck = [
+    { id: "source", name: "Cloud Study", filament_ids: ["red", "blue"], saved: false },
+    { id: "other", name: "Other", filament_ids: ["green"], saved: false },
+  ];
+  app.state.palette.activeDeckId = "source";
+  app.state.solve.solveMode = "batch";
+  app.state.solve.batchSelectedDeckIds = new Set(["source", "other"]);
+  app.commands.switchTab = () => {};
+  app.commands.toggleCreationMode = mode => { app.state.palette.creationMode = mode; };
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+  app.commands.syncConfigToServer = async () => {};
+
+  await app.commands.beginPaletteVariant("source");
+  app.commands.removeManualFilamentAt(1);
+  app.commands.addManualFilament("green");
+  const variant = await app.commands.commitPaletteVariant();
+
+  assert.ok(variant);
+  assert.deepEqual([...app.state.solve.batchSelectedDeckIds], ["source", "other"]);
+  assert.equal(app.state.solve.batchSelectedDeckIds.has(variant.id), false);
+  assert.equal(app.state.palette.activeDeckId, "source");
+});
+
+test("deck-selected batch start sends mixed ordered palettes without suggestion fields", async () => {
+  let payload = null;
+  let toast = "";
+  const status = {
+    job_id: "batch-a",
+    job_kind: "palette_batch",
+    status: "running",
+    phase: "preparing_source",
+    items: [
+      { position: 1, result_id: "result-1", deck_card_id: "manual", label: "Manual", palette: ["red"], status: "queued" },
+      { position: 2, result_id: "result-2", deck_card_id: "saved", label: "Saved", palette: ["red", "blue"], status: "queued" },
+    ],
+  };
+  const { app } = await harness({
+    api: {
+      getExportStatus: async () => ({ status: "idle" }),
+      apiPost: async () => ({ valid: true }),
+      startPaletteBatch: async body => { payload = body; return status; },
+    },
+  });
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = { filename: "image.png", source_ref: null, width: 100, height: 100 };
+  app.state.palette.enabledFilaments = new Set(["red", "blue", "white"]);
+  app.state.palette.deck = [
+    { id: "manual", name: "Manual", filament_ids: ["red"] },
+    { id: "saved", name: "Saved", filament_ids: ["red", "blue"] },
+  ];
+  app.state.solve.batchSelectedDeckIds = new Set(["manual", "saved"]);
+  app.state.solve.solveMode = "batch";
+  app.commands.appConfirm = async () => true;
+  app.commands.syncConfigToServer = async () => {};
+  app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
+  app.commands.paletteGatingIssueCount = () => 0;
+  app.commands.buildSolveRecipeContext = palette => ({
+    profile_ref: { kind: "system", id: "system-default" },
+    profile_name_at_solve: "Default",
+    is_profile_modified_at_solve: false,
+    recipe_snapshot: { palette: [...palette] },
+  });
+  app.commands._currentSettingsSnapshot = () => ({});
+  app.commands.ensureBatchPreviewRuns = () => {};
+  app.commands.startPaletteBatchPolling = () => {};
+  app.commands.renderDeckCards = () => {};
+  app.commands.renderSolveProgress = () => {};
+  app.commands.switchTab = () => {};
+  app.commands.updateSolveReadiness = () => {};
+  app.commands.showToast = message => { toast = message; };
+
+  await app.commands.handleStartPaletteBatch();
+
+  assert.ok(payload, toast || "batch start did not call the API");
+  assert.deepEqual(payload.deck_palettes, [
+    { deck_card_id: "manual", deck_card_name: "Manual", filament_ids: ["red"] },
+    { deck_card_id: "saved", deck_card_name: "Saved", filament_ids: ["red", "blue"] },
+  ]);
+  assert.equal("top_k" in payload, false);
+  assert.equal("filament_ids" in payload, false);
+  assert.equal("palette_mode" in payload, false);
+  assert.equal(app.state.solve.activeSolveJobId, "batch-a");
+  assert.equal(app.state.solve.batchDeckLocked, true);
+});
+
+test("an accepted batch stays locked and tracked if Preview initialization fails", async () => {
+  const status = {
+    job_id: "batch-accepted",
+    job_kind: "palette_batch",
+    status: "running",
+    phase: "preparing_source",
+    items: [
+      { position: 1, result_id: "result-1", deck_card_id: "deck-1", label: "One", palette: ["red"], status: "queued" },
+      { position: 2, result_id: "result-2", deck_card_id: "deck-2", label: "Two", palette: ["blue"], status: "queued" },
+    ],
+  };
+  const { app } = await harness({
+    api: {
+      getExportStatus: async () => ({ status: "idle" }),
+      apiPost: async () => ({ valid: true }),
+      startPaletteBatch: async () => status,
+    },
+  });
+  let pollingStatus = null;
+  let toast = "";
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = { filename: "image.png", source_ref: null, width: 100, height: 100 };
+  app.state.palette.enabledFilaments = new Set(["red", "blue", "white"]);
+  app.state.palette.deck = [
+    { id: "deck-1", name: "One", filament_ids: ["red"] },
+    { id: "deck-2", name: "Two", filament_ids: ["blue"] },
+  ];
+  app.state.solve.batchSelectedDeckIds = new Set(["deck-1", "deck-2"]);
+  app.state.solve.solveMode = "batch";
+  app.commands.appConfirm = async () => true;
+  app.commands.syncConfigToServer = async () => {};
+  app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
+  app.commands.paletteGatingIssueCount = () => 0;
+  app.commands.buildSolveRecipeContext = () => ({ recipe_snapshot: {} });
+  app.commands._currentSettingsSnapshot = () => ({});
+  app.commands.ensureBatchPreviewRuns = () => { throw new Error("render failed"); };
+  app.commands.startPaletteBatchPolling = value => { pollingStatus = value; };
+  app.commands.renderDeckCards = () => {};
+  app.commands.updateSolveReadiness = () => {};
+  app.commands.showToast = message => { toast = message; };
+
+  await app.commands.handleStartPaletteBatch();
+
+  assert.equal(app.state.solve.activeSolveJobId, "batch-accepted");
+  assert.equal(app.state.solve.batchDeckLocked, true);
+  assert.equal(pollingStatus, status);
+  assert.match(toast, /started, but Preview could not initialize/);
+});
+
+test("batch confirmation cancellation performs no work and preserves selection", async () => {
+  let starts = 0;
+  const { app } = await harness({
+    api: {
+      startPaletteBatch: async () => {
+        starts += 1;
+        return {};
+      },
+    },
+  });
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = { filename: "image.png", source_ref: null };
+  app.state.palette.deck = [
+    { id: "deck-1", name: "One", filament_ids: ["red"] },
+    { id: "deck-2", name: "Two", filament_ids: ["blue"] },
+  ];
+  app.state.solve.batchSelectedDeckIds = new Set(["deck-1", "deck-2"]);
+  app.state.solve.solveMode = "batch";
+  app.commands.appConfirm = async () => false;
+  app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
+  app.commands.paletteGatingIssueCount = () => 0;
+
+  await app.commands.handleStartPaletteBatch();
+
+  assert.equal(starts, 0);
+  assert.equal(app.state.solve.batchDeckLocked, false);
+  assert.equal(app.state.solve.solveMode, "batch");
+  assert.deepEqual([...app.state.solve.batchSelectedDeckIds], ["deck-1", "deck-2"]);
+});
+
+test("a rejected batch start unlocks the deck without discarding mode or selection", async () => {
+  const { app } = await harness({
+    api: {
+      getExportStatus: async () => ({ status: "idle" }),
+      apiPost: async () => ({ valid: true }),
+      startPaletteBatch: async () => { throw new Error("server rejected batch"); },
+    },
+  });
+  let toast = "";
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = { filename: "image.png", source_ref: null };
+  app.state.palette.deck = [
+    { id: "deck-1", name: "One", filament_ids: ["red"] },
+    { id: "deck-2", name: "Two", filament_ids: ["blue"] },
+  ];
+  app.state.solve.batchSelectedDeckIds = new Set(["deck-1", "deck-2"]);
+  app.state.solve.solveMode = "batch";
+  app.commands.appConfirm = async () => true;
+  app.commands.syncConfigToServer = async () => {};
+  app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
+  app.commands.paletteGatingIssueCount = () => 0;
+  app.commands.buildSolveRecipeContext = () => ({ recipe_snapshot: {} });
+  app.commands._currentSettingsSnapshot = () => ({});
+  app.commands.renderDeckCards = () => {};
+  app.commands.updateSolveReadiness = () => {};
+  app.commands.showToast = message => { toast = message; };
+
+  await app.commands.handleStartPaletteBatch();
+
+  assert.equal(app.state.solve.batchDeckLocked, false);
+  assert.equal(app.state.solve.solveMode, "batch");
+  assert.deepEqual([...app.state.solve.batchSelectedDeckIds], ["deck-1", "deck-2"]);
+  assert.match(toast, /server rejected batch/);
+});
+
+test("palette batch results fetch once and cancellation removes only incomplete runs", async () => {
+  let fetches = 0;
+  const { app } = await harness({
+    api: {
+      getPaletteBatchResult: async (_jobId, resultId) => {
+        fetches += 1;
+        return {
+          result_id: resultId,
+          label: "Manual",
+          palette: ["red"],
+          config: { palette: ["red"], base_filament: "white" },
+          recipe_snapshot: { palette: ["red"] },
+          result: { card_id: resultId, mean_de: 0.1 },
+          elapsed_s: 2,
+        };
+      },
+    },
+  });
+  app.commands.renderSolveTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+  app.state.solve.solveRuns = [
+    { id: "result-1", label: "queued", palette: ["red"], results: null },
+    { id: "result-2", label: "queued", palette: ["blue"], results: null },
+  ];
+
+  const running = {
+    job_id: "batch-a",
+    job_kind: "palette_batch",
+    status: "running",
+    items: [
+      { result_id: "result-1", deck_card_id: "deck-1", position: 1, palette: ["red"], status: "complete", result_available: true },
+      { result_id: "result-2", deck_card_id: "deck-2", position: 2, palette: ["blue"], status: "queued", result_available: false },
+    ],
+  };
+  await app.commands.reconcilePaletteBatchStatus(running, { awaitResults: true });
+  await app.commands.reconcilePaletteBatchStatus(running, { awaitResults: true });
+  assert.equal(fetches, 1);
+  assert.equal(app.state.solve.solveRuns[0].results.card_id, "result-1");
+
+  await app.commands.reconcilePaletteBatchStatus({
+    ...running,
+    status: "cancelled",
+    items: [running.items[0], { ...running.items[1], status: "cancelled" }],
+  });
+  assert.deepEqual(app.state.solve.solveRuns.map(run => run.id), ["result-1"]);
+});
+
+test("selected source cards and whole-deck clearing are locked during a batch", async () => {
+  const { app } = await harness();
+  let toast = "";
+  app.commands.showToast = message => { toast = message; };
+  app.commands.renderDeckCards = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.syncConfigToServer = () => {};
+  app.state.palette.deck = [
+    { id: "locked", name: "Locked", filament_ids: ["red"] },
+    { id: "free", name: "Free", filament_ids: ["blue"] },
+  ];
+  app.state.solve.batchDeckLocked = true;
+  app.state.solve.batchLockedDeckIds = new Set(["locked"]);
+
+  assert.equal(await app.commands.removeDeckCard("locked"), false);
+  assert.match(toast, /locked/i);
+  assert.deepEqual(app.state.palette.deck.map(card => card.id), ["locked", "free"]);
+  assert.equal(await app.commands.removeDeckCard("free"), true);
+  assert.deepEqual(app.state.palette.deck.map(card => card.id), ["locked"]);
+});
 test("palette hover preview omits the internal out-of-gamut diagnostic", async () => {
   const { app } = await harness();
   app.commands.esc = (value) => String(value);

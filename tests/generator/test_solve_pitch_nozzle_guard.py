@@ -35,5 +35,5 @@ def test_solve_pitch_guard_rejects_pitch_below_nozzle() -> None:
 
 
 def test_solve_start_validates_pitch_before_reserving_a_job() -> None:
-    source = inspect.getsource(server.start_solve)
-    assert source.index("_validate_solve_pitch_for_nozzle(cfg)") < source.index("_reserve_model_job(")
+    source = inspect.getsource(server._start_full_solve_job)
+    assert source.index("_validate_solve_pitch_for_nozzle(") < source.index("_reserve_model_job(")

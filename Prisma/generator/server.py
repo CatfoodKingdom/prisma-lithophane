@@ -729,6 +729,23 @@ session: Dict[str, Any] = {
         "cancel_requested": False,
     },
     "solve_cache": {},        # card_id -> {"solve": ..., "config": ...}
+    "palette_batch": {
+        "status": "idle",
+        "job_id": None,
+        "job_kind": "palette_batch",
+        "phase": None,
+        "progress": {},
+        "elapsed_s": 0.0,
+        "started_monotonic": None,
+        "item_count": 0,
+        "current_position": None,
+        "items": [],
+        "cancel_requested": False,
+        "profile_ref": {},
+        "profile_name_at_solve": None,
+        "is_profile_modified_at_solve": False,
+        "recipe_snapshot": {},
+    },
     "suggest": {
         "status": "idle",       # idle | running | complete | error | cancelled
         "progress": {},
@@ -763,7 +780,7 @@ def _image_import_priority_busy() -> bool:
             return True
         return any(
             session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES
-            for key in ("solve", "export", "suggest")
+            for key in ("solve", "export", "suggest", "palette_batch")
         )
 
 
@@ -1107,6 +1124,7 @@ def _drop_phantom_config_fields(cfg: Optional[dict]) -> dict:
     resolved = deepcopy(dict(cfg or {}))
     for key in _PHANTOM_CONFIG_FIELDS:
         resolved.pop(key, None)
+    resolved.pop("__active_printer__", None)
     return resolved
 
 
@@ -1347,7 +1365,12 @@ def _resolve_photo_stack_candidate_path_for_solve(cfg: dict) -> Path | None:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) -> SolveConfig:
+def _build_solve_config(
+    cfg: dict,
+    palette_override: List[str] | None = None,
+    *,
+    active_printer: Mapping[str, Any] | None = None,
+) -> SolveConfig:
     """Translate session config dict to a SolveConfig dataclass.
 
     Resolution fields are passed via canonical names only. Live session
@@ -1359,7 +1382,11 @@ def _build_solve_config(cfg: dict, palette_override: List[str] | None = None) ->
     # Derive printability exclusively from the active printer. Session/client
     # copies of the resolved millimeter fields are provenance only and never
     # override this authority.
-    active = get_active_printer()
+    active = deepcopy(
+        active_printer
+        if active_printer is not None
+        else cfg.get("__active_printer__") or get_active_printer()
+    )
     nozzle_size = 0.20  # fallback
     printer_min_line_width = 0.20
     printer_min_line_length = 0.40
@@ -2435,7 +2462,12 @@ _SOLVE_OWNED_KEYS = (
 )
 
 
-def _solve_owned_fingerprint(cfg: dict) -> str:
+def _solve_owned_fingerprint(
+    cfg: dict,
+    *,
+    module_state: dict | None = None,
+    active_printer: Mapping[str, Any] | None = None,
+) -> str:
     """Stable hash of the canonical resolved solve-owned config subset.
 
     Anything not in _SOLVE_OWNED_KEYS is considered export-owned or
@@ -2458,7 +2490,11 @@ def _solve_owned_fingerprint(cfg: dict) -> str:
     """
     canonical_cfg = _force_mandatory_product_settings(cfg)
     subset = {k: canonical_cfg.get(k) for k in _SOLVE_OWNED_KEYS}
-    active = get_active_printer()
+    active = deepcopy(
+        active_printer
+        if active_printer is not None
+        else canonical_cfg.get("__active_printer__") or get_active_printer()
+    )
     nozzle = active.get("nozzle") or {}
     printability = active.get("printability") or (
         _resolve_nozzle_printability(
@@ -2481,7 +2517,9 @@ def _solve_owned_fingerprint(cfg: dict) -> str:
             "minimum_component_area_mm2"
         ),
     }
-    subset["__module_state__"] = load_module_state(_MODULES_PATH)
+    subset["__module_state__"] = deepcopy(
+        module_state if module_state is not None else load_module_state(_MODULES_PATH)
+    )
     _ensure_registry_populated()
     pre_params = cfg.get("preprocessing_params", {}) or {}
     subset["preprocessing_params_enabled"] = {
@@ -2595,9 +2633,15 @@ def _collect_module_param_values(cfg: dict, module_name: Optional[str], descript
     return collected
 
 
-def _build_solve_start_diagnostics(cfg: dict) -> dict:
+def _build_solve_start_diagnostics(
+    cfg: dict,
+    *,
+    module_state: dict | None = None,
+) -> dict:
     """Build a compact, inspectable summary of solve-start runtime inputs."""
-    module_state = load_module_state(_MODULES_PATH)
+    module_state = deepcopy(
+        module_state if module_state is not None else load_module_state(_MODULES_PATH)
+    )
     descriptors = _module_descriptors_by_name()
     active_modules = _resolve_active_runtime_modules(module_state)
 
@@ -2911,6 +2955,15 @@ def list_filaments() -> List[dict]:
 
 # ── Images ────────────────────────────────────────────────────────────────
 
+def _assert_palette_batch_inactive(operation: str) -> None:
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        batch = session.get("palette_batch") or {}
+        if batch.get("status") in _ACTIVE_MODEL_JOB_STATUSES:
+            raise HTTPException(
+                409,
+                f"Cannot {operation} while a palette batch is active",
+            )
+
 
 @app.get("/api/images")
 def list_images() -> List[dict]:
@@ -2925,6 +2978,7 @@ def list_images() -> List[dict]:
 def refresh_images() -> dict:
     """Scan the visible Images folder and queue missing normalized sources."""
 
+    _assert_palette_batch_inactive("refresh images")
     return _IMAGE_IMPORTS.refresh()
 
 
@@ -2953,6 +3007,7 @@ def open_images_folder() -> dict:
 @app.post("/api/images/upload")
 async def upload_image(file: UploadFile) -> dict:
     """Compatibility single-file upload; waits until the image is usable."""
+    _assert_palette_batch_inactive("upload an image")
     if not file.filename:
         raise HTTPException(400, "No filename provided")
 
@@ -2982,6 +3037,7 @@ async def upload_image(file: UploadFile) -> dict:
 async def import_images(files: List[UploadFile] = File(...)) -> dict:
     """Stage a batch and return immediately while the single worker validates it."""
 
+    _assert_palette_batch_inactive("import images")
     if not files:
         raise HTTPException(400, "No files provided")
     data_paths.SOURCE_IMAGE_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -3039,7 +3095,7 @@ def get_session() -> dict:
     """Return full session state (config + solve status)."""
     response = {
         "config": _with_canonical_pitch_egress(session["config"]),
-        "solve": _serialize_solve_status(session["solve"]),
+        "solve": _serialize_effective_solve_status(),
     }
     source_ref = session["config"].get("image_source_ref")
     if source_ref:
@@ -3080,6 +3136,48 @@ def _serialize_solve_status(solve: dict) -> dict:
         "result": solve.get("result"),
         "cancel_requested": bool(solve.get("cancel_requested", False)),
     }
+
+
+def _serialize_palette_batch_status(batch: dict) -> dict:
+    progress = batch.get("progress", {})
+    detail = dict(progress) if isinstance(progress, dict) else {}
+    label = detail.get("stage_label", "") if detail else str(progress or "")
+    items = []
+    for item in batch.get("items") or []:
+        items.append({
+            key: deepcopy(item.get(key))
+            for key in (
+                "position",
+                "result_id",
+                "deck_card_id",
+                "label",
+                "palette",
+                "status",
+                "elapsed_s",
+                "result_available",
+                "error",
+            )
+        })
+    return {
+        "job_id": batch.get("job_id"),
+        "job_kind": "palette_batch",
+        "status": batch.get("status", "idle"),
+        "phase": batch.get("phase"),
+        "progress": label,
+        "progress_detail": detail,
+        "elapsed_s": round(_solve_elapsed_seconds(batch), 2),
+        "item_count": int(batch.get("item_count") or 0),
+        "current_position": batch.get("current_position"),
+        "items": items,
+        "cancel_requested": bool(batch.get("cancel_requested", False)),
+    }
+
+
+def _serialize_effective_solve_status() -> dict:
+    batch = session.get("palette_batch") or {}
+    if batch.get("status") != "idle":
+        return _serialize_palette_batch_status(batch)
+    return _serialize_solve_status(session["solve"])
 
 
 def _translate_resolution_schema_error(exc: Exception) -> HTTPException:
@@ -4247,7 +4345,8 @@ def _format_tier_response(
 
 def _palette_suggestion_ams_capacity(snapshot: dict) -> tuple[int, int]:
     """Resolve palette-suggestion AMS capacity from active printer state."""
-    printer = (get_active_printer() or {}).get("printer") or {}
+    active = snapshot.get("__active_printer__") or get_active_printer() or {}
+    printer = active.get("printer") or {}
     snapshot_units = max(1, int(snapshot.get("n_ams_units", 1) or 1))
     snapshot_total_slots = max(1, int(snapshot.get("ams_slots", 4) or 4))
     n_ams_units = max(1, int(printer.get("ams_units") or snapshot_units))
@@ -4492,16 +4591,22 @@ def _complete_suggest_job(job_id: str, *, result: dict[str, Any], elapsed_s: flo
         return True
 
 
-@app.post("/api/palette/suggest")
-def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
-    """Auto-suggest optimal palettes for the given image."""
+def _start_palette_suggestion_job(
+    payload: PaletteSuggestPayload,
+    *,
+    snapshot_override: dict | None = None,
+    image_path_override: Path | None = None,
+    resolved_source_override: ResolvedSource | None = None,
+    internal_batch: bool = False,
+) -> dict:
+    """Start the shared suggestion worker for the API or a palette batch."""
+
     _require_model_library()
-    image_path = _resolve_image_source_path(
-        payload.image_path,
-        payload.image_source_ref,
+    image_path = image_path_override or _resolve_image_source_path(
+        payload.image_path, payload.image_source_ref
     )
 
-    cfg = _cfg()
+    cfg = snapshot_override if snapshot_override is not None else _cfg()
 
     # Palette suggestion is always thorough now. The old fast/quality switches
     # were only user-facing complexity; thorough is fast enough for this app.
@@ -4509,7 +4614,7 @@ def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
     if suggest["status"] == "running":
         raise HTTPException(409, "Suggestion already running")
 
-    snapshot = dict(cfg)
+    snapshot = deepcopy(cfg)
     snapshot["image_path"] = payload.image_path
     snapshot["image_source_ref"] = payload.image_source_ref
 
@@ -4527,18 +4632,23 @@ def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
         )
 
     job_id = uuid.uuid4().hex
-    _reserve_model_job(
-        "suggest",
-        already_running="Suggestion already running",
-        state={
-            "status": "running",
-            "progress": {"stage_label": "Starting..."},
-            "elapsed_s": 0.0,
-            "result": None,
-            "cancel_requested": False,
-            "job_id": job_id,
-        },
-    )
+    reserved_state = {
+        "status": "running",
+        "progress": {"stage_label": "Starting..."},
+        "elapsed_s": 0.0,
+        "result": None,
+        "cancel_requested": False,
+        "job_id": job_id,
+    }
+    if internal_batch:
+        with _MODEL_RESOURCE_COORDINATION_LOCK:
+            session["suggest"].update(reserved_state)
+    else:
+        _reserve_model_job(
+            "suggest",
+            already_running="Suggestion already running",
+            state=reserved_state,
+        )
 
     def _run_suggest():
         with _suggest_lock:
@@ -4587,7 +4697,12 @@ def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
                 wc_profile = _load_profile_sandbox(_white_cap(snapshot))
                 gamut_backend, model_metadata, model_kwargs = _build_palette_suggestion_model(snapshot)
                 _report_progress("Loading source image", 0.04)
-                suggest_img = _load_run_source_image(image_path, snapshot, max_dim_mm=80.0)
+                suggest_img = _load_run_source_image(
+                    image_path,
+                    snapshot,
+                    max_dim_mm=80.0,
+                    resolved_source=resolved_source_override,
+                )
                 _check_cancel()
                 palette_mode = str(payload.palette_mode or "standard")
                 solve_cfg = _build_solve_config(snapshot)
@@ -4747,6 +4862,13 @@ def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
     return {"status": "started", "job_id": job_id}
 
 
+@app.post("/api/palette/suggest")
+def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
+    """Auto-suggest optimal palettes for the given image."""
+
+    return _start_palette_suggestion_job(payload)
+
+
 @app.get("/api/palette/suggest/status")
 def suggest_status() -> dict:
     """Poll suggest progress."""
@@ -4795,6 +4917,64 @@ class SolveStartPayload(BaseModel):
     profile_name_at_solve: Optional[str] = None
     is_profile_modified_at_solve: Optional[bool] = None
     recipe_snapshot: Optional[Dict[str, Any]] = None
+
+
+class PaletteBatchDeckItemPayload(BaseModel):
+    """One explicitly selected Palette Deck card."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    deck_card_id: str = Field(min_length=1, max_length=200)
+    deck_card_name: str = Field(default="", max_length=200)
+    filament_ids: List[str] = Field(min_length=1)
+
+    @field_validator("deck_card_id", mode="before")
+    @classmethod
+    def _normalize_deck_card_id(cls, value: Any) -> str:
+        normalized = str(value or "").strip()
+        if not normalized:
+            raise ValueError("deck_card_id must not be empty")
+        return normalized
+
+    @field_validator("filament_ids", mode="before")
+    @classmethod
+    def _normalize_filament_ids(cls, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError("filament_ids must be a list")
+        normalized = [str(item or "").strip() for item in value]
+        if not normalized or any(not item for item in normalized):
+            raise ValueError("filament_ids must contain non-empty filament IDs")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("filament_ids must not contain duplicates")
+        return normalized
+
+
+class PaletteBatchStartPayload(BaseModel):
+    """An ordered set of Palette Deck cards for sequential full solves."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    image_path: str
+    image_source_ref: Optional[str] = None
+    deck_palettes: List[PaletteBatchDeckItemPayload] = Field(
+        min_length=2,
+        max_length=10,
+    )
+    profile_ref: Optional[Dict[str, Any]] = None
+    profile_name_at_solve: Optional[str] = None
+    is_profile_modified_at_solve: Optional[bool] = None
+    recipe_snapshot: Optional[Dict[str, Any]] = None
+
+    @field_validator("deck_palettes")
+    @classmethod
+    def _validate_unique_deck_card_ids(
+        cls,
+        value: List[PaletteBatchDeckItemPayload],
+    ) -> List[PaletteBatchDeckItemPayload]:
+        ids = [item.deck_card_id for item in value]
+        if len(set(ids)) != len(ids):
+            raise ValueError("deck_card_id values must be unique")
+        return value
 
 
 _WHITE_CAP_STAGE4_FIELD_ARRAY_KEYS = (
@@ -5193,27 +5373,39 @@ def _validate_solve_pitch_for_nozzle(cfg: dict, active: dict | None = None) -> N
         )
 
 
-@app.post("/api/solve/start")
-def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
-    """Start full solve in a background thread."""
+def _start_full_solve_job(
+    payload: SolveStartPayload,
+    *,
+    config_override: dict | None = None,
+    image_path_override: Path | None = None,
+    resolved_source_override: ResolvedSource | None = None,
+    source_provenance_override: dict | None = None,
+    module_state_override: dict | None = None,
+    active_printer_override: Mapping[str, Any] | None = None,
+    auto_archive: bool = True,
+    internal_batch: bool = False,
+) -> dict:
+    """Start the shared production-solve worker."""
+
     _require_model_library()
     if session["solve"]["status"] == "running":
         raise HTTPException(409, "Solve already running")
 
-    raw_cfg = _cfg()
+    raw_cfg = deepcopy(config_override if config_override is not None else _cfg())
     if not raw_cfg["image_path"]:
         raise HTTPException(400, "No image selected")
     palette = payload.palette if payload.palette else raw_cfg["palette"]
     if not palette:
         raise HTTPException(400, "No palette selected")
 
-    image_path = _resolve_config_image_source(raw_cfg)
+    image_path = image_path_override or _resolve_config_image_source(raw_cfg)
 
     # Snapshot config so the solve thread isn't affected by mid-solve changes
     cfg = _with_active_printer_printability(
-        _drop_phantom_config_fields(raw_cfg)
+        _drop_phantom_config_fields(raw_cfg),
+        active=active_printer_override,
     )
-    _validate_solve_pitch_for_nozzle(cfg)
+    _validate_solve_pitch_for_nozzle(cfg, active=dict(active_printer_override) if active_printer_override is not None else None)
     cfg["palette"] = canonical_palette_order(
         palette,
         load_filament_order_registry(),
@@ -5227,27 +5419,38 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
         _raw_recipe = {**_raw_recipe, "config": _with_canonical_pitch_egress(_raw_recipe["config"])}
     recipe_snapshot = _sanitize_recipe_snapshot_phantom_fields(_raw_recipe)
     job_id = str(uuid.uuid4())[:8]
-    solve_start_diagnostics = _build_solve_start_diagnostics(cfg)
-    sc = _build_solve_config(cfg)
+    solve_start_diagnostics = _build_solve_start_diagnostics(
+        cfg,
+        module_state=module_state_override,
+    )
+    sc = _build_solve_config(
+        cfg,
+        active_printer=active_printer_override,
+    )
     swap_banding_requested = len(sc.palette) > sc.color_slots()
     solve_stage_count = 10 if swap_banding_requested else 7
     started_monotonic = time.monotonic()
 
     # Set status synchronously so _assert_no_active_job() sees "running"
     # immediately after this handler returns (mirrors export_files_start).
-    _reserve_model_job(
-        "solve",
-        already_running="Solve already running",
-        state={
-            "status": "running",
-            "progress": {},
-            "elapsed_s": 0.0,
-            "started_monotonic": started_monotonic,
-            "job_id": job_id,
-            "card_id": card_id,
-            "cancel_requested": False,
-        },
-    )
+    reserved_state = {
+        "status": "running",
+        "progress": {},
+        "elapsed_s": 0.0,
+        "started_monotonic": started_monotonic,
+        "job_id": job_id,
+        "card_id": card_id,
+        "cancel_requested": False,
+    }
+    if internal_batch:
+        with _MODEL_RESOURCE_COORDINATION_LOCK:
+            session["solve"].update(reserved_state)
+    else:
+        _reserve_model_job(
+            "solve",
+            already_running="Solve already running",
+            state=reserved_state,
+        )
 
     def _store_progress(event: dict) -> None:
         solve = session["solve"]
@@ -5321,10 +5524,22 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     stage_index=1,
                     local_pct=0,
                 )
-                resolved_source = _resolve_run_source_image(image_path)
-                source_asset = _source_provenance_for_config(cfg, resolved_source)
-                if source_asset.get("normalized"):
-                    snapshot_name = "source-image.png"
+                resolved_source = (
+                    resolved_source_override
+                    if resolved_source_override is not None
+                    else _resolve_run_source_image(image_path)
+                )
+                source_asset = (
+                    deepcopy(source_provenance_override)
+                    if source_provenance_override is not None
+                    else _source_provenance_for_config(cfg, resolved_source)
+                )
+                if source_asset.get("normalized") or source_provenance_override is not None:
+                    snapshot_name = (
+                        "source-image.png"
+                        if source_asset.get("normalized")
+                        else f"source-image{resolved_source.working_path.suffix.lower()}"
+                    )
                     shutil.copy2(resolved_source.working_path, out / snapshot_name)
                     source_asset["snapshot_name"] = snapshot_name
                 solve["source_asset"] = source_asset
@@ -5349,8 +5564,17 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                 )
 
                 # Step 2-4: Facade solve (profiles → LUTs → solve → grouping)
-                result = solve_full(img, sc, progress=pipeline_progress,
-                                    modules_path=_MODULES_PATH)
+                solve_kwargs: dict[str, Any] = {
+                    "progress": pipeline_progress,
+                    "modules_path": (
+                        None
+                        if module_state_override is not None
+                        else _MODULES_PATH
+                    ),
+                }
+                if module_state_override is not None:
+                    solve_kwargs["module_state"] = module_state_override
+                result = solve_full(img, sc, **solve_kwargs)
                 _mark_phase("solve_full")
                 detail_cap_smoothing_summary = (
                     getattr(result, "cap_quality", {}) or {}
@@ -5694,7 +5918,11 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     debug_map = debug_maps.get(key)
                     if debug_map is None:
                         continue
-                    filename = f"{key}.png"
+                    # Debug maps live in their own filename namespace.  In
+                    # particular, the staged ``boundary_cap_height`` field
+                    # must never overwrite the canonical Inferno thickness
+                    # artifact written above as ``boundary_cap_height.png``.
+                    filename = f"debug_{key}.png"
                     _save_overlay_map(
                         np.asarray(debug_map, dtype=np.float32),
                         out / filename,
@@ -6054,7 +6282,11 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                     material_exposure_audit.get("passes", False)
                 )
 
-                solve["solve_owned_fingerprint"] = _solve_owned_fingerprint(cfg)
+                solve["solve_owned_fingerprint"] = _solve_owned_fingerprint(
+                    cfg,
+                    module_state=module_state_override,
+                    active_printer=active_printer_override,
+                )
                 artifact_progress.emit(
                     stage="artifacts",
                     stage_label="Persisting completed run...",
@@ -6072,7 +6304,8 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
                 logger.info("SOLVE_PHASE_TIMINGS %s", json.dumps(_phase_durations))
                 if card_id:
                     entry = _write_completed_solve_cache_entry(card_id, cfg, solve, result)
-                    _maybe_write_auto_run(card_id, entry["solve"], entry["config"])
+                    if auto_archive:
+                        _maybe_write_auto_run(card_id, entry["solve"], entry["config"])
                 root_progress.emit(
                     stage="complete",
                     stage_label="Solve complete",
@@ -6117,27 +6350,544 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
     return {"job_id": job_id, "status": "running"}
 
 
+@app.post("/api/solve/start")
+def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
+    """Start one full solve in a background thread."""
+
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        if session["palette_batch"].get("status") in _ACTIVE_MODEL_JOB_STATUSES:
+            raise HTTPException(409, "A palette batch solve is currently running")
+        session["palette_batch"].update({
+            "status": "idle",
+            "job_id": None,
+            "phase": None,
+            "item_count": 0,
+            "current_position": None,
+            "items": [],
+            "cancel_requested": False,
+        })
+    return _start_full_solve_job(payload)
+
+
+def _palette_batch_cancel_requested(job_id: str) -> bool:
+    batch = session.get("palette_batch") or {}
+    return bool(
+        str(batch.get("job_id") or "") != job_id
+        or batch.get("cancel_requested")
+    )
+
+
+def _update_palette_batch(job_id: str, **updates: Any) -> bool:
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        batch = session["palette_batch"]
+        if str(batch.get("job_id") or "") != job_id:
+            return False
+        batch.update(updates)
+        return True
+
+
+def _pin_palette_batch_source(
+    job_id: str,
+    cfg: Mapping[str, Any],
+) -> tuple[Path, ResolvedSource, dict]:
+    """Materialize one immutable source asset shared by every batch item."""
+
+    image_path = _resolve_config_image_source(cfg)
+    resolved = _resolve_run_source_image(image_path)
+    batch_dir = data_paths.CACHE_DIR / "palette-batches" / job_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    suffix = resolved.working_path.suffix.lower() or ".img"
+    snapshot_path = batch_dir / f"source{suffix}"
+    shutil.copy2(resolved.working_path, snapshot_path)
+    prepared_hasher = hashlib.sha256()
+    with snapshot_path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            prepared_hasher.update(block)
+    prepared_digest = prepared_hasher.hexdigest()
+    pinned = ResolvedSource(
+        original_path=resolved.original_path,
+        working_path=snapshot_path,
+        display_name=resolved.display_name,
+        source_format=resolved.source_format,
+        fingerprint=resolved.fingerprint,
+        normalized=resolved.normalized,
+        width=resolved.width,
+        height=resolved.height,
+    )
+    provenance = _source_provenance_for_config(cfg, resolved)
+    provenance["prepared_source_digest"] = prepared_digest
+    provenance["batch_source_snapshot"] = True
+    return image_path, pinned, provenance
+
+
+def _authoritative_batch_recipe(
+    client_snapshot: Mapping[str, Any] | None,
+    *,
+    cfg: Mapping[str, Any],
+    module_state: Mapping[str, Any],
+    palette: list[str],
+    profile_ref: Mapping[str, Any],
+    profile_name: str | None,
+) -> dict:
+    """Replace every execution-bearing client carrier with server truth."""
+
+    recipe = _sanitize_recipe_snapshot_phantom_fields(dict(client_snapshot or {}))
+    resolved_cfg = _with_canonical_pitch_egress({
+        **_drop_phantom_config_fields(dict(cfg)),
+        "palette": list(palette),
+    })
+    profile_settings = {
+        key: deepcopy(resolved_cfg.get(key))
+        for key in _SETTINGS_PROFILE_KEYS
+        if key in resolved_cfg
+    }
+    profile_snapshot = dict(recipe.get("profile_snapshot") or {})
+    profile_snapshot.update({
+        "name": profile_name or profile_snapshot.get("name"),
+        "settings": profile_settings,
+        "modules": deepcopy(dict(module_state)),
+    })
+    recipe.update({
+        "palette": list(palette),
+        "profile_ref": deepcopy(dict(profile_ref)),
+        "profile_snapshot": profile_snapshot,
+        "config": resolved_cfg,
+    })
+    return recipe
+
+
+def _sanitize_palette_batch_label(value: Any, position: int) -> str:
+    """Return a concise display label without control characters."""
+
+    cleaned = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value or ""))
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:120] or f"Palette {position}"
+
+
+def _validate_palette_batch_items(
+    *,
+    job_id: str,
+    payload: PaletteBatchStartPayload,
+    frozen_cfg: Mapping[str, Any],
+    module_state: Mapping[str, Any],
+    active_printer: Mapping[str, Any],
+) -> list[dict]:
+    """Validate and fully materialize every item before resource reservation."""
+
+    from filament_policy import unavailable_for_generation
+
+    registry = _load_registry()
+    profile_errors: list[dict] = []
+    items: list[dict] = []
+    white_ids = _white_ids(dict(frozen_cfg))
+    for position, requested in enumerate(payload.deck_palettes, start=1):
+        label = _sanitize_palette_batch_label(requested.deck_card_name, position)
+        palette = canonical_palette_order(requested.filament_ids, registry)
+        solve_filaments = [*palette, *white_ids]
+        missing = [
+            filament_id
+            for filament_id in solve_filaments
+            if not _runtime_profile_exists(filament_id)
+        ]
+        unavailable = unavailable_for_generation(solve_filaments, registry)
+        validation_messages: list[str] = []
+        if missing:
+            validation_messages.append(
+                f"missing calibration profile: {', '.join(dict.fromkeys(missing))}"
+            )
+        if unavailable:
+            validation_messages.append(
+                "excluded from the active model: "
+                + ", ".join(dict.fromkeys(unavailable))
+            )
+        item_cfg = deepcopy(dict(frozen_cfg))
+        item_cfg["palette"] = list(palette)
+        try:
+            _build_solve_config(
+                item_cfg,
+                palette_override=list(palette),
+                active_printer=active_printer,
+            )
+        except HTTPException as exc:
+            validation_messages.append(str(exc.detail))
+        except (TypeError, ValueError, RuntimeError) as exc:
+            validation_messages.append(str(exc))
+        if validation_messages:
+            profile_errors.append({
+                "position": position,
+                "deck_card_id": requested.deck_card_id,
+                "label": label,
+                "message": "; ".join(validation_messages),
+            })
+            continue
+
+        result_id = f"batch-{job_id[:8]}-i{position:02d}"
+        recipe = _authoritative_batch_recipe(
+            payload.recipe_snapshot,
+            cfg=frozen_cfg,
+            module_state=module_state,
+            palette=palette,
+            profile_ref=payload.profile_ref or {},
+            profile_name=payload.profile_name_at_solve,
+        )
+        items.append({
+            "position": position,
+            "result_id": result_id,
+            "deck_card_id": requested.deck_card_id,
+            "label": label,
+            "palette": palette,
+            "status": "queued",
+            "elapsed_s": 0.0,
+            "result_available": False,
+            "error": None,
+            "recipe_snapshot": recipe,
+            "profile_ref": deepcopy(payload.profile_ref or {}),
+            "profile_name_at_solve": payload.profile_name_at_solve,
+            "is_profile_modified_at_solve": bool(
+                payload.is_profile_modified_at_solve
+            ),
+        })
+    if profile_errors:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_palette_batch",
+                "message": "One or more Palette Deck cards cannot be solved.",
+                "items": profile_errors,
+            },
+        )
+    return items
+
+
+def _run_palette_batch(job_id: str, payload: PaletteBatchStartPayload) -> None:
+    batch = session["palette_batch"]
+    started = time.time()
+    try:
+        frozen_cfg = deepcopy(batch["config_snapshot"])
+        module_state = deepcopy(batch["module_state"])
+        active_printer = deepcopy(batch["active_printer"])
+        original_image_path, pinned_source, source_provenance = _pin_palette_batch_source(
+            job_id,
+            frozen_cfg,
+        )
+        if _palette_batch_cancel_requested(job_id):
+            raise SolveCancelled()
+
+        _update_palette_batch(
+            job_id,
+            phase="solving",
+            progress={
+                "stage_label": "Source prepared; starting batch...",
+                "overall_pct": 0.0,
+            },
+        )
+        items = batch.get("items") or []
+        for item in items:
+            if _palette_batch_cancel_requested(job_id):
+                raise SolveCancelled()
+            item["status"] = "solving"
+            item_started = time.time()
+            position = int(item["position"])
+            _update_palette_batch(job_id, current_position=position)
+            item_cfg = deepcopy(frozen_cfg)
+            item_cfg["palette"] = list(item["palette"])
+            try:
+                started_solve = _start_full_solve_job(
+                    SolveStartPayload(
+                        palette=list(item["palette"]),
+                        card_id=item["result_id"],
+                        profile_ref=deepcopy(item["profile_ref"]),
+                        profile_name_at_solve=item["profile_name_at_solve"],
+                        is_profile_modified_at_solve=item[
+                            "is_profile_modified_at_solve"
+                        ],
+                        recipe_snapshot=deepcopy(item["recipe_snapshot"]),
+                    ),
+                    config_override=item_cfg,
+                    image_path_override=original_image_path,
+                    resolved_source_override=pinned_source,
+                    source_provenance_override=source_provenance,
+                    module_state_override=module_state,
+                    active_printer_override=active_printer,
+                    auto_archive=False,
+                    internal_batch=True,
+                )
+            except Exception as exc:
+                if _palette_batch_cancel_requested(job_id):
+                    item["status"] = "cancelled"
+                    raise SolveCancelled() from exc
+                item["elapsed_s"] = round(time.time() - item_started, 2)
+                item["status"] = "error"
+                item["error"] = str(exc) or "Solve could not start"
+                logger.exception(
+                    "Palette batch item %d could not start",
+                    position,
+                )
+                continue
+            inner_job_id = str(started_solve["job_id"])
+            while True:
+                solve = session["solve"]
+                if str(solve.get("job_id") or "") != inner_job_id:
+                    raise RuntimeError("Solve job identity changed during palette batch")
+                inner_status = str(solve.get("status") or "")
+                detail = solve.get("progress") or {}
+                local_pct = float(detail.get("overall_pct") or 0.0) if isinstance(detail, dict) else 0.0
+                overall = 100.0 * (
+                    (position - 1) + max(0.0, min(100.0, local_pct)) / 100.0
+                ) / len(items)
+                inner_label = (
+                    detail.get("stage_label") if isinstance(detail, dict) else str(detail)
+                ) or "Solving..."
+                _update_palette_batch(
+                    job_id,
+                    progress={
+                        "stage_label": (
+                            f"Palette {position} of {len(items)}: {inner_label}"
+                        ),
+                        "overall_pct": round(overall, 1),
+                    },
+                    elapsed_s=time.time() - started,
+                )
+                if inner_status not in _ACTIVE_MODEL_JOB_STATUSES:
+                    break
+                if _palette_batch_cancel_requested(job_id):
+                    session["solve"]["cancel_requested"] = True
+                time.sleep(0.1)
+
+            item["elapsed_s"] = round(time.time() - item_started, 2)
+            if inner_status == "complete" and item["result_id"] in session["solve_cache"]:
+                item["status"] = "complete"
+                item["result_available"] = True
+            elif inner_status == "cancelled" or _palette_batch_cancel_requested(job_id):
+                item["status"] = "cancelled"
+                raise SolveCancelled()
+            else:
+                detail = session["solve"].get("progress") or {}
+                error = (
+                    detail.get("stage_label") if isinstance(detail, dict) else str(detail)
+                )
+                item["status"] = "error"
+                item["error"] = error or "Solve failed"
+
+        succeeded = sum(item["status"] == "complete" for item in items)
+        failed = sum(item["status"] == "error" for item in items)
+        terminal = "complete" if failed == 0 else ("partial" if succeeded else "error")
+        _update_palette_batch(
+            job_id,
+            status=terminal,
+            phase="finalizing",
+            current_position=None,
+            elapsed_s=time.time() - started,
+            started_monotonic=None,
+            cancel_requested=False,
+            progress={
+                "stage_label": (
+                    "Palette batch complete"
+                    if terminal == "complete"
+                    else (
+                        f"Palette batch complete: {succeeded} succeeded, {failed} failed"
+                        if terminal == "partial"
+                        else f"Palette batch failed: {succeeded} succeeded, {failed} failed"
+                    )
+                ),
+                "overall_pct": 100.0,
+            },
+        )
+    except SolveCancelled:
+        for item in batch.get("items") or []:
+            if item.get("status") in {"queued", "solving"}:
+                item["status"] = "cancelled"
+        _update_palette_batch(
+            job_id,
+            status="cancelled",
+            phase="finalizing",
+            current_position=None,
+            elapsed_s=time.time() - started,
+            started_monotonic=None,
+            cancel_requested=False,
+            progress={"stage_label": "Palette batch cancelled"},
+        )
+    except Exception as exc:
+        logger.exception("Palette batch failed")
+        shared_error = str(exc) or "Shared batch preparation failed"
+        for item in batch.get("items") or []:
+            if item.get("status") in {"queued", "solving"}:
+                item["status"] = "error"
+                item["error"] = shared_error
+        _update_palette_batch(
+            job_id,
+            status="error",
+            phase="finalizing",
+            current_position=None,
+            elapsed_s=time.time() - started,
+            started_monotonic=None,
+            cancel_requested=False,
+            progress={"stage_label": shared_error},
+        )
+
+
+@app.post("/api/solve/palette-batch/start")
+def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
+    """Sequentially solve an ordered set of explicit Palette Deck cards."""
+
+    job_id = uuid.uuid4().hex
+    started_monotonic = time.monotonic()
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        _require_model_library()
+        raw_cfg = deepcopy(_cfg())
+        if not raw_cfg.get("image_path"):
+            raise HTTPException(400, "No image selected")
+        if (
+            payload.image_path != raw_cfg.get("image_path")
+            or payload.image_source_ref != raw_cfg.get("image_source_ref")
+        ):
+            raise HTTPException(
+                409,
+                "The selected image changed before the batch started; retry the batch.",
+            )
+        frozen_cfg = deepcopy(raw_cfg)
+        frozen_cfg = _apply_luminance_mode_preset(frozen_cfg, reset_standard=True)
+        frozen_cfg = _force_mandatory_product_settings(frozen_cfg)
+        active_printer = deepcopy(get_active_printer())
+        frozen_cfg = _with_active_printer_printability(
+            frozen_cfg,
+            active=active_printer,
+        )
+        _validate_solve_pitch_for_nozzle(
+            frozen_cfg,
+            active=active_printer,
+        )
+        module_state = deepcopy(load_module_state(_MODULES_PATH))
+        items = _validate_palette_batch_items(
+            job_id=job_id,
+            payload=payload,
+            frozen_cfg=frozen_cfg,
+            module_state=module_state,
+            active_printer=active_printer,
+        )
+        _reserve_palette_batch({
+            "status": "running",
+            "job_id": job_id,
+            "job_kind": "palette_batch",
+            "phase": "preparing_source",
+            "progress": {
+                "stage_label": "Preparing immutable source image...",
+                "overall_pct": 0.0,
+            },
+            "elapsed_s": 0.0,
+            "started_monotonic": started_monotonic,
+            "item_count": len(items),
+            "current_position": None,
+            "items": items,
+            "cancel_requested": False,
+            "profile_ref": deepcopy(payload.profile_ref or {}),
+            "profile_name_at_solve": payload.profile_name_at_solve,
+            "is_profile_modified_at_solve": bool(
+                payload.is_profile_modified_at_solve
+            ),
+            "recipe_snapshot": deepcopy(payload.recipe_snapshot or {}),
+            "config_snapshot": frozen_cfg,
+            "module_state": module_state,
+            "active_printer": active_printer,
+            "active_model_library_id": _ACTIVE_MODEL_LIBRARY_ID,
+        })
+    thread = threading.Thread(
+        target=_run_palette_batch,
+        args=(job_id, payload),
+        name=f"palette-batch-{job_id[:8]}",
+        daemon=True,
+    )
+    try:
+        thread.start()
+    except Exception as exc:
+        for item in session["palette_batch"].get("items") or []:
+            if item.get("status") == "queued":
+                item["status"] = "error"
+                item["error"] = f"Could not start palette batch: {exc}"
+        _update_palette_batch(
+            job_id,
+            status="error",
+            progress={"stage_label": f"Could not start palette batch: {exc}"},
+            started_monotonic=None,
+        )
+        raise HTTPException(500, f"Could not start palette batch: {exc}") from exc
+    return _serialize_palette_batch_status(session["palette_batch"])
+
+
+@app.get("/api/solve/palette-batch/{job_id}/results/{result_id}")
+def palette_batch_result(job_id: str, result_id: str) -> dict:
+    """Return one completed batch result without bloating status polling."""
+
+    _validate_card_id(result_id)
+    batch = session.get("palette_batch") or {}
+    if str(batch.get("job_id") or "") != job_id:
+        raise HTTPException(404, "No such palette batch")
+    item = next(
+        (
+            item
+            for item in batch.get("items") or []
+            if item.get("result_id") == result_id
+        ),
+        None,
+    )
+    if item is None:
+        raise HTTPException(404, "No such palette batch item")
+    if item.get("status") != "complete" or not item.get("result_available"):
+        raise HTTPException(409, "Palette batch item is not complete")
+    cached = session.get("solve_cache", {}).get(result_id)
+    if not cached:
+        raise HTTPException(404, "Palette batch result is no longer cached")
+    return {
+        "job_id": job_id,
+        "result_id": result_id,
+        "deck_card_id": item.get("deck_card_id"),
+        "position": item.get("position"),
+        "label": item.get("label"),
+        "palette": deepcopy(item.get("palette") or []),
+        "config": _with_canonical_pitch_egress(cached.get("config") or {}),
+        "profile_ref": deepcopy(item.get("profile_ref") or {}),
+        "profile_name_at_solve": item.get("profile_name_at_solve"),
+        "is_profile_modified_at_solve": bool(
+            item.get("is_profile_modified_at_solve")
+        ),
+        "recipe_snapshot": deepcopy(item.get("recipe_snapshot") or {}),
+        "elapsed_s": float(item.get("elapsed_s") or 0.0),
+        "result": deepcopy(cached["solve"].get("result") or {}),
+    }
+
+
 @app.get("/api/solve/status")
 def solve_status() -> dict:
     """Poll solve status."""
-    return _serialize_solve_status(session["solve"])
+    return _serialize_effective_solve_status()
 
 
 @app.post("/api/solve/cancel")
 def cancel_solve(job_id: str | None = None) -> dict:
     """Request cancellation of a running solve."""
-    solve = session["solve"]
-    active_job_id = str(solve.get("job_id") or "")
-    if job_id and job_id != active_job_id:
-        raise HTTPException(409, "Solve job no longer matches the active job")
-    if solve["status"] != "running":
-        return {
-            "cancelled": False,
-            "reason": "not running",
-            "job_id": active_job_id or None,
-        }
-    solve["cancel_requested"] = True
-    return {"requested": True, "job_id": active_job_id}
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        batch = session.get("palette_batch") or {}
+        if batch.get("status") in _ACTIVE_MODEL_JOB_STATUSES:
+            active_batch_id = str(batch.get("job_id") or "")
+            if job_id and job_id != active_batch_id:
+                raise HTTPException(409, "Solve job no longer matches the active job")
+            batch["cancel_requested"] = True
+            if session["solve"].get("status") == "running":
+                session["solve"]["cancel_requested"] = True
+            return {"requested": True, "job_id": active_batch_id}
+
+        solve = session["solve"]
+        active_job_id = str(solve.get("job_id") or "")
+        if job_id and job_id != active_job_id:
+            raise HTTPException(409, "Solve job no longer matches the active job")
+        if solve["status"] != "running":
+            return {
+                "cancelled": False,
+                "reason": "not running",
+                "job_id": active_job_id or None,
+            }
+        solve["cancel_requested"] = True
+        return {"requested": True, "job_id": active_job_id}
 
 
 # ── Export ────────────────────────────────────────────────────────────────
@@ -7030,7 +7780,7 @@ def _assert_no_active_job(*, action: str = "clear cache") -> None:
     with _MODEL_RESOURCE_COORDINATION_LOCK:
         if action != "manage model libraries" and _MODEL_LIBRARY_OPERATION_LOCK.locked():
             raise HTTPException(409, "Cannot clear cache while a model-library operation is running")
-        for key in ("solve", "export", "suggest"):
+        for key in ("solve", "export", "suggest", "palette_batch"):
             if session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES:
                 raise HTTPException(409, f"Cannot {action} while a {key} job is running")
         if action != "manage model libraries" and _IMAGE_IMPORTS.active():
@@ -7043,9 +7793,31 @@ def _reserve_model_job(key: str, *, already_running: str, state: dict[str, Any])
             raise HTTPException(409, "Prisma is restarting")
         if _MODEL_LIBRARY_OPERATION_LOCK.locked():
             raise HTTPException(409, "A model-library operation is currently running")
+        if (
+            key != "palette_batch"
+            and session.get("palette_batch", {}).get("status")
+            in _ACTIVE_MODEL_JOB_STATUSES
+        ):
+            raise HTTPException(409, "A palette batch solve is currently running")
         if session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES:
             raise HTTPException(409, already_running)
         session[key].update(state)
+
+
+def _reserve_palette_batch(state: dict[str, Any]) -> None:
+    """Atomically reserve all model-heavy Generator resources for one batch."""
+
+    with _MODEL_RESOURCE_COORDINATION_LOCK:
+        if _RESTART_REQUESTED.is_set():
+            raise HTTPException(409, "Prisma is restarting")
+        if _MODEL_LIBRARY_OPERATION_LOCK.locked():
+            raise HTTPException(409, "A model-library operation is currently running")
+        if _IMAGE_IMPORTS.active():
+            raise HTTPException(409, "Images are currently being prepared")
+        for key in ("solve", "export", "suggest", "palette_batch"):
+            if session.get(key, {}).get("status") in _ACTIVE_MODEL_JOB_STATUSES:
+                raise HTTPException(409, f"A {key} job is currently running")
+        session["palette_batch"].update(state)
 
 
 def _library_status() -> dict:
@@ -7204,6 +7976,8 @@ def clear_cache_all() -> dict:
             data_paths.RUN_CACHE_DIR,
             data_paths.LUT_CACHE_DIR,
             data_paths.AUTO_RUNS_DIR,
+            data_paths.CACHE_DIR / "palette-batches",
+            data_paths.CACHE_DIR / "image-imports",
         )
     )
     source_cache = _SOURCE_IMAGES.cache_dir.resolve()
@@ -7211,6 +7985,18 @@ def clear_cache_all() -> dict:
     if source_cache == active_cache or active_cache in source_cache.parents:
         removed += _SOURCE_IMAGES.clear()
     session.get("solve_cache", {}).clear()
+    session["palette_batch"].update({
+        "status": "idle",
+        "job_id": None,
+        "phase": None,
+        "progress": {},
+        "elapsed_s": 0.0,
+        "started_monotonic": None,
+        "item_count": 0,
+        "current_position": None,
+        "items": [],
+        "cancel_requested": False,
+    })
     if active_private_source:
         config["image_path"] = None
         config["image_source_ref"] = None
@@ -7306,7 +8092,7 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
             or original_image_name
         )
         image_bytes = snapshot_path.read_bytes()
-    elif source_asset.get("normalized"):
+    elif source_asset.get("snapshot_name"):
         original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
         snapshot_name = Path(str(source_asset.get("snapshot_name") or "")).name
         snapshot_path = run_dir / snapshot_name
@@ -7315,7 +8101,11 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
                 409,
                 "The exact prepared source used by this solve is missing; rerun the solve before saving.",
             )
-        image_name = f"{Path(original_image_name).stem}.prisma-source.png"
+        image_name = (
+            f"{Path(original_image_name).stem}.prisma-source.png"
+            if source_asset.get("normalized")
+            else original_image_name
+        )
         image_bytes = snapshot_path.read_bytes()
     else:
         original_image_name = Path(str(cfg.get("image_path", ""))).name or "image"
@@ -7350,7 +8140,7 @@ def _build_archive_inputs(card_id: str, solve: dict, cfg: dict, *, label: str, s
                     f"{private_dir_folded}/"
                 ):
                     continue
-                if source_asset.get("normalized") and rel == source_asset.get("snapshot_name"):
+                if rel == source_asset.get("snapshot_name"):
                     continue
                 payload = p.read_bytes()
                 if rel == "run.json":

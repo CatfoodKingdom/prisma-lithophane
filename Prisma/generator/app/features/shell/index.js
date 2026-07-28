@@ -271,6 +271,8 @@ export function installFeaturesShellIndex(app) {
       btn.classList.toggle("is-active", active);
       btn.setAttribute("aria-checked", active ? "true" : "false");
     });
+    const paletteMode = app.state.ui.$("#paletteSuggestMode");
+    if (paletteMode) paletteMode.value = normalized;
   }
 
   function buildSolveRecipeContext(palette, settingsSnapshot = null) {
@@ -389,7 +391,8 @@ export function installFeaturesShellIndex(app) {
 
   function _slowButtons() {
     return [
-      app.state.ui.$("#suggestPalettesBtn"), app.state.ui.$("#exportFilesBtn"),
+      app.state.ui.$("#suggestPalettesBtn"), app.state.ui.$("#startSolveBtn"),
+      app.state.ui.$("#exportFilesBtn"),
     ].filter(Boolean);
   }
 

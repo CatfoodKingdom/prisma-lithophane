@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import server
+from scalar_palette import scalar_diagnostic_rgb
 from thickness_maps import MapKey, ThicknessMaps
 
 
@@ -175,6 +176,11 @@ def _make_fake_result() -> SimpleNamespace:
         key: np.full((h, w), 0.08, dtype=np.float32)
         for key in _STRUCTURAL_SPLIT_DEBUG_KEYS
     }
+    structural_split_debug["boundary_cap_height"] = np.full(
+        (h, w),
+        0.08,
+        dtype=np.float32,
+    )
 
     return SimpleNamespace(
         thickness_maps=maps,
@@ -227,21 +233,13 @@ def solve_env(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "load_image", lambda *a, **k: np.zeros((4, 4, 3), dtype=np.uint8))
     monkeypatch.setattr(server, "apply_adjustments", lambda img, *a, **k: img)
 
-    # Stub every raster writer to a tiny placeholder so the route runs fast and
-    # filesystem-light. The white-cap part/height writers return real stats
-    # dicts so the boundary/detail payload branches stay populated.
+    # Stub the unrelated raster writers to tiny placeholders so the route runs
+    # fast and filesystem-light.  Keep cap/overlay writers real so this contract
+    # catches diagnostic artifact filename collisions and palette regressions.
     monkeypatch.setattr(server, "_save_de_map", lambda _a, p: _write_placeholder(p))
     monkeypatch.setattr(server, "_save_de_map_scaled", lambda _a, p, **k: _write_placeholder(p))
-    monkeypatch.setattr(server, "_save_cap_height_map", lambda _a, p, **k: _write_placeholder(p))
-    monkeypatch.setattr(server, "_save_overlay_map", lambda _a, p: _write_placeholder(p))
     monkeypatch.setattr(server, "_save_de_raw", lambda _a, p, **k: _write_placeholder(p))
     monkeypatch.setattr(server, "_save_surface_blob", lambda _a, p: _write_placeholder(p))
-
-    def _fake_part_map(arr, path, **kwargs):
-        if arr is None:
-            return None
-        _write_placeholder(path)
-        return {"active_px": 4, "max_d": 0.08}
 
     def _fake_masked_height(arr, mask, path, **kwargs):
         if arr is None or mask is None:
@@ -249,7 +247,6 @@ def solve_env(tmp_path, monkeypatch):
         _write_placeholder(path)
         return {"max_d": 0.08}
 
-    monkeypatch.setattr(server, "_save_white_cap_part_map", _fake_part_map)
     monkeypatch.setattr(server, "_save_masked_white_cap_height_map", _fake_masked_height)
     monkeypatch.setattr(server, "_save_masked_contour_blob",
                         lambda *a, **k: True)
@@ -334,8 +331,38 @@ def test_structural_split_debug_maps_are_exposed(solve_env):
     out_dir = server._current_out_dir("contract_run")
     for key in _STRUCTURAL_SPLIT_DEBUG_KEYS:
         assert key in debug_urls
-        assert debug_urls[key].startswith(f"/api/run-cache/files/{key}.png")
-        assert (out_dir / f"{key}.png").exists()
+        assert debug_urls[key].startswith(f"/api/run-cache/files/debug_{key}.png")
+        assert (out_dir / f"debug_{key}.png").exists()
+
+
+def test_boundary_cap_debug_map_cannot_overwrite_canonical_inferno_artifact(
+    solve_env,
+):
+    result = _run_solve(solve_env.client)
+    out_dir = server._current_out_dir("contract_run")
+    canonical_path = out_dir / "boundary_cap_height.png"
+    debug_path = out_dir / "debug_boundary_cap_height.png"
+
+    assert result["boundary_cap_map_url"].startswith(
+        "/api/run-cache/files/boundary_cap_height.png"
+    )
+    assert result["debug_map_urls"]["boundary_cap_height"].startswith(
+        "/api/run-cache/files/debug_boundary_cap_height.png"
+    )
+    assert canonical_path.is_file()
+    assert debug_path.is_file()
+
+    canonical = np.asarray(Image.open(canonical_path).convert("RGB"))
+    expected = scalar_diagnostic_rgb(
+        np.full((4, 4), 0.08, dtype=np.float32),
+        max_value=3.0,
+        zero_rgb=server._ZERO_THICKNESS_RGB,
+    )
+    np.testing.assert_array_equal(canonical, expected)
+    assert not np.array_equal(
+        canonical,
+        np.asarray(Image.open(debug_path).convert("RGB")),
+    )
 
 
 def test_payload_contains_no_retired_preferred_length_or_soft_warning_keys(solve_env):

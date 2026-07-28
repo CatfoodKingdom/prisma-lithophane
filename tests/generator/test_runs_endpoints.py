@@ -704,7 +704,7 @@ def _server_function_source(*names: str) -> str:
 
 def test_solve_worker_uses_single_completed_cache_assignment_seam():
     helper_source = _server_function_source("_write_completed_solve_cache_entry")
-    worker_source = _server_function_source("start_solve", "_run_solve")
+    worker_source = _server_function_source("_start_full_solve_job", "_run_solve")
     load_source = _server_function_source("_rehydrate_loaded_archive")
     assignment = 'session["solve_cache"][card_id] = {'
 

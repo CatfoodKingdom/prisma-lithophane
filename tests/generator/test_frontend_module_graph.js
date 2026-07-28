@@ -168,6 +168,7 @@ test("solve history controls and cards keep compact stable confirmation geometry
   assert.match(shellCss, /\.compact-history-clear-slot\s*{[\s\S]*?flex:\s*0 0 42px;[\s\S]*?width:\s*42px;/);
   assert.match(shellCss, /\.compact-history-clear\s*{[\s\S]*?width:\s*42px;[\s\S]*?min-width:\s*42px;[\s\S]*?white-space:\s*nowrap;/);
   assert.match(css, /\.solve-run-card-actions\s*{[\s\S]*?flex:\s*0 0 54px;[\s\S]*?width:\s*54px;/);
+  assert.doesNotMatch(css, /solve-run-use-palette-btn/);
   assert.match(css, /\.solve-run-delete-slot\s*{[\s\S]*?width:\s*18px;[\s\S]*?min-width:\s*18px;/);
   assert.match(shellCss, /\.rail-deck-remove,\s*\.compact-deck-card-remove\s*{[\s\S]*?width:\s*18px;[\s\S]*?min-width:\s*18px;[\s\S]*?color:\s*var\(--muted\);/);
   assert.doesNotMatch(css, /\.solve-run-delete-btn\s*{[\s\S]*?(?:border-color:\s*transparent|background:\s*transparent);/);
@@ -236,4 +237,77 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
   assert.match(paletteCss, /#creationDeckPanel\s*{[\s\S]*?width:\s*var\(--palette-suggestion-panel-width\);/);
   assert.match(surfacesCss, /@media \(max-width: 980px\)[\s\S]*?\.creation-layout\s*{\s*flex-direction:\s*column;/);
   assert.match(imageController, /getComputedStyle\(layout\)\.flexDirection === "column"/);
+  assert.doesNotMatch(html, /id="suggestSlotHint"/);
+  assert.match(paletteCss, /\.filament-card\.is-base-cap-reserved\s*{[^}]*var\(--white-filament-line\)[^}]*var\(--white-filament-surface\)/);
+});
+
+test("extra-extra-small ghost actions share button geometry across element types", () => {
+  const shellCss = fs.readFileSync(path.join(appDir, "styles", "shell.css"), "utf8");
+
+  assert.match(
+    shellCss,
+    /\.ghost-button\.xxs\s*{[^}]*line-height:\s*normal;[^}]*}/,
+  );
+});
+
+test("main Solve is an accessible split action and Auto-Suggest owns no solve action", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const batch = fs.readFileSync(
+    path.join(appDir, "features", "solve", "batch.js"),
+    "utf8",
+  );
+  const suggestions = fs.readFileSync(
+    path.join(appDir, "features", "palette", "suggestions.js"),
+    "utf8",
+  );
+  const deck = fs.readFileSync(
+    path.join(appDir, "features", "palette", "deck.js"),
+    "utf8",
+  );
+
+  assert.match(html, /id="solveModeMenuBtn"[\s\S]*?aria-haspopup="menu"/);
+  assert.match(html, /id="solveModeMenu" role="menu" aria-label="Solve mode"/);
+  assert.match(html, /role="menuitemradio" data-solve-mode="single"/);
+  assert.match(html, /role="menuitemradio" data-solve-mode="batch"/);
+  assert.match(batch, /ArrowDown[\s\S]*?ArrowUp[\s\S]*?Home[\s\S]*?End/);
+  assert.match(batch, /event\.key === "Escape"/);
+  assert.match(deck, /aria-multiselectable/);
+  assert.match(deck, /is-batch-selected/);
+  assert.doesNotMatch(suggestions, /paletteBatch|PaletteBatch|startPaletteBatch/);
+  assert.doesNotMatch(html, new RegExp("solvePalette" + "BatchBtn"));
+});
+
+test("Palette Deck cards expose an accessible variant menu without replacing remove", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const deck = fs.readFileSync(path.join(appDir, "features/palette/deck.js"), "utf8");
+
+  assert.match(html, /id="deckCardMenu" role="menu" aria-label="Palette actions"/);
+  assert.match(html, /data-deck-card-action="variant"[\s\S]*?Create Variant/);
+  assert.match(html, /data-deck-card-action="save"[\s\S]*?Save Palette/);
+  assert.match(deck, /class="ghost-button xxs rail-deck-menu-button"/);
+  assert.match(deck, /aria-haspopup="menu" aria-expanded="false" aria-controls="deckCardMenu"/);
+  assert.match(deck, /class="ghost-button xxs rail-deck-remove compact-deck-card-remove"/);
+  assert.match(deck, /event\.key === "Escape"/);
+});
+
+test("abandoned suggestion-owned batch surface is absent", () => {
+  const files = [
+    "index.html",
+    "features/palette/suggestions.js",
+    "features/solve/batch.js",
+    "features/solve/controller.js",
+    "styles/solve.css",
+  ];
+  const combined = files
+    .map(relative => fs.readFileSync(path.join(appDir, relative), "utf8"))
+    .join("\n");
+  const abandoned = [
+    "Solve " + "Top",
+    "solvePalette" + "BatchBtn",
+    "stagePaletteBatch" + "Candidates",
+    "fetchPaletteBatch" + "CandidateResult",
+    "batch_" + "rank",
+    "Use " + "Palette",
+  ];
+  for (const relic of abandoned) assert.doesNotMatch(combined, new RegExp(relic));
 });

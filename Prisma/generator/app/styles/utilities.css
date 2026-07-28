@@ -63,6 +63,34 @@
 }
 .theme-menu [role="menuitemradio"] > span { font-size: 12px; font-weight: 700; }
 .theme-menu [role="menuitemradio"] > small { margin-top: 1px; color: var(--muted); font-size: 10px; }
+.deck-card-menu {
+  width: 230px;
+}
+.deck-card-menu [role="menuitem"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.deck-card-menu [role="menuitem"]:hover,
+.deck-card-menu [role="menuitem"]:focus-visible {
+  background: var(--control-hover);
+}
+.deck-card-menu [role="menuitem"] > span {
+  font-size: 12px;
+  font-weight: 700;
+}
+.deck-card-menu [role="menuitem"] > small {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 10px;
+}
 .model-libraries-attention {
   position: absolute;
   top: 3px;
@@ -108,6 +136,38 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
+}
+.solve-action-split {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  margin-left: 6px;
+}
+.mode-switch .solve-action-split .bar-action {
+  margin-left: 0;
+}
+.mode-switch .solve-action-main {
+  min-width: 78px;
+  border-radius: 4px 0 0 4px;
+}
+.mode-switch .solve-action-menu-button {
+  width: 27px;
+  min-width: 27px;
+  padding: 4px 6px;
+  border-left: 1px solid color-mix(in srgb, var(--on-accent) 35%, transparent);
+  border-radius: 0 4px 4px 0;
+}
+.solve-action-menu-button svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.solve-mode-menu {
+  width: 230px;
 }
 .settings-gear-btn { gap: 5px; }
 .settings-gear-label { font-size: 13px; }

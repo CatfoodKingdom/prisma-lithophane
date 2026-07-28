@@ -3,6 +3,11 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesPaletteDeck(app) {
+let deckCardMenu = null;
+let deckCardMenuAnchor = null;
+let deckCardMenuCardId = null;
+let deckCardMenuViewport = null;
+
 function normalizeSupportFromLoadedConfig(cfg = {}) {
     const base = cfg.base_filament || cfg.white_base || app.state.session.DEFAULT_BASE_FILAMENT;
     return {
@@ -151,7 +156,15 @@ function addLoadedAdHocPaletteToDeck(filamentIds, label = "Loaded run palette") 
   }
 
 function mintPaletteToDeck() {
-    const filaments = app.state.palette.creationMode === "manual" ? app.state.palette.manualSlots : app.state.palette.composerPalette;
+    if (
+      app.state.palette.creationMode === "manual"
+      && app.state.palette.manualVariantDraft
+    ) {
+      return app.commands.commitPaletteVariant();
+    }
+    const filaments = app.state.palette.creationMode === "manual"
+      ? app.state.palette.manualSlots
+      : app.state.palette.composerPalette;
     if (filaments.length === 0) return;
     const card = app.commands.createPaletteDeckCard({
       idPrefix: app.state.palette.creationMode === "manual" ? "manual" : "deck",
@@ -174,6 +187,292 @@ function mintPaletteToDeck() {
     app.commands.updateRail();
   }
 
+function manualVariantFilamentIds() {
+    const draft = app.state.palette.manualVariantDraft;
+    if (!draft) return [...app.state.palette.manualSlots];
+    return draft.workingSlots.filter(
+      filamentId => typeof filamentId === "string" && filamentId.trim(),
+    );
+  }
+
+function manualVariantHasChanged() {
+    const draft = app.state.palette.manualVariantDraft;
+    if (!draft) return false;
+    const current = app.commands.manualVariantFilamentIds();
+    return current.length !== draft.sourceFilamentIds.length
+      || current.some((filamentId, index) => (
+        filamentId !== draft.sourceFilamentIds[index]
+      ));
+  }
+
+function addManualFilament(filamentId) {
+    if (!filamentId || app.commands.manualVariantFilamentIds().includes(filamentId)) {
+      return false;
+    }
+    const draft = app.state.palette.manualVariantDraft;
+    if (!draft) {
+      app.state.palette.manualSlots.push(filamentId);
+      return true;
+    }
+    const vacancy = draft.workingSlots.findIndex(value => value === null);
+    if (vacancy >= 0) draft.workingSlots[vacancy] = filamentId;
+    else draft.workingSlots.push(filamentId);
+    return true;
+  }
+
+function removeManualFilamentAt(index) {
+    const draft = app.state.palette.manualVariantDraft;
+    if (!draft) {
+      if (index < 0 || index >= app.state.palette.manualSlots.length) return false;
+      app.state.palette.manualSlots.splice(index, 1);
+      return true;
+    }
+    if (index < 0 || index >= draft.workingSlots.length) return false;
+    draft.workingSlots[index] = null;
+    return true;
+  }
+
+function nextVariantPaletteName(sourceName) {
+    const source = String(sourceName || "").trim() || "Palette";
+    const base = `${source} Variant`;
+    const existing = new Set(
+      app.state.palette.deck.map(card => String(card.name || "").trim().toLocaleLowerCase()),
+    );
+    if (!existing.has(base.toLocaleLowerCase())) return base;
+    let suffix = 2;
+    while (existing.has(`${base} ${suffix}`.toLocaleLowerCase())) suffix += 1;
+    return `${base} ${suffix}`;
+  }
+
+async function beginPaletteVariant(cardId) {
+    const card = app.state.palette.deck.find(entry => entry.id === cardId);
+    if (!card) {
+      app.commands.showToast("That palette is no longer in the deck.", "warn");
+      return false;
+    }
+    const gatingIssues = app.commands.getPaletteGatingIssues(card.filament_ids);
+    if (app.commands.paletteGatingIssueCount(gatingIssues)) {
+      app.commands.showToast(
+        app.commands.buildPaletteGatingMessage(
+          gatingIssues,
+          `Can't create a variant of “${card.name}”.`,
+        ),
+        "error",
+      );
+      return false;
+    }
+
+    const existingDraft = app.state.palette.manualVariantDraft;
+    if (existingDraft?.sourceCardId === card.id) {
+      app.commands.switchTab("creation");
+      app.commands.toggleCreationMode("manual");
+      return true;
+    }
+    if (existingDraft || app.state.palette.manualSlots.length > 0) {
+      const confirmed = await app.commands.appConfirm(
+        existingDraft
+          ? "Replace the current palette variant draft? The underlying Manual palette draft will remain available if you cancel the new variant."
+          : "Use the Manual builder for this variant? Your current Manual palette draft will return if you cancel.",
+        {
+          title: existingDraft ? "Replace Variant Draft" : "Open Palette Variant",
+          ok: "Create Variant",
+          cancel: "Cancel",
+        },
+      );
+      if (!confirmed) return false;
+    }
+
+    app.state.palette.manualVariantDraft = {
+      sourceCardId: card.id,
+      sourceName: card.name,
+      sourceFilamentIds: [...card.filament_ids],
+      workingSlots: [...card.filament_ids],
+    };
+    app.commands.switchTab("creation");
+    app.commands.toggleCreationMode("manual");
+    return true;
+  }
+
+function cancelPaletteVariant() {
+    if (!app.state.palette.manualVariantDraft) return false;
+    app.state.palette.manualVariantDraft = null;
+    app.commands.renderCreationTab();
+    app.commands.showToast("Palette variant cancelled", "warn");
+    return true;
+  }
+
+async function commitPaletteVariant() {
+    const draft = app.state.palette.manualVariantDraft;
+    if (!draft) return null;
+    const filamentIds = app.commands.manualVariantFilamentIds();
+    if (!filamentIds.length || !app.commands.manualVariantHasChanged()) return null;
+
+    const card = app.commands.createPaletteDeckCard({
+      idPrefix: "variant",
+      name: app.commands.nextVariantPaletteName(draft.sourceName),
+      filamentIds,
+      saved: false,
+    });
+    const sourceIndex = app.state.palette.deck.findIndex(
+      entry => entry.id === draft.sourceCardId,
+    );
+    if (sourceIndex >= 0) app.state.palette.deck.splice(sourceIndex + 1, 0, card);
+    else app.state.palette.deck.push(card);
+
+    if (app.state.solve.solveMode !== "batch") {
+      app.state.palette.activeDeckId = card.id;
+    }
+    app.state.palette.manualVariantDraft = null;
+    app.state.palette.manualSlots = [];
+    app.commands.renderCreationTab();
+    app.commands.updateRail();
+    await app.commands.syncConfigToServer();
+    app.commands.showToast(`Added "${card.name}" to the deck`, "success");
+    return card;
+  }
+
+function handleManualSecondaryAction() {
+    if (app.state.palette.manualVariantDraft) {
+      return app.commands.cancelPaletteVariant();
+    }
+    app.commands.clearManualSlots();
+    return true;
+  }
+
+function deckCardMenuItems() {
+    return [...(deckCardMenu?.querySelectorAll("[data-deck-card-action]") || [])]
+      .filter(item => !item.hidden);
+  }
+
+function positionDeckCardMenu() {
+    if (!deckCardMenu || !deckCardMenuAnchor || deckCardMenu.hidden) return;
+    const rect = deckCardMenuAnchor.getBoundingClientRect();
+    const margin = 8;
+    const gap = 8;
+    const width = deckCardMenu.offsetWidth;
+    const height = deckCardMenu.offsetHeight;
+    const viewportWidth = deckCardMenuViewport?.innerWidth
+      ?? document.documentElement.clientWidth;
+    const viewportHeight = deckCardMenuViewport?.innerHeight
+      ?? document.documentElement.clientHeight;
+    let left = rect.right + gap;
+    if (left + width > viewportWidth - margin) {
+      left = Math.max(margin, rect.left - width - gap);
+    }
+    const top = Math.max(
+      margin,
+      Math.min(rect.top - 4, viewportHeight - height - margin),
+    );
+    deckCardMenu.style.left = `${Math.round(left)}px`;
+    deckCardMenu.style.top = `${Math.round(top)}px`;
+  }
+
+function closeDeckCardMenu({ restoreFocus = false } = {}) {
+    if (!deckCardMenu || deckCardMenu.hidden) return;
+    deckCardMenu.hidden = true;
+    if (deckCardMenuAnchor) {
+      deckCardMenuAnchor.setAttribute("aria-expanded", "false");
+      if (restoreFocus && document.body.contains(deckCardMenuAnchor)) {
+        deckCardMenuAnchor.focus();
+      }
+    }
+    deckCardMenuAnchor = null;
+    deckCardMenuCardId = null;
+  }
+
+function openDeckCardMenu(cardId, anchor, { focus = "first" } = {}) {
+    const card = app.state.palette.deck.find(entry => entry.id === cardId);
+    if (!card || !deckCardMenu || !anchor) return false;
+    app.commands.closeDeckCardMenu();
+    deckCardMenuAnchor = anchor;
+    deckCardMenuCardId = card.id;
+    deckCardMenu.setAttribute("aria-label", `Palette actions for ${card.name}`);
+    const saveItem = deckCardMenu.querySelector('[data-deck-card-action="save"]');
+    if (saveItem) saveItem.hidden = !!card.saved;
+    deckCardMenu.hidden = false;
+    anchor.setAttribute("aria-expanded", "true");
+    app.commands.hideRailDeckHoverPreview();
+    app.commands.positionDeckCardMenu();
+    const items = app.commands.deckCardMenuItems();
+    if (items.length) {
+      (focus === "last" ? items.at(-1) : items[0]).focus();
+    }
+    return true;
+  }
+
+function toggleDeckCardMenu(cardId, anchor) {
+    if (
+      !deckCardMenu?.hidden
+      && deckCardMenuCardId === cardId
+      && deckCardMenuAnchor === anchor
+    ) {
+      app.commands.closeDeckCardMenu({ restoreFocus: true });
+      return false;
+    }
+    return app.commands.openDeckCardMenu(cardId, anchor);
+  }
+
+function handleDeckCardMenuKeydown(event) {
+    const items = app.commands.deckCardMenuItems();
+    if (!items.length) return;
+    const currentIndex = Math.max(0, items.indexOf(event.target));
+    let nextIndex = null;
+    if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % items.length;
+    if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + items.length) % items.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = items.length - 1;
+    if (nextIndex !== null) {
+      event.preventDefault();
+      items[nextIndex].focus();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      app.commands.closeDeckCardMenu({ restoreFocus: true });
+      return;
+    }
+    if (event.key === "Tab") app.commands.closeDeckCardMenu();
+  }
+
+function initializeDeckCardMenuController({
+    viewport = window,
+    documentEvents = document,
+  } = {}) {
+    deckCardMenu = app.state.ui.$("#deckCardMenu");
+    deckCardMenuViewport = viewport;
+    if (deckCardMenu) {
+      app.lifecycle.listen(deckCardMenu, "click", async event => {
+        const item = event.target.closest?.("[data-deck-card-action]");
+        if (!item || !deckCardMenuCardId) return;
+        const cardId = deckCardMenuCardId;
+        const action = item.dataset.deckCardAction;
+        app.commands.closeDeckCardMenu();
+        if (action === "variant") await app.commands.beginPaletteVariant(cardId);
+        if (action === "save") await app.commands.saveDeckCard(cardId);
+      });
+      app.lifecycle.listen(
+        deckCardMenu,
+        "keydown",
+        app.commands.handleDeckCardMenuKeydown,
+      );
+    }
+    app.lifecycle.listen(documentEvents, "pointerdown", event => {
+      if (
+        deckCardMenu?.hidden
+        || deckCardMenu?.contains(event.target)
+        || deckCardMenuAnchor?.contains(event.target)
+      ) return;
+      app.commands.closeDeckCardMenu();
+    });
+    app.lifecycle.listen(viewport, "resize", () => app.commands.closeDeckCardMenu());
+    app.lifecycle.listen(
+      viewport,
+      "scroll",
+      () => app.commands.closeDeckCardMenu(),
+      true,
+    );
+  }
+
 function activateDeckCard(cardId, { sync = true } = {}) {
     app.state.palette.activeDeckId = cardId;
     app.commands.renderDeckCards();
@@ -186,13 +485,22 @@ function setActiveDeckCard(cardId) {
   }
 
 async function removeDeckCard(cardId) {
+    if (
+      app.state.solve.batchDeckLocked
+      && app.state.solve.batchLockedDeckIds.has(cardId)
+    ) {
+      app.commands.showToast("This palette is locked while its batch is running.", "warn");
+      return false;
+    }
     app.state.palette.deck = app.state.palette.deck.filter(d => d.id !== cardId);
+    app.commands.removeBatchDeckSelection(cardId);
     if (app.state.palette.activeDeckId === cardId) {
       app.state.palette.activeDeckId = app.state.palette.deck.length > 0 ? app.state.palette.deck[0].id : null;
     }
     app.commands.renderDeckCards();
     app.commands.updateRail();
     app.commands.syncConfigToServer();
+    return true;
   }
 
 function promoteStagedCard(cardId) {
@@ -518,25 +826,41 @@ function renderDeckCards() {
   }
 
 function renderRailDeck() {
+    app.commands.closeDeckCardMenu();
     app.commands.hideRailDeckHoverPreview();
     const list = app.state.ui.$("#railDeckList");
     if (!list) return;
     const clearButton = app.state.ui.$("#railClearDeckBtn");
     if (clearButton) {
       const empty = app.state.palette.deck.length === 0;
-      clearButton.disabled = empty;
-      clearButton.setAttribute("aria-disabled", empty ? "true" : "false");
-      clearButton.setAttribute("aria-label", empty ? "No palettes to clear" : "Clear palette deck");
-      clearButton.title = empty
+      const locked = app.state.solve.batchDeckLocked;
+      clearButton.disabled = empty || locked;
+      clearButton.setAttribute("aria-disabled", empty || locked ? "true" : "false");
+      clearButton.setAttribute(
+        "aria-label",
+        locked ? "Palette deck locked during batch solve" : empty ? "No palettes to clear" : "Clear palette deck",
+      );
+      clearButton.title = locked
+        ? "The Palette Deck cannot be cleared while a batch is running"
+        : empty
         ? "No palettes to clear"
         : "Remove all palettes from the persistent deck";
     }
     if (app.state.palette.deck.length === 0) {
       list.innerHTML = `<span class="rail-deck-empty">No palettes yet</span>`;
+      list.removeAttribute("role");
+      list.removeAttribute("aria-multiselectable");
       return;
     }
+    const batchMode = app.state.solve.solveMode === "batch";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("aria-label", batchMode ? "Palette Deck batch selection" : "Palette Deck");
+    list.setAttribute("aria-multiselectable", batchMode ? "true" : "false");
     list.innerHTML = app.state.palette.deck.map((card) => {
-      const isActive = card.id === app.state.palette.activeDeckId;
+      const isActive = !batchMode && card.id === app.state.palette.activeDeckId;
+      const isBatchSelected = batchMode && app.state.solve.batchSelectedDeckIds.has(card.id);
+      const removalLocked = app.state.solve.batchDeckLocked
+        && app.state.solve.batchLockedDeckIds.has(card.id);
       const chips = card.filament_ids.map((fid) => {
         const fil = app.commands.filamentById(fid);
         return `<span class="color-chip" style="background:${fil?.hex || '#ccc'}"></span>`;
@@ -553,15 +877,19 @@ function renderRailDeck() {
       const tags = [
         card.saved ? `<span class="rail-deck-tag is-saved">Saved</span>` : "",
       ].filter(Boolean).join("");
-      return `<div class="rail-deck-card compact-deck-card${isActive ? " is-active" : ""}" data-card-id="${card.id}">
+      return `<div class="rail-deck-card compact-deck-card${isActive ? " is-active" : ""}${isBatchSelected ? " is-batch-selected" : ""}" data-card-id="${card.id}" role="option" tabindex="0" aria-selected="${batchMode ? (isBatchSelected ? "true" : "false") : (isActive ? "true" : "false")}">
         <div class="rail-deck-card-header compact-deck-card-header">
           <div class="rail-deck-card-titlebar">
+            ${batchMode ? `<span class="rail-deck-batch-check" aria-hidden="true">${isBatchSelected ? "✓" : ""}</span>` : ""}
             <span class="rail-deck-card-title compact-deck-card-title" title="${app.commands.escAttr(card.name)}">${app.commands.esc(card.name)}</span>
           </div>
           <div class="rail-deck-card-actions compact-deck-card-actions">
             ${tags}
-            ${!card.saved ? `<button class="ghost-button xxs rail-deck-save compact-deck-card-save" data-card-id="${card.id}">Save</button>` : ""}
-            <button class="ghost-button xxs rail-deck-remove compact-deck-card-remove" data-card-id="${card.id}" title="Remove from deck" aria-label="Remove ${app.commands.escAttr(card.name)}">${app.commands.xIconSvg()}</button>
+            <button class="ghost-button xxs rail-deck-menu-button" type="button" data-card-id="${card.id}"
+                    aria-haspopup="menu" aria-expanded="false" aria-controls="deckCardMenu"
+                    aria-label="Palette actions for ${app.commands.escAttr(card.name)}"
+                    title="Palette actions">⋯</button>
+            <button class="ghost-button xxs rail-deck-remove compact-deck-card-remove" data-card-id="${card.id}" title="${removalLocked ? "Locked while this batch is running" : "Remove from deck"}" aria-label="${removalLocked ? `Cannot remove ${app.commands.escAttr(card.name)} while its batch is running` : `Remove ${app.commands.escAttr(card.name)}`}"${removalLocked ? " disabled aria-disabled=\"true\"" : ""}>${app.commands.xIconSvg()}</button>
           </div>
         </div>
         <div class="rail-deck-card-chips">
@@ -574,17 +902,51 @@ function renderRailDeck() {
       </div>`;
     }).join("");
     list.querySelectorAll(".rail-deck-card").forEach((el) => {
-      el.addEventListener("click", () => app.commands.setActiveDeckCard(el.dataset.cardId));
+      const select = () => {
+        if (app.state.solve.solveMode === "batch") {
+          app.commands.toggleBatchDeckSelection(el.dataset.cardId);
+        } else {
+          app.commands.setActiveDeckCard(el.dataset.cardId);
+        }
+      };
+      el.addEventListener("click", event => {
+        if (event.target.closest?.(".rail-deck-card-actions")) return;
+        select();
+      });
+      el.addEventListener("keydown", event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        select();
+      });
       el.addEventListener("mousemove", (e) => app.commands.handleRailDeckCardHoverMove(el, e));
       el.addEventListener("mouseleave", () => app.commands.scheduleHideRailDeckHoverPreview());
     });
-    list.querySelectorAll(".rail-deck-save").forEach((btn) => {
-      btn.addEventListener("click", (e) => { e.stopPropagation(); app.commands.saveDeckCard(btn.dataset.cardId); });
+    list.querySelectorAll(".rail-deck-menu-button").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        app.commands.toggleDeckCardMenu(btn.dataset.cardId, btn);
+      });
+      btn.addEventListener("keydown", event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          event.stopPropagation();
+          app.commands.openDeckCardMenu(
+            btn.dataset.cardId,
+            btn,
+            { focus: event.key === "ArrowUp" ? "last" : "first" },
+          );
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          app.commands.closeDeckCardMenu({ restoreFocus: true });
+        }
+      });
     });
     list.querySelectorAll(".rail-deck-remove").forEach((btn) => {
       let confirmPending = false;
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
+        if (btn.disabled) return;
         if (confirmPending) {
           app.commands.removeDeckCard(btn.dataset.cardId);
           return;
@@ -797,6 +1159,22 @@ function hideRailDeckHoverPreview() {
     createPaletteDeckCard,
     addLoadedAdHocPaletteToDeck,
     mintPaletteToDeck,
+    manualVariantFilamentIds,
+    manualVariantHasChanged,
+    addManualFilament,
+    removeManualFilamentAt,
+    nextVariantPaletteName,
+    beginPaletteVariant,
+    cancelPaletteVariant,
+    commitPaletteVariant,
+    handleManualSecondaryAction,
+    deckCardMenuItems,
+    positionDeckCardMenu,
+    closeDeckCardMenu,
+    openDeckCardMenu,
+    toggleDeckCardMenu,
+    handleDeckCardMenuKeydown,
+    initializeDeckCardMenuController,
     activateDeckCard,
     setActiveDeckCard,
     removeDeckCard,

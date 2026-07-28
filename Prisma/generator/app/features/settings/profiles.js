@@ -1827,16 +1827,27 @@ export function installFeaturesSettingsProfiles(app) {
   function updateSolveReadiness() {
     const btn = app.state.ui.$("#startSolveBtn");
     if (!btn) return;
-    const canSolve = app.state.session.apiConnected && app.state.image.selectedImage && app.commands.getActivePalette().length > 0;
-    const isRunning = app.state.solve.solveStatus.status === "running";
-    btn.disabled = !(canSolve && !app.state.solve.solveStartPending && !isRunning && !app.state.export.exportRunning);
+    app.commands.syncSolveModeUi?.();
+    const isBatch = app.state.solve.solveMode === "batch";
+    const batchCount = app.commands.selectedBatchDeckCards?.().length || 0;
+    const hasPalette = isBatch
+      ? batchCount >= 2 && batchCount <= 10
+      : app.commands.getActivePalette().length > 0;
+    const canSolve = app.state.session.apiConnected && app.state.image.selectedImage && hasPalette;
+    const isRunning = ["running", "cancelling"].includes(app.state.solve.solveStatus.status);
+    const isStarting = app.state.solve.solveStartPending || app.state.solve.paletteBatchStartPending;
+    btn.disabled = !(canSolve && !isStarting && !isRunning && !app.state.export.exportRunning);
     btn.title = app.state.export.exportRunning
       ? "Please wait for meshing to finish"
-      : app.state.solve.solveStartPending
+      : isStarting
         ? "Starting solve..."
         : isRunning
           ? "A solve is already running"
-          : "Solve the active palette";
+          : isBatch
+            ? batchCount < 2
+              ? "Select at least 2 Palette Deck cards"
+              : `Solve ${batchCount} selected palettes sequentially`
+            : "Solve the active palette";
   }
 
   Object.assign(app.commands, {

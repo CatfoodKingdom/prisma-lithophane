@@ -174,6 +174,34 @@ def test_export_stage_recovery_runs_only_after_workspace_lock_is_owned(
     assert events == ["lock_acquired", "recovery", "lock_released"]
 
 
+def test_startup_cache_cleanup_preserves_only_prepared_sources(tmp_path: Path) -> None:
+    workspace = tmp_path / "Generator"
+    cache = workspace / "cache"
+    (cache / "source-images").mkdir(parents=True)
+    (cache / "source-images" / "manifest.json").write_text("keep")
+    (cache / "runs").mkdir()
+    (cache / "runs" / "result.bin").write_text("remove")
+    (cache / "auto_runs").mkdir()
+    (cache / "auto_runs" / "run.zip").write_text("remove")
+    (workspace / "saved_runs").mkdir()
+    (workspace / "saved_runs" / "saved.zip").write_text("keep")
+
+    report = launcher._clear_startup_generator_cache(workspace)
+
+    assert report["removed"] == 2
+    assert report["failures"] == []
+    assert (cache / "source-images" / "manifest.json").read_text() == "keep"
+    assert (workspace / "saved_runs" / "saved.zip").read_text() == "keep"
+    assert sorted(path.name for path in cache.iterdir()) == ["source-images"]
+
+
+def test_startup_cache_cleanup_missing_cache_is_noop(tmp_path: Path) -> None:
+    report = launcher._clear_startup_generator_cache(tmp_path / "Generator")
+    assert report["removed"] == 0
+    assert report["preserved"] == []
+    assert report["failures"] == []
+
+
 def test_frozen_server_load_preloads_top_level_shared_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     imported: list[str] = []
     expected_server = object()

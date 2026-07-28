@@ -240,6 +240,23 @@
   background: color-mix(in srgb, var(--accent) 8%, var(--panel));
 }
 .filament-card.is-deselected-candidate { opacity: 0.4; }
+.filament-card.is-base-cap-reserved {
+  border-color: var(--white-filament-line);
+  background: var(--white-filament-surface);
+  color: var(--white-filament-muted);
+  cursor: help;
+}
+.filament-card.is-base-cap-reserved .filament-detail {
+  color: var(--white-filament-muted);
+}
+.filament-reserved-label {
+  margin-left: 2px;
+  color: var(--white-filament-muted);
+  font-size: 6px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
 /* Manual mode: placed filament (greyed in library) */
 .filament-card.is-placed { opacity: 0.3; pointer-events: none; }
 
@@ -258,6 +275,11 @@
 .suggest-field label { font-size: 11px; color: var(--muted); }
 .suggest-field .control-input { width: 44px; text-align: center; }
 .suggest-field select.control-input { width: auto; min-width: 70px; text-align: left; }
+.palette-suggest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .creation-settings-card {
   display: flex;
   flex-direction: column;

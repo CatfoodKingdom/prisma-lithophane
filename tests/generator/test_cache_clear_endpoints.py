@@ -64,9 +64,11 @@ def cache_dirs(tmp_path, monkeypatch):
     runs = cache / "runs"
     luts = cache / "luts"
     auto_runs = cache / "auto_runs"
+    palette_batches = cache / "palette-batches"
+    image_imports = cache / "image-imports"
     output = tmp_path / "output"
 
-    for d in (runs, luts, auto_runs, output):
+    for d in (runs, luts, auto_runs, palette_batches, image_imports, output):
         d.mkdir(parents=True)
 
     # Patch data_paths module-level attrs — the new endpoints read via data_paths.X
@@ -74,12 +76,15 @@ def cache_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(data_paths, "RUN_CACHE_DIR", runs)
     monkeypatch.setattr(data_paths, "LUT_CACHE_DIR", luts)
     monkeypatch.setattr(data_paths, "AUTO_RUNS_DIR", auto_runs)
+    monkeypatch.setattr(data_paths, "SOURCE_IMAGE_IMPORT_DIR", image_imports)
 
     return {
         "cache": cache,
         "runs": runs,
         "luts": luts,
         "auto_runs": auto_runs,
+        "palette_batches": palette_batches,
+        "image_imports": image_imports,
         "output": output,
     }
 
@@ -146,6 +151,26 @@ def test_clear_all_clears_luts_too(cache_dirs):
     # in-RAM cache cleared
     assert server.session["solve_cache"] == {}
     assert server._PALETTE_BACKEND_CACHE == {}
+
+
+def test_clear_all_removes_batch_and_import_work_and_resets_batch(cache_dirs):
+    dirs = cache_dirs
+    _write_file(dirs["palette_batches"] / "batch-a" / "source.png")
+    _write_file(dirs["image_imports"] / ".upload-a.png")
+    server.session["palette_batch"].update({
+        "status": "complete",
+        "job_id": "batch-a",
+        "items": [{"result_id": "batch-a-i01"}],
+    })
+
+    response = client.post("/api/cache/clear-all")
+
+    assert response.status_code == 200
+    assert not any(dirs["palette_batches"].iterdir())
+    assert not any(dirs["image_imports"].iterdir())
+    assert server.session["palette_batch"]["status"] == "idle"
+    assert server.session["palette_batch"]["job_id"] is None
+    assert server.session["palette_batch"]["items"] == []
 
 
 def test_clear_all_removed_count(cache_dirs):
@@ -217,6 +242,12 @@ def test_clear_refused_while_export_running(cache_dirs):
 def test_clear_refused_while_suggest_running(cache_dirs):
     """The endpoint returns 409 when a palette-suggestion job is active."""
     server.session["suggest"]["status"] = "running"
+    resp = client.post("/api/cache/clear-all")
+    assert resp.status_code == 409
+
+
+def test_clear_refused_while_palette_batch_running(cache_dirs):
+    server.session["palette_batch"]["status"] = "running"
     resp = client.post("/api/cache/clear-all")
     assert resp.status_code == 409
 
