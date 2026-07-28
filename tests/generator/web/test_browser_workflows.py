@@ -234,6 +234,60 @@ def _load_saved_run(page: Page, *, recipe: bool = False) -> None:
     page.locator('.solve-run-card[data-run-id="browser-loaded-card"]').wait_for(state="visible")
 
 
+def test_palette_deck_create_variant_workflow(page: Page):
+    page.locator('#tabSwitch .mode-button[data-tab="creation"]').click()
+    page.locator("#paletteModeManual").click()
+
+    first = page.locator("#manualLibraryGrid .filament-card:not(.is-placed)").first
+    first.wait_for(state="visible")
+    first.click()
+    page.locator("#manualLibraryGrid .filament-card:not(.is-placed)").first.click()
+    page.locator("#mintPaletteBtn").click()
+
+    source = page.locator("#railDeckList .rail-deck-card").first
+    source.wait_for(state="visible")
+    source_title = source.locator(".rail-deck-card-title").text_content()
+    assert source.locator(".rail-deck-remove").is_visible()
+
+    menu_button = source.locator(".rail-deck-menu-button")
+    menu_button.click()
+    menu = page.locator("#deckCardMenu")
+    menu.wait_for(state="visible")
+    assert menu.locator('[data-deck-card-action="variant"]').is_visible()
+    assert menu.locator('[data-deck-card-action="save"]').is_visible()
+    menu.locator('[data-deck-card-action="variant"]').press("Escape")
+    menu.wait_for(state="hidden")
+    assert menu_button.evaluate("button => document.activeElement === button")
+
+    menu_button.click()
+    menu.locator('[data-deck-card-action="save"]').click()
+    save_modal = page.locator("#paletteSaveModal")
+    save_modal.wait_for(state="visible")
+    page.locator("#paletteSaveCancel").click()
+    save_modal.wait_for(state="hidden")
+
+    menu_button.click()
+    menu.locator('[data-deck-card-action="variant"]').click()
+    assert page.locator("#manualPaletteTitle").text_content() == f"Variant of “{source_title}”"
+    assert page.locator("#mintPaletteBtn").text_content() == "Add Variant to Deck"
+    assert page.locator("#clearComposerBtn").text_content() == "Cancel Variant"
+    assert page.locator("#mintPaletteBtn").is_disabled()
+
+    page.locator("#manualAmsSlots .ams-slot-remove").first.click()
+    # The first available card is the just-removed source filament; choose the
+    # next one so the ordered palette actually differs.
+    page.locator("#manualLibraryGrid .filament-card:not(.is-placed)").nth(1).click()
+    assert page.locator("#mintPaletteBtn").is_enabled()
+    page.locator("#mintPaletteBtn").click()
+
+    deck_cards = page.locator("#railDeckList .rail-deck-card")
+    assert deck_cards.count() == 2
+    assert deck_cards.nth(0).locator(".rail-deck-card-title").text_content() == source_title
+    assert deck_cards.nth(1).locator(".rail-deck-card-title").text_content() == f"{source_title} Variant"
+    assert deck_cards.nth(1).get_attribute("aria-selected") == "true"
+    assert page.locator("#manualPaletteTitle").text_content() == "Manual Palette"
+
+
 def test_run_history_cards_save_naming_and_stable_controls(page: Page):
     _load_saved_run(page)
     page.route(
@@ -930,6 +984,58 @@ def test_theme_popover_keyboard_and_narrow_viewport_geometry(browser: Browser, g
         assert bounds["y"] + bounds["height"] <= 900
         assert instance.locator(".theme-button-prefix").evaluate("el => getComputedStyle(el).display") == "none"
         assert instance.locator("#themeCurrentValue").is_visible()
+        assert page_errors == []
+    finally:
+        context.close()
+
+
+def test_solve_mode_split_button_keyboard_and_narrow_geometry(
+    browser: Browser,
+    generator_url: str,
+):
+    context = browser.new_context(viewport={"width": 820, "height": 900}, color_scheme="light")
+    instance = context.new_page()
+    page_errors: list[str] = []
+    instance.on("pageerror", lambda error: page_errors.append(str(error)))
+    try:
+        instance.goto(generator_url, wait_until="domcontentloaded")
+        instance.locator("#dataSourceBadge.connected").wait_for(state="visible")
+        _close_recovery_modal(instance)
+
+        menu_button = instance.locator("#solveModeMenuBtn")
+        menu = instance.locator("#solveModeMenu")
+        menu_button.focus()
+        menu_button.press("ArrowDown")
+        assert menu.is_visible()
+        assert instance.evaluate("document.activeElement?.dataset.solveMode") == "single"
+        instance.keyboard.press("End")
+        assert instance.evaluate("document.activeElement?.dataset.solveMode") == "batch"
+        instance.keyboard.press("Enter")
+        assert not menu.is_visible()
+        assert instance.locator("#startSolveBtn").text_content() == "Batch Solve (0)"
+        assert instance.evaluate("document.activeElement?.id") == "solveModeMenuBtn"
+
+        menu_button.press("ArrowUp")
+        assert instance.evaluate("document.activeElement?.dataset.solveMode") == "batch"
+        instance.keyboard.press("Escape")
+        assert not menu.is_visible()
+        assert instance.evaluate("document.activeElement?.id") == "solveModeMenuBtn"
+
+        menu_button.click()
+        menu_bounds = menu.bounding_box()
+        split_bounds = instance.locator("#solveActionSplit").bounding_box()
+        assert menu_bounds is not None
+        assert split_bounds is not None
+        assert menu_bounds["x"] >= 0
+        assert menu_bounds["y"] >= 0
+        assert menu_bounds["x"] + menu_bounds["width"] <= 820
+        assert menu_bounds["y"] + menu_bounds["height"] <= 900
+        assert split_bounds["x"] >= 0
+        assert split_bounds["x"] + split_bounds["width"] <= 820
+
+        instance.locator('#themeMenuBtn').click()
+        instance.locator('#themeMenu [data-theme-preference="dark"]').click()
+        assert instance.locator("html").get_attribute("data-theme") == "dark"
         assert page_errors == []
     finally:
         context.close()

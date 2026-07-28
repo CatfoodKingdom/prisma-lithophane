@@ -19,7 +19,7 @@
       document.documentElement.style.colorScheme = resolved;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=2026-07-24-run-polish">
+  <link rel="stylesheet" href="style.css?v=2026-07-28-palette-variants">
 </head>
 <body>
   <div class="app-shell">
@@ -110,7 +110,14 @@
             <span class="step-number">4</span> Export
           </button>
           <span class="mode-actions-divider" aria-hidden="true"></span>
-          <button class="primary-button bar-action" id="startSolveBtn" disabled title="Solve the active palette">Solve</button>
+          <div class="solve-action-split" id="solveActionSplit">
+            <button class="primary-button bar-action solve-action-main" id="startSolveBtn" disabled title="Solve the active palette">Solve</button>
+            <button class="primary-button bar-action solve-action-menu-button" id="solveModeMenuBtn" type="button"
+                    aria-haspopup="menu" aria-expanded="false" aria-controls="solveModeMenu"
+                    aria-label="Choose solve mode" title="Choose solve mode">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.25 6 7.75l3.5-3.5"></path></svg>
+            </button>
+          </div>
           <button class="topbar-utility-button settings-gear-btn" id="settingsDrawerBtn" title="Settings" aria-label="Settings">
             <svg class="settings-gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="12" cy="12" r="3"></circle>
@@ -543,8 +550,8 @@
                       <input type="number" id="targetSwapCount" class="control-input" value="0" min="0" max="4" step="1">
                     </div>
                     <div class="suggest-field">
-                      <label>Suggestions</label>
-                      <input type="number" id="targetSuggestCount" class="control-input" value="6" min="1" max="10" step="1">
+                      <label for="targetSuggestCount">Suggestions</label>
+                      <input type="number" id="targetSuggestCount" class="control-input" value="5" min="1" max="10" step="1">
                     </div>
                     <div class="suggest-field">
                       <label for="paletteSuggestMode">Solve mode</label>
@@ -554,8 +561,9 @@
                       </select>
                     </div>
                     <div class="ams-preview" id="amsPreview"></div>
-                    <button class="primary-button small" id="suggestPalettesBtn" style="width:100%">Suggest Palettes</button>
-                    <p class="small-copy" id="suggestSlotHint"></p>
+                    <div class="palette-suggest-actions">
+                      <button class="primary-button small" id="suggestPalettesBtn">Suggest Palettes</button>
+                    </div>
                   </div>
                 </div>
                 <details class="creation-settings-shell" id="creationSettingsShell">
@@ -618,7 +626,7 @@
             <!-- ── Right column: Manual Palette ──────────────────────────── -->
             <div class="creation-deck manual-palette-panel" id="manualPalettePanel" hidden>
               <div class="creation-panel-header deck-header">
-                <span class="panel-kicker">Manual Palette</span>
+                <span class="panel-kicker" id="manualPaletteTitle">Manual Palette</span>
               </div>
               <div class="creation-ams-pane" id="manualAmsPane">
                 <div class="ams-slots" id="manualAmsSlots"></div>
@@ -1531,6 +1539,24 @@
     </button>
   </div>
 
-  <script type="module" src="bootstrap.js?v=2026-07-24-run-polish"></script>
+  <div class="theme-menu solve-mode-menu" id="solveModeMenu" role="menu" aria-label="Solve mode" hidden>
+    <button type="button" role="menuitemradio" data-solve-mode="single" aria-checked="true">
+      <span>Single Solve</span><small>Solve the active palette</small>
+    </button>
+    <button type="button" role="menuitemradio" data-solve-mode="batch" aria-checked="false">
+      <span>Batch Solve</span><small>Solve 2–10 selected deck palettes</small>
+    </button>
+  </div>
+
+  <div class="theme-menu deck-card-menu" id="deckCardMenu" role="menu" aria-label="Palette actions" hidden>
+    <button type="button" role="menuitem" data-deck-card-action="variant">
+      <span>Create Variant</span><small>Change a copy in the Manual builder</small>
+    </button>
+    <button type="button" role="menuitem" data-deck-card-action="save">
+      <span>Save Palette</span><small>Keep this palette for later sessions</small>
+    </button>
+  </div>
+
+  <script type="module" src="bootstrap.js?v=2026-07-28-palette-variants"></script>
 </body>
 </html>

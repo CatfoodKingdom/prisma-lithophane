@@ -5,8 +5,9 @@ export {
   openImagesFolder, refreshImages, uploadImage,
 } from "./images.js";
 export {
-  cancelExport, cancelSolve, exportFileUrl, getExportStatus, getSolveStatus,
-  openExportFolder, startExportPrintFiles, startSolve,
+  cancelExport, cancelSolve, exportFileUrl, getExportStatus, getPaletteBatchResult,
+  getSolveStatus, openExportFolder, startExportPrintFiles, startPaletteBatch,
+  startSolve,
 } from "./jobs.js";
 export {
   activateModelLibrary, fetchModelLibraries, installModelLibrary,

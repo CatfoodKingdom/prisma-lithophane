@@ -23,10 +23,16 @@ export function installFeaturesSolveController(app) {
   }
 
   function isActivePendingSolveRun(run) {
-    return !!run
-      && !run.results
-      && run.id === app.state.solve.activeSolveRunId
-      && app.state.solve.solveStatus.status === "running";
+    if (!run || run.results || !["running", "cancelling"].includes(app.state.solve.solveStatus.status)) {
+      return false;
+    }
+    if (
+      app.state.solve.solveStatus.job_kind === "palette_batch"
+      && run.batch_job_id === app.state.solve.solveStatus.job_id
+    ) {
+      return ["queued", "running", "solving"].includes(run.batch_status);
+    }
+    return run.id === app.state.solve.activeSolveRunId;
   }
 
   function getSolveRunDeleteBlockReason(run) {
@@ -280,9 +286,22 @@ export function installFeaturesSolveController(app) {
       }).join("");
       const supportChips = app.commands.buildSolveRunSupportChipsHtml(run);
 
-      const stats = run.results
-        ? `<span class="solve-run-card-rmse">${app.commands.formatSolveRunCardRmse(run.results)}</span>`
-        : `<span class="solve-run-card-rmse is-pending">solving...</span>`;
+      let stats;
+      if (run.results) {
+        stats = `<span class="solve-run-card-rmse">${app.commands.formatSolveRunCardRmse(run.results)}</span>`;
+      } else {
+        const statusLabel = run.batch_status === "complete"
+          ? (run.batch_result_error ? "Load Failed" : "Loading")
+          : ({
+              queued: "Queued",
+              running: "Solving",
+              solving: "Solving",
+              error: "Failed",
+              cancelled: "Cancelled",
+            }[run.batch_status] || "Solving");
+        const statusTitle = run.batch_error || run.batch_result_error || statusLabel;
+        stats = `<span class="solve-run-card-rmse is-pending" title="${app.commands.escAttr(statusTitle)}">${app.commands.esc(statusLabel)}</span>`;
+      }
       const saveDisabled = !run.results || run.save_pending;
       const saveTitle = !run.results
         ? "Save is available after this solve completes"
@@ -350,7 +369,6 @@ export function installFeaturesSolveController(app) {
         await app.commands.saveSolveRun(btn.dataset.runId, label, btn);
       });
     });
-
     app.commands.bindSolveRunCardAuxiliaryInteractions(container, "preview");
   }
 
@@ -1113,10 +1131,16 @@ export function installFeaturesSolveController(app) {
       const elapsedVal = app.state.solve.solveStatus.elapsed_s ?? d.elapsed_s ?? 0;
       if (elapsed) app.commands.setOperationElapsedSeconds(elapsedVal);
 
-    } else if (app.state.solve.solveStatus.status === "complete") {
+    } else if (["complete", "partial"].includes(app.state.solve.solveStatus.status)) {
       if (cancelBtn) cancelBtn.disabled = false;
       if (el && el.dataset.owner === "solve") {
-        if (lbl) lbl.textContent = "Solve complete";
+        if (lbl) {
+          lbl.textContent = app.state.solve.solveStatus.job_kind === "palette_batch"
+            ? (app.state.solve.solveStatus.status === "partial"
+                ? "Palette batch complete with failures"
+                : "Palette batch complete")
+            : "Solve complete";
+        }
         if (fill) {
           fill.className = "op-progress-fill";
           fill.style.width = "100%";
@@ -1138,7 +1162,9 @@ export function installFeaturesSolveController(app) {
       if (el && el.dataset.owner === "solve") {
         if (lbl) {
           lbl.textContent = app.state.solve.solveStatus.status === "cancelled"
-            ? "Solve cancelled"
+            ? (app.state.solve.solveStatus.job_kind === "palette_batch"
+                ? "Palette batch cancelled"
+                : "Solve cancelled")
             : `Error: ${app.state.solve.solveStatus.progress}`;
         }
         // Auto-hide after a moment

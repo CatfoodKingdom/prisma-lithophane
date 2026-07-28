@@ -24,6 +24,14 @@ export function cancelSolve(jobId = "") {
   return apiPost(`/solve/cancel${query}`);
 }
 export function getSolveStatus() { return apiFetch("/solve/status"); }
+export function startPaletteBatch(payload) {
+  return apiPost("/solve/palette-batch/start", payload);
+}
+export function getPaletteBatchResult(jobId, resultId) {
+  return apiFetch(
+    `/solve/palette-batch/${encodeURIComponent(jobId)}/results/${encodeURIComponent(resultId)}`,
+  );
+}
 
 export function startExportPrintFiles({
   geometrySource = "field_derived",

@@ -242,12 +242,6 @@ export function installFeaturesSettingsController(app) {
       }
     }
 
-    // Update the hint text
-    const hint = app.state.ui.$("#suggestSlotHint");
-    if (hint) {
-      const nCandidates = app.state.palette.candidateSelection.size;
-      hint.textContent = `${nCandidates} candidates → best ${parseInt(input?.value) || ceiling} of ${ceiling} color slots.`;
-    }
   }
 
   function renderSettingsTab(options = {}) {

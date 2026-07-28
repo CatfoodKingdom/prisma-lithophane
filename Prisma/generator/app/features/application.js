@@ -29,6 +29,8 @@ export function installFeaturesApplication(app) {
 
   async function startGeneratorApp() {
     app.commands.initializeThemeController();
+    app.commands.initializeSolveModeController();
+    app.commands.initializeDeckCardMenuController();
     app.commands.initAllEnhancedSliders();
     app.commands.bindEvents();
     app.commands.updateRail();
@@ -66,7 +68,9 @@ export function installFeaturesApplication(app) {
         }
         if (session.solve) {
           app.state.solve.solveStatus = session.solve;
-          if (session.solve.status === "running") {
+          if (session.solve.job_kind === "palette_batch") {
+            await app.commands.recoverPaletteBatch(session.solve);
+          } else if (session.solve.status === "running") {
             const recoveredRun = app.commands.createSolveRun(app.state.settings.config.palette || [], { ...app.state.settings.config });
             recoveredRun.id = session.solve.card_id || recoveredRun.id;
             app.state.solve.solveRuns.push(recoveredRun);

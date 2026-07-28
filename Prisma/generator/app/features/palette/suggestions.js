@@ -4,10 +4,18 @@
  */
 export function installFeaturesPaletteSuggestions(app) {
 function renderCreationTab() {
+    const suggestionMode = app.state.ui.$("#paletteSuggestMode");
+    if (suggestionMode) {
+      suggestionMode.value = app.commands.normalizeLuminanceMode(
+        app.state.settings.config.luminance_mode || "standard",
+      );
+    }
     const modeNote = app.state.ui.$("#creationModeNote");
     if (modeNote) {
       modeNote.textContent = app.state.palette.creationMode === "manual"
-        ? "Select filaments to be included in the manual palette. The number chosen can exceed the available AMS slots, but will require swapping filaments mid-print."
+        ? app.state.palette.manualVariantDraft
+          ? "Change this copy in the Manual builder. The source Palette Deck card remains unchanged."
+          : "Select filaments to be included in the manual palette. The number chosen can exceed the available AMS slots, but will require swapping filaments mid-print."
         : "Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.";
     }
 
@@ -23,11 +31,24 @@ function renderCreationTab() {
     }
 
     // Update header chips (after renderCandidateLibrary so candidateSelection is populated)
-    const profiled = app.state.session.allFilaments.filter(f => app.commands.isGenerationEligibleFilament(f) && !app.commands.getBaseCapIds().has(f.filament_id) && app.state.palette.enabledFilaments.has(f.filament_id));
+    const profiled = app.state.session.allFilaments.filter(
+      f => app.commands.isGenerationEligibleFilament(f)
+        && app.state.palette.enabledFilaments.has(f.filament_id),
+    );
+    const reservedCount = profiled.filter(
+      f => app.commands.getBaseCapIds().has(f.filament_id),
+    ).length;
     const candidateChip = app.state.ui.$("#candidateCountChip");
-    if (candidateChip) candidateChip.textContent = `${app.state.palette.candidateSelection.size}/${profiled.length}`;
+    if (candidateChip) {
+      candidateChip.textContent = `${app.state.palette.candidateSelection.size}/${profiled.length}`;
+      candidateChip.title = reservedCount
+        ? `${app.state.palette.candidateSelection.size} selected for suggestions; ${reservedCount} reserved for base/cap`
+        : `${app.state.palette.candidateSelection.size} selected for suggestions`;
+    }
     const manualChip = app.state.ui.$("#manualCountChip");
-    if (manualChip) manualChip.textContent = `${app.state.palette.manualSlots.length}`;
+    if (manualChip) {
+      manualChip.textContent = `${app.commands.manualVariantFilamentIds().length}`;
+    }
     const capacityNote = app.state.ui.$("#suggestCapacityNote");
     if (capacityNote) {
       capacityNote.textContent = app.state.palette.suggestCapacityNote;
@@ -39,6 +60,51 @@ function renderCreationTab() {
     app.commands.updateLibraryFilterStatus();
   }
 
+function getRequestedPaletteSuggestionCount() {
+    const input = app.state.ui.$("#targetSuggestCount");
+    const count = Math.max(1, Math.min(10, parseInt(input?.value, 10) || 5));
+    if (input) input.value = String(count);
+    return count;
+  }
+
+function applyPaletteSuggestModeToSettings(mode) {
+    const normalized = app.commands.normalizeLuminanceMode(mode);
+    const select = app.state.ui.$("#paletteSuggestMode");
+    if (select) select.value = normalized;
+    app.commands.setSolveModeControlValue(normalized);
+    app.commands.updateLuminanceModeFields();
+    app.commands.updateCapModeFields();
+    app.commands.updateStage4DetailFields();
+    app.commands.readConfigFromUI();
+    app.commands.renderSettingsTab({ preservePendingUi: true });
+    app.commands.updateSettingsSummaries();
+    app.commands.updateDerivedParams();
+    app.commands.updateAccordionSummaries();
+    app.commands.checkPresetModified();
+    return normalized;
+  }
+
+function buildPaletteSuggestionPayload() {
+    const targetCount = parseInt(app.state.ui.$("#targetFilamentCount")?.value, 10) || 7;
+    const swapCount = parseInt(app.state.ui.$("#targetSwapCount")?.value, 10) || 0;
+    const availableIds = [...app.state.palette.candidateSelection]
+      .filter(fid => !app.commands.getBaseCapIds().has(fid));
+    const paletteMode = app.commands.normalizeLuminanceMode(
+      app.state.ui.$("#paletteSuggestMode")?.value || "standard",
+    );
+    return {
+      image_path: app.state.image.selectedImage?.filename || "",
+      image_source_ref: app.state.image.selectedImage?.source_ref || null,
+      n_filaments: targetCount,
+      top_k: app.commands.getRequestedPaletteSuggestionCount(),
+      filament_ids: availableIds,
+      palette_mode: paletteMode,
+      max_swaps: swapCount,
+      improvement_threshold: Number(app.state.settings.config.swap_improvement_threshold ?? 2.0),
+      force_all_tiers: !!app.state.settings.config.force_all_tiers,
+    };
+  }
+
 function selectAllCandidates() {
     const profiled = app.state.session.allFilaments.filter(f => app.commands.isGenerationEligibleFilament(f) && !app.commands.getBaseCapIds().has(f.filament_id) && app.state.palette.enabledFilaments.has(f.filament_id));
     app.state.palette.candidateSelection = new Set(profiled.map(f => f.filament_id));
@@ -48,8 +114,13 @@ function renderCandidateLibrary() {
     const grid = app.state.ui.$("#candidateGrid");
     if (!grid) return;
 
+    const baseCapIds = app.commands.getBaseCapIds();
+    for (const filamentId of baseCapIds) {
+      app.state.palette.candidateSelection.delete(filamentId);
+    }
     const libraryFils = app.state.session.allFilaments.filter(
-      f => app.commands.isGenerationEligibleFilament(f) && !app.commands.getBaseCapIds().has(f.filament_id) && app.state.palette.enabledFilaments.has(f.filament_id)
+      f => app.commands.isGenerationEligibleFilament(f)
+        && app.state.palette.enabledFilaments.has(f.filament_id),
     );
 
     // Auto-select all on first render only
@@ -70,12 +141,20 @@ function renderCandidateLibrary() {
     for (const [mfg, fils] of groups) {
       html += `<div class="library-group-header">${app.commands.esc(mfg)}</div>`;
       for (const fil of fils) {
+        const reserved = baseCapIds.has(fil.filament_id);
         const selected = app.state.palette.candidateSelection.has(fil.filament_id);
-        const stateClass = selected ? "is-candidate" : "is-deselected-candidate";
+        const stateClass = reserved
+          ? "is-base-cap-reserved"
+          : selected ? "is-candidate" : "is-deselected-candidate";
         const textCol = app.commands.textColorForHex(fil.hex);
-        html += `<div class="filament-card ${stateClass}" data-filament-id="${fil.filament_id}">
+        const name = fil.color_name || fil.display_name || fil.filament_id;
+        const reservedAttributes = reserved
+          ? `aria-disabled="true" title="${app.commands.esc(`${name} is reserved for the white base and cap and cannot be used as a suggested color.`)}"`
+          : "";
+        html += `<div class="filament-card ${stateClass}" data-filament-id="${fil.filament_id}" ${reservedAttributes}>
           <div class="filament-swatch" style="background:${fil.hex};color:${textCol}"></div>
-          <div class="filament-copy"><div class="filament-detail">${app.commands.esc(fil.color_name)}</div></div>
+          <div class="filament-copy"><div class="filament-detail">${app.commands.esc(name)}</div></div>
+          ${reserved ? '<span class="filament-reserved-label">BASE/CAP</span>' : ""}
         </div>`;
       }
     }
@@ -85,6 +164,7 @@ function renderCandidateLibrary() {
     grid.querySelectorAll(".filament-card").forEach(card => {
       card.addEventListener("click", () => {
         const fid = card.dataset.filamentId;
+        if (app.commands.getBaseCapIds().has(fid)) return;
         if (app.state.palette.candidateSelection.has(fid)) {
           app.state.palette.candidateSelection.delete(fid);
         } else {
@@ -137,7 +217,10 @@ function renderManualLibrary() {
     const libraryFils = app.state.session.allFilaments.filter(
       f => app.commands.isGenerationEligibleFilament(f) && !app.commands.getBaseCapIds().has(f.filament_id) && app.state.palette.enabledFilaments.has(f.filament_id)
     );
-    const availableCount = libraryFils.filter(f => !app.state.palette.manualSlots.includes(f.filament_id)).length;
+    const selectedFilaments = app.commands.manualVariantFilamentIds();
+    const availableCount = libraryFils.filter(
+      f => !selectedFilaments.includes(f.filament_id),
+    ).length;
     if (chip) chip.textContent = availableCount;
 
     const groups = new Map();
@@ -151,7 +234,7 @@ function renderManualLibrary() {
     for (const [mfg, fils] of groups) {
       html += `<div class="library-group-header">${app.commands.esc(mfg)}</div>`;
       for (const fil of fils) {
-        const placed = app.state.palette.manualSlots.includes(fil.filament_id);
+        const placed = selectedFilaments.includes(fil.filament_id);
         const stateClass = placed ? "is-placed" : "";
         const textCol = app.commands.textColorForHex(fil.hex);
         html += `<div class="filament-card ${stateClass}" data-filament-id="${fil.filament_id}">
@@ -165,8 +248,7 @@ function renderManualLibrary() {
     grid.querySelectorAll(".filament-card:not(.is-placed)").forEach(card => {
       card.addEventListener("click", () => {
         const fid = card.dataset.filamentId;
-        if (!app.state.palette.manualSlots.includes(fid)) {
-          app.state.palette.manualSlots.push(fid);
+        if (app.commands.addManualFilament(fid)) {
           app.commands.renderCreationTab();
         }
       });
@@ -196,9 +278,13 @@ function renderManualAmsSlots() {
       <span class="ams-slot-label">BASE/CAP</span>
     </div>`);
 
-    // Partition manual slots into AMS-fits and swaps
-    const amsFilaments = app.state.palette.manualSlots.slice(0, colorSlots);
-    const swapFilaments = app.state.palette.manualSlots.slice(colorSlots);
+    const variantDraft = app.state.palette.manualVariantDraft;
+    const orderedSlots = variantDraft
+      ? variantDraft.workingSlots
+      : app.state.palette.manualSlots;
+    const amsFilaments = orderedSlots.slice(0, colorSlots);
+    const swapFilaments = orderedSlots.slice(colorSlots);
+    const selectedCount = app.commands.manualVariantFilamentIds().length;
 
     let html = "";
     let colorIdx = 0;
@@ -209,30 +295,39 @@ function renderManualAmsSlots() {
         const globalSlot = u * slotsPerUnit + s;
         if (globalSlot < whiteSlots) {
           html += whiteHtml[globalSlot];
-        } else if (colorIdx < amsFilaments.length) {
-          const fid = amsFilaments[colorIdx];
-          const fil = app.commands.filamentById(fid);
-          html += `<div class="ams-slot" data-filament-id="${fid}">
-            <span class="ams-slot-swatch" style="background:${fil?.hex || '#ccc'}"></span>
-            <span class="ams-slot-name">${app.commands.esc(fil?.color_name || fid)}</span>
-            <span class="ams-slot-remove" data-remove="${fid}" aria-label="Remove filament" title="Remove filament">${app.commands.xIconSvg()}</span>
-          </div>`;
-          colorIdx++;
         } else {
-          html += `<div class="ams-slot is-empty"></div>`;
+          const manualIndex = colorIdx;
+          const fid = amsFilaments[colorIdx];
+          colorIdx++;
+          if (fid) {
+            const fil = app.commands.filamentById(fid);
+            html += `<div class="ams-slot" data-filament-id="${fid}" data-manual-index="${manualIndex}">
+              <span class="ams-slot-swatch" style="background:${fil?.hex || '#ccc'}"></span>
+              <span class="ams-slot-name">${app.commands.esc(fil?.color_name || fid)}</span>
+              <span class="ams-slot-remove" data-manual-index="${manualIndex}" aria-label="Remove filament" title="Remove filament">${app.commands.xIconSvg()}</span>
+            </div>`;
+          } else {
+            html += `<div class="ams-slot is-empty"></div>`;
+          }
         }
       }
     }
 
     // Swap overflow
-    if (swapFilaments.length > 0) {
-      html += `<div class="ams-swap-label">&#9888; SWAP (${swapFilaments.length})</div>`;
-      for (const fid of swapFilaments) {
+    const activeSwapFilaments = swapFilaments
+      .map((filamentId, index) => ({
+        filamentId,
+        manualIndex: colorSlots + index,
+      }))
+      .filter(entry => entry.filamentId);
+    if (activeSwapFilaments.length > 0) {
+      html += `<div class="ams-swap-label">&#9888; SWAP (${activeSwapFilaments.length})</div>`;
+      for (const { filamentId: fid, manualIndex } of activeSwapFilaments) {
         const fil = app.commands.filamentById(fid);
-        html += `<div class="ams-slot is-swap" data-filament-id="${fid}">
+        html += `<div class="ams-slot is-swap" data-filament-id="${fid}" data-manual-index="${manualIndex}">
           <span class="ams-slot-swatch" style="background:${fil?.hex || '#ccc'}"></span>
           <span class="ams-slot-name">${app.commands.esc(fil?.color_name || fid)}</span>
-          <span class="ams-slot-remove" data-remove="${fid}" aria-label="Remove filament" title="Remove filament">${app.commands.xIconSvg()}</span>
+          <span class="ams-slot-remove" data-manual-index="${manualIndex}" aria-label="Remove filament" title="Remove filament">${app.commands.xIconSvg()}</span>
         </div>`;
       }
     }
@@ -243,16 +338,33 @@ function renderManualAmsSlots() {
     container.querySelectorAll(".ams-slot-remove").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        const fid = btn.dataset.remove;
-        app.state.palette.manualSlots = app.state.palette.manualSlots.filter(id => id !== fid);
+        app.commands.removeManualFilamentAt(
+          Number.parseInt(btn.dataset.manualIndex, 10),
+        );
         app.commands.renderCreationTab();
       });
     });
 
     // Status
-    const swapText = swapFilaments.length > 0 ? ` + ${swapFilaments.length} swap` : "";
-    if (statusEl) statusEl.textContent = `${amsFilaments.length} / ${colorSlots} slots${swapText}`;
-    if (mintBtn) mintBtn.disabled = app.state.palette.manualSlots.length === 0;
+    const amsCount = amsFilaments.filter(Boolean).length;
+    const swapText = activeSwapFilaments.length > 0
+      ? ` + ${activeSwapFilaments.length} swap`
+      : "";
+    if (statusEl) statusEl.textContent = `${amsCount} / ${colorSlots} slots${swapText}`;
+    if (mintBtn) {
+      mintBtn.textContent = variantDraft ? "Add Variant to Deck" : "Add to Deck";
+      mintBtn.disabled = selectedCount === 0
+        || (variantDraft && !app.commands.manualVariantHasChanged());
+    }
+    const clearBtn = app.state.ui.$("#clearComposerBtn");
+    if (clearBtn) clearBtn.textContent = variantDraft ? "Cancel Variant" : "Clear";
+    const title = app.state.ui.$("#manualPaletteTitle");
+    if (title) {
+      title.textContent = variantDraft
+        ? `Variant of “${variantDraft.sourceName}”`
+        : "Manual Palette";
+      title.title = variantDraft ? `Variant of ${variantDraft.sourceName}` : "";
+    }
   }
 
 function clearManualSlots() {
@@ -272,20 +384,7 @@ async function handleSuggestPalettes() {
     btn.disabled = true;
     btn.textContent = "...";
 
-    const targetCount = parseInt(app.state.ui.$("#targetFilamentCount")?.value) || 7;
-    const swapCount = parseInt(app.state.ui.$("#targetSwapCount")?.value) || 0;
-    const availableIds = [...app.state.palette.candidateSelection].filter(fid => !app.commands.getBaseCapIds().has(fid));
-    const paletteMode = app.commands.normalizeLuminanceMode(app.state.ui.$("#paletteSuggestMode")?.value || "standard");
-
-    const payload = {
-      image_path: app.state.image.selectedImage.filename,
-      image_source_ref: app.state.image.selectedImage.source_ref || null,
-      n_filaments: targetCount,
-      top_k: parseInt(app.state.ui.$("#targetSuggestCount")?.value) || 6,
-      filament_ids: availableIds,
-      palette_mode: paletteMode,
-      max_swaps: swapCount,
-    };
+    const payload = app.commands.buildPaletteSuggestionPayload();
 
     let pollingOwner = null;
     try {
@@ -455,6 +554,9 @@ function _processSuggestResults(suggestions) {
     renderManualLibrary,
     renderManualAmsSlots,
     clearManualSlots,
+    getRequestedPaletteSuggestionCount,
+    applyPaletteSuggestModeToSettings,
+    buildPaletteSuggestionPayload,
     handleSuggestPalettes,
     handleSuggestBaseShadingLimit,
     _processSuggestResults,

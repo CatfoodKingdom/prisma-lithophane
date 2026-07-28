@@ -37,6 +37,8 @@ export function installFeaturesEventBindings(app) {
       const privateSelectionAtRequest = app.state.image.selectedImage?.source_ref || null;
       const body = await app.api.clearAllTempFiles();
       app.commands.clearSolveHistory({ force: true });
+      app.state.solve.paletteBatchFetchedResultIds.clear();
+      app.state.solve.paletteBatchResultFetches.clear();
       const selectionUnchanged = activeImageIdentity() === selectionAtRequest;
       if (selectionUnchanged && body.config) {
         Object.assign(app.state.settings.config, body.config);
@@ -146,6 +148,12 @@ function bindEvents() {
     app.state.ui.$$("#cfgLuminanceMode .segmented-btn").forEach((btn) => {
       app.lifecycle.listen(btn, "click", () => {
         app.commands.setSolveModeControlValue(btn.dataset.value || "standard");
+        const paletteMode = app.state.ui.$("#paletteSuggestMode");
+        if (paletteMode) {
+          paletteMode.value = app.commands.normalizeLuminanceMode(
+            btn.dataset.value || "standard",
+          );
+        }
         app.commands.updateLuminanceModeFields();
         app.commands.updateCapModeFields();
         app.commands.updateStage4DetailFields();
@@ -562,7 +570,7 @@ function bindEvents() {
     const mintBtn = app.state.ui.$("#mintPaletteBtn");
     if (mintBtn) app.lifecycle.listen(mintBtn, "click", app.commands.mintPaletteToDeck);
     const clearBtn = app.state.ui.$("#clearComposerBtn");
-    if (clearBtn) app.lifecycle.listen(clearBtn, "click", app.commands.clearManualSlots);
+    if (clearBtn) app.lifecycle.listen(clearBtn, "click", app.commands.handleManualSecondaryAction);
 
     // Palette — deck actions
     const railLoadBtn = app.state.ui.$("#railLoadPaletteBtn");
@@ -578,6 +586,10 @@ function bindEvents() {
       let confirmPending = false;
       let confirmTimer = null;
       app.lifecycle.listen(railClearDeckBtn, "click", () => {
+        if (app.state.solve.batchDeckLocked) {
+          app.commands.showToast("The Palette Deck cannot be cleared while a batch is running.", "warn");
+          return;
+        }
         if (app.state.palette.deck.length === 0) return;
         if (!confirmPending) {
           confirmPending = true;
@@ -603,6 +615,7 @@ function bindEvents() {
           railClearDeckBtn.setAttribute("aria-label", "No palettes to clear");
           app.state.palette.deck = [];
           app.state.palette.activeDeckId = null;
+          app.state.solve.batchSelectedDeckIds.clear();
           app.commands.renderDeckCards();
           app.commands.updateRail();
           app.commands.syncConfigToServer();
@@ -622,6 +635,13 @@ function bindEvents() {
     // Palette suggestion
     const suggestBtn = app.state.ui.$("#suggestPalettesBtn");
     if (suggestBtn) app.lifecycle.listen(suggestBtn, "click", app.commands.handleSuggestPalettes);
+    const paletteSuggestMode = app.state.ui.$("#paletteSuggestMode");
+    if (paletteSuggestMode) {
+      app.lifecycle.listen(paletteSuggestMode, "change", () => {
+        app.commands.applyPaletteSuggestModeToSettings(paletteSuggestMode.value);
+        app.commands.syncConfigToServer();
+      });
+    }
     const luminanceGuessBtn = app.state.ui.$("#cfgBaseShadingLimitSuggest");
     if (luminanceGuessBtn) app.lifecycle.listen(luminanceGuessBtn, "click", app.commands.handleSuggestBaseShadingLimit);
     app.state.ui.DECK_GENERATION_FIELD_MAP.forEach(({ paletteId }) => {
@@ -721,7 +741,7 @@ function bindEvents() {
     app.commands.bindSettingsAutoSyncControls();
 
     // Solve
-    app.lifecycle.listen(app.state.ui.$("#startSolveBtn"), "click", app.commands.handleStartSolve);
+    app.lifecycle.listen(app.state.ui.$("#startSolveBtn"), "click", app.commands.handlePrimarySolveAction);
 
     // Clear solve history
     ["clearSolveHistoryBtn", "exportClearSolveHistoryBtn"].forEach((id) => {

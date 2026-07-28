@@ -1,16 +1,16 @@
 /* Prisma Generator stylesheet manifest. Import order preserves the legacy cascade. */
 @import url("./styles/tokens.css");
 @import url("./styles/base.css");
-@import url("./styles/shell.css");
+@import url("./styles/shell.css?v=2026-07-27-deck-batch");
 @import url("./styles/components.css");
 @import url("./styles/image.css");
-@import url("./styles/palette.css");
+@import url("./styles/palette.css?v=2026-07-27-deck-batch");
 @import url("./styles/settings.css");
 @import url("./styles/result-controls.css");
-@import url("./styles/solve.css");
+@import url("./styles/solve.css?v=2026-07-27-deck-batch");
 @import url("./styles/export.css");
-@import url("./styles/surfaces.css");
-@import url("./styles/utilities.css");
+@import url("./styles/surfaces.css?v=2026-07-27-deck-batch");
+@import url("./styles/utilities.css?v=2026-07-27-deck-batch");
 @import url("./styles/profiles.css");
 @import url("./styles/printers-and-modules.css");
 @import url("./styles/diagnostics.css");

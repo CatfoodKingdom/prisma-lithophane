@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import os
 import stat
+import time
 from pathlib import Path
+from typing import Iterable
 
 
 class OutsideRootError(ValueError):
@@ -44,16 +46,9 @@ def _rm_tree(path: Path) -> None:
             os.unlink(str(child))
 
 
-def safe_clear_dir(target: Path, *, root: Path) -> int:
-    """Delete the CONTENTS of `target` (keeping `target` itself), refusing any
-    target not inside `root`, and never following a symlink/junction out of root.
-    Returns the number of top-level entries removed.
+def _validated_paths(target: Path, root: Path) -> tuple[Path, Path]:
+    """Return safe lexical target/root paths without following reparse points."""
 
-    Containment is checked on LEXICAL absolute paths (normalized, but WITHOUT
-    following symlinks/junctions), and the root plus every path component down to
-    target must be a real directory — never a reparse point. This prevents a
-    junctioned root (or ancestor) from redirecting deletion outside the cache.
-    """
     # Lexical absolutisation: resolves '..' but does NOT follow symlinks/junctions.
     target = Path(os.path.normpath(os.path.abspath(str(target))))
     root = Path(os.path.normpath(os.path.abspath(str(root))))
@@ -74,17 +69,97 @@ def safe_clear_dir(target: Path, *, root: Path) -> int:
         walk = walk / part
         if _is_link_or_junction(walk):
             raise OutsideRootError(f"path component {walk} is a symlink/junction")
+    return target, root
+
+
+def _remove_entry(path: Path) -> None:
+    """Remove one entry without following a link or junction."""
+
+    if _is_link_or_junction(path):
+        _unlink_link(path)
+    elif path.is_dir():
+        _rm_tree(path)
+        os.rmdir(str(path))
+    else:
+        os.unlink(str(path))
+
+
+def safe_clear_dir(target: Path, *, root: Path) -> int:
+    """Delete the contents of ``target`` while keeping ``target`` itself."""
+
+    target, _root = _validated_paths(target, root)
     if not target.exists():
         return 0
     removed = 0
     for entry in os.scandir(str(target)):
         child = Path(entry.path)
-        if _is_link_or_junction(child):
-            _unlink_link(child)
-        elif entry.is_dir(follow_symlinks=False):
-            _rm_tree(child)
-            os.rmdir(str(child))
-        else:
-            os.unlink(str(child))
+        _remove_entry(child)
         removed += 1
     return removed
+
+
+def safe_clear_dir_except(
+    target: Path,
+    *,
+    root: Path,
+    preserve_names: Iterable[str],
+    retries: int = 1,
+) -> dict:
+    """Clear direct children of ``target`` except an explicit name allowlist.
+
+    Preserved names apply only to direct, real children. A symlink or junction
+    whose name matches the allowlist is rejected rather than preserved. Failed
+    removals are retried after a short yield and returned to the caller so a
+    desktop launcher can report them without making startup impossible.
+    """
+
+    target, _root = _validated_paths(target, root)
+    anchor = Path(target.anchor)
+    home = Path(os.path.normpath(os.path.abspath(str(Path.home()))))
+    if target in {anchor, home} or target.parent == anchor:
+        raise OutsideRootError(f"refusing unsafe clear root: {target}")
+    preserved = {str(name) for name in preserve_names}
+    if any(not name or Path(name).name != name for name in preserved):
+        raise ValueError("preserve_names must contain direct child names")
+    if not target.exists():
+        return {"removed": 0, "preserved": [], "failures": []}
+
+    preserved_paths: list[str] = []
+    pending: list[tuple[Path, str]] = []
+    removed = 0
+    for entry in os.scandir(str(target)):
+        child = Path(entry.path)
+        if (
+            child.name in preserved
+            and not _is_link_or_junction(child)
+            and child.is_dir()
+        ):
+            preserved_paths.append(child.name)
+            continue
+        try:
+            _remove_entry(child)
+            removed += 1
+        except OSError as exc:
+            pending.append((child, str(exc)))
+
+    attempts = max(0, int(retries))
+    for _attempt in range(attempts):
+        if not pending:
+            break
+        time.sleep(0)
+        retrying, pending = pending, []
+        for child, _previous_error in retrying:
+            try:
+                _remove_entry(child)
+                removed += 1
+            except OSError as exc:
+                pending.append((child, str(exc)))
+
+    return {
+        "removed": removed,
+        "preserved": sorted(preserved_paths),
+        "failures": [
+            {"path": str(child), "error": error}
+            for child, error in pending
+        ],
+    }

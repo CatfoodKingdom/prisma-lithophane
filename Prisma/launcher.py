@@ -35,6 +35,7 @@ from Prisma.lib.runtime_layout import (  # noqa: E402
 from Prisma.lib.console_output import configure_console_streams  # noqa: E402
 from Prisma.lib.export_stage_recovery import reconcile_interrupted_export_stages  # noqa: E402
 from Prisma.lib.workspace_lock import WorkspaceLock, WorkspaceLockError  # noqa: E402
+from Prisma.generator.cache_admin import safe_clear_dir_except  # noqa: E402
 
 
 DEFAULT_HOST = "127.0.0.1"
@@ -77,6 +78,21 @@ def _probe_prisma_generator(url: str, *, timeout: float = 0.5) -> bool:
         and payload.get("ok") is True
         and payload.get("app") == "prisma-generator"
     )
+
+
+def _clear_startup_generator_cache(workspace_root: Path) -> dict:
+    """Remove session-temporary Generator data while retaining source conversions."""
+
+    cache_root = Path(workspace_root) / "cache"
+    started = time.monotonic()
+    report = safe_clear_dir_except(
+        cache_root,
+        root=cache_root,
+        preserve_names={"source-images"},
+        retries=1,
+    )
+    report["elapsed_s"] = round(time.monotonic() - started, 3)
+    return report
 
 
 def _reserve_port(host: str, preferred_port: int, *, attempts: int = PORT_SEARCH_COUNT) -> tuple[int, socket.socket]:
@@ -181,6 +197,32 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
             print(
                 f"Export recovery preserved {finding.get('path')}: "
                 f"{finding.get('status')}{' — ' + finding.get('error') if finding.get('error') else ''}",
+                flush=True,
+            )
+
+        try:
+            cache_report = _clear_startup_generator_cache(
+                layout.generator_workspace_root
+            )
+            print(
+                "Cleared "
+                f"{cache_report.get('removed', 0)} temporary cache entr"
+                f"{'y' if cache_report.get('removed', 0) == 1 else 'ies'} "
+                f"in {cache_report.get('elapsed_s', 0):.3f}s; "
+                "preserved prepared source images.",
+                flush=True,
+            )
+            for failure in cache_report.get("failures") or []:
+                print(
+                    "Warning: Prisma could not remove temporary cache entry "
+                    f"{failure.get('path')}: {failure.get('error')}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        except (OSError, ValueError) as exc:
+            print(
+                f"Warning: Prisma could not complete startup cache cleanup: {exc}",
+                file=sys.stderr,
                 flush=True,
             )
 

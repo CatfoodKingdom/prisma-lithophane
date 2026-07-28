@@ -15,6 +15,7 @@ import { installFeaturesModelLibraries } from "./features/palette/model-librarie
 import { installFeaturesSettingsController } from "./features/settings/controller.js";
 import { installFeaturesSettingsProfiles } from "./features/settings/profiles.js";
 import { installFeaturesSolveController } from "./features/solve/controller.js";
+import { installFeaturesSolveBatch } from "./features/solve/batch.js";
 import { installFeaturesSolveComparison } from "./features/solve/comparison.js";
 import { installFeaturesSolveRun } from "./features/solve/run.js";
 import { installFeaturesSolveDiagnostics } from "./features/solve/diagnostics.js";
@@ -43,6 +44,7 @@ installFeaturesModelLibraries(app);
 installFeaturesSettingsController(app);
 installFeaturesSettingsProfiles(app);
 installFeaturesSolveController(app);
+installFeaturesSolveBatch(app);
 installFeaturesSolveComparison(app);
 installFeaturesSolveRun(app);
 installFeaturesSolveDiagnostics(app);

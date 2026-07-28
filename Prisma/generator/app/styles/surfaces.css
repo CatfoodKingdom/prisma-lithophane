@@ -231,7 +231,7 @@
   padding-top: 10px;
   padding-bottom: 14px;
 }
-.app-dialog-msg { margin: 0; font-size: 13px; line-height: 1.5; }
+.app-dialog-msg { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-line; }
 .app-dialog-input { width: 100%; margin-bottom: 0; box-sizing: border-box; }
 .app-dialog-hint {
   margin: -6px 0 12px;

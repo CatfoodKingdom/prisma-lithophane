@@ -103,6 +103,7 @@ export function initializeApplicationState(app) {
   app.state.palette.candidateSelection = new Set();
   app.state.palette.candidateInitialized = false;
   app.state.palette.manualSlots = [];
+  app.state.palette.manualVariantDraft = null;
   app.state.palette.composerPalette = [];
   app.state.palette.deck = [];
   app.state.palette.stagingDeck = [];
@@ -385,6 +386,15 @@ export function initializeApplicationState(app) {
   app.state.solve.solveStartPending = false;
   app.state.solve.solveCancelPending = false;
   app.state.solve.solveProgressHideTimer = null;
+  app.state.solve.solveMode = "single";
+  app.state.solve.solveModeMenuOpen = false;
+  app.state.solve.batchSelectedDeckIds = new Set();
+  app.state.solve.batchLockedDeckIds = new Set();
+  app.state.solve.batchDeckLocked = false;
+  app.state.solve.batchRecoveryOwnsToolbar = false;
+  app.state.solve.paletteBatchStartPending = false;
+  app.state.solve.paletteBatchResultFetches = new Map();
+  app.state.solve.paletteBatchFetchedResultIds = new Set();
   app.state.export.exportRunning = false;
   app.state.export.exportPollingOwner = null;
   app.state.export.exportSelectedRunId = null;
