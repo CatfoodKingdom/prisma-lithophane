@@ -19,7 +19,7 @@
       document.documentElement.style.colorScheme = resolved;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=2026-07-28-palette-variants">
+  <link rel="stylesheet" href="style.css?v=2026-07-28-base-cap-contrast">
 </head>
 <body>
   <div class="app-shell">
@@ -1322,7 +1322,9 @@
 
   <!-- In-browser confirm/prompt dialog -->
   <div class="modal-overlay surface-overlay" id="appDialog" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-window surface-window app-dialog">
+    <div class="modal-dialog modal-dialog-window surface-window app-dialog"
+         role="dialog" aria-modal="true"
+         aria-labelledby="appDialogTitle" aria-describedby="appDialogMsg">
       <div class="modal-dialog-header window-header surface-header app-dialog-header">
         <div class="window-header__title-slot">
           <h3 class="window-header__title surface-title" id="appDialogTitle">Confirm</h3>
@@ -1557,6 +1559,6 @@
     </button>
   </div>
 
-  <script type="module" src="bootstrap.js?v=2026-07-28-palette-variants"></script>
+  <script type="module" src="bootstrap.js?v=2026-07-28-solve-pitch-remediation-v5"></script>
 </body>
 </html>

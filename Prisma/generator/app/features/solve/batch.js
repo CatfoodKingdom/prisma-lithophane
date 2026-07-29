@@ -30,6 +30,14 @@ export function installFeaturesSolveBatch(app) {
     return [...(menu?.querySelectorAll("[data-solve-mode]") || [])];
   }
 
+  function solveModeControlsLocked() {
+    return !!(
+      app.state.solve.batchDeckLocked
+      || app.state.solve.paletteBatchStartPending
+      || app.state.solve.solveStartPending
+    );
+  }
+
   function positionSolveModeMenu() {
     if (!menuButton || !menu || menu.hidden) return;
     const rect = menuButton.getBoundingClientRect();
@@ -58,7 +66,7 @@ export function installFeaturesSolveBatch(app) {
   }
 
   function openSolveModeMenu({ focus = "checked" } = {}) {
-    if (!menu || !menuButton || app.state.solve.batchDeckLocked) return;
+    if (!menu || !menuButton || solveModeControlsLocked()) return;
     menu.hidden = false;
     app.state.solve.solveModeMenuOpen = true;
     menuButton.setAttribute("aria-expanded", "true");
@@ -80,7 +88,7 @@ export function installFeaturesSolveBatch(app) {
 
   function setSolveMode(mode, { recovery = false } = {}) {
     const normalized = mode === "batch" ? "batch" : "single";
-    if (app.state.solve.batchDeckLocked && !recovery) return false;
+    if (solveModeControlsLocked() && !recovery) return false;
     app.state.solve.solveMode = normalized;
     app.state.solve.batchRecoveryOwnsToolbar = recovery && normalized === "batch";
     if (
@@ -107,15 +115,18 @@ export function installFeaturesSolveBatch(app) {
       main.setAttribute("aria-label", isBatch ? `Batch Solve ${count} selected palettes` : "Solve active palette");
     }
     if (menuButton) {
-      menuButton.disabled = app.state.solve.batchDeckLocked;
-      menuButton.setAttribute("aria-disabled", app.state.solve.batchDeckLocked ? "true" : "false");
-      menuButton.title = app.state.solve.batchDeckLocked
-        ? "Solve mode is locked while the batch is running"
+      const modeLocked = solveModeControlsLocked();
+      menuButton.disabled = modeLocked;
+      menuButton.setAttribute("aria-disabled", modeLocked ? "true" : "false");
+      menuButton.title = modeLocked
+        ? "Solve mode is locked while a solve is starting or running"
         : "Choose solve mode";
+      if (modeLocked) closeSolveModeMenu();
     }
+    const modeLocked = solveModeControlsLocked();
     solveModeMenuItems().forEach(item => {
       item.setAttribute("aria-checked", item.dataset.solveMode === app.state.solve.solveMode ? "true" : "false");
-      item.disabled = app.state.solve.batchDeckLocked;
+      item.disabled = modeLocked;
     });
   }
 
@@ -419,7 +430,7 @@ export function installFeaturesSolveBatch(app) {
       return;
     }
     pruneBatchDeckSelection();
-    const cards = selectedBatchDeckCards();
+    let cards = selectedBatchDeckCards();
     if (cards.length < 2 || cards.length > 10) {
       app.commands.showToast("Select between 2 and 10 Palette Deck cards for a batch.", "warn");
       return;
@@ -442,19 +453,9 @@ export function installFeaturesSolveBatch(app) {
       return;
     }
 
-    const names = cards.map((card, index) => `${index + 1}. ${card.name}`).join("\n");
-    const confirmed = await app.commands.appConfirm(
-      `Prisma will run ${cards.length} full production solves sequentially using the same frozen image and settings.\n\n${names}\n\nThis may take roughly ${cards.length} times a normal solve and use substantial temporary storage. Unsaved results are removed when Prisma restarts.`,
-      {
-        ok: `Solve ${cards.length} Palettes`,
-        cancel: "Cancel",
-        title: "Solve Palette Batch",
-      },
-    );
-    if (!confirmed) return;
-
     app.state.solve.paletteBatchStartPending = true;
-    setBatchDeckLocked(true, cards.map(card => card.id));
+    app.commands.syncSolveModeUi();
+    app.commands.updateSolveReadiness();
     let acceptedStatus = null;
     try {
       try {
@@ -466,10 +467,31 @@ export function installFeaturesSolveBatch(app) {
       } catch (error) {
         if (error?.message === "Please wait for meshing to finish.") throw error;
       }
-      await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+      const preparedSettings = await app.commands.syncSolveSettingsWithPitchRemediation({
+        intent: "batch",
+      });
+      if (!preparedSettings.proceed) return;
       const settingsIssues = app.commands.getSolveSettingsPreflightIssues();
       if (settingsIssues.length) {
         throw new Error(app.commands.buildSolveSettingsPreflightMessage(settingsIssues));
+      }
+
+      // Selection stays editable until the final cost confirmation. Re-read it
+      // after asynchronous settings preparation so validation and execution
+      // use the exact cards the user is about to confirm.
+      pruneBatchDeckSelection();
+      cards = selectedBatchDeckCards();
+      if (cards.length < 2 || cards.length > 10) {
+        throw new Error("Select between 2 and 10 Palette Deck cards for a batch.");
+      }
+      const refreshedGating = cards
+        .map(card => ({ card, issues: app.commands.getPaletteGatingIssues(card.filament_ids) }))
+        .filter(entry => app.commands.paletteGatingIssueCount(entry.issues));
+      if (refreshedGating.length) {
+        throw new Error(app.commands.buildPaletteGatingMessage(
+          refreshedGating[0].issues,
+          `Can't batch solve "${refreshedGating[0].card.name}".`,
+        ));
       }
       for (const card of cards) {
         const check = await app.api.apiPost("/palette/validate", { palette: card.filament_ids });
@@ -478,6 +500,18 @@ export function installFeaturesSolveBatch(app) {
         }
       }
 
+      const names = cards.map((card, index) => `${index + 1}. ${card.name}`).join("\n");
+      const confirmed = await app.commands.appConfirm(
+        `Prisma will run ${cards.length} full production solves sequentially using the same frozen image and settings.\n\n${names}\n\nThis may take roughly ${cards.length} times a normal solve and use substantial temporary storage. Unsaved results are removed when Prisma restarts.`,
+        {
+          ok: `Solve ${cards.length} Palettes`,
+          cancel: "Cancel",
+          title: "Solve Palette Batch",
+        },
+      );
+      if (!confirmed) return;
+
+      setBatchDeckLocked(true, cards.map(card => card.id));
       const recipeContext = app.commands.buildSolveRecipeContext(
         cards[0].filament_ids,
         app.commands._currentSettingsSnapshot(),

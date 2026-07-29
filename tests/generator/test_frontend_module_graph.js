@@ -11,7 +11,7 @@ const entry = path.join(appDir, "bootstrap.js");
 function importsFor(file) {
   const source = fs.readFileSync(file, "utf8");
   return [...source.matchAll(/(?:from\s+|import\s*)["'](\.[^"']+)["']/g)]
-    .map((match) => path.resolve(path.dirname(file), match[1]));
+    .map((match) => path.resolve(path.dirname(file), match[1].split(/[?#]/, 1)[0]));
 }
 
 test("Generator frontend module graph has no missing files or cycles", () => {
@@ -239,6 +239,25 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
   assert.match(imageController, /getComputedStyle\(layout\)\.flexDirection === "column"/);
   assert.doesNotMatch(html, /id="suggestSlotHint"/);
   assert.match(paletteCss, /\.filament-card\.is-base-cap-reserved\s*{[^}]*var\(--white-filament-line\)[^}]*var\(--white-filament-surface\)/);
+  assert.match(paletteCss, /--white-filament-ink:\s*#1f1f1b;/);
+  assert.match(paletteCss, /--white-filament-label:\s*#62625c;/);
+  assert.match(paletteCss, /\.ams-slot\.is-white \.ams-slot-name\s*{\s*color:\s*var\(--white-filament-ink\);\s*}/);
+  assert.match(paletteCss, /\.ams-slot\.is-white \.ams-slot-label\s*{\s*color:\s*var\(--white-filament-label\);\s*}/);
+});
+
+test("changed solve-pitch modules carry the bootstrap cache version", () => {
+  const bootstrap = fs.readFileSync(path.join(appDir, "bootstrap.js"), "utf8");
+  for (const relativePath of [
+    "features/shell/index.js",
+    "features/settings/profiles.js",
+    "features/solve/batch.js",
+    "features/solve/recipe-viewer.js",
+  ]) {
+    assert.match(
+      bootstrap,
+      new RegExp(`${relativePath.replaceAll("/", "\\/").replace(".", "\\.")}\\?v=2026-07-28-solve-pitch-remediation-v5`),
+    );
+  }
 });
 
 test("extra-extra-small ghost actions share button geometry across element types", () => {
@@ -275,6 +294,10 @@ test("main Solve is an accessible split action and Auto-Suggest owns no solve ac
   assert.match(deck, /is-batch-selected/);
   assert.doesNotMatch(suggestions, /paletteBatch|PaletteBatch|startPaletteBatch/);
   assert.doesNotMatch(html, new RegExp("solvePalette" + "BatchBtn"));
+  assert.match(
+    html,
+    /class="modal-dialog modal-dialog-window surface-window app-dialog"[\s\S]*?role="dialog" aria-modal="true"[\s\S]*?aria-labelledby="appDialogTitle" aria-describedby="appDialogMsg"/,
+  );
 });
 
 test("Palette Deck cards expose an accessible variant menu without replacing remove", () => {
