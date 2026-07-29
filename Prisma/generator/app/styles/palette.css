@@ -3,6 +3,8 @@
 :root {
   --white-filament-surface: #f8f8f3;
   --white-filament-line: #d0d0c8;
+  --white-filament-ink: #1f1f1b;
+  --white-filament-label: #62625c;
   --white-filament-muted: #999999;
 }
 
@@ -413,6 +415,8 @@
 .ams-slot-remove { font-size: 9px; color: var(--error-ink); cursor: pointer; }
 .ams-slot-label { font-size: 7px; color: var(--muted); margin-left: auto; }
 .ams-slot.is-white { border-color: var(--white-filament-line); background: var(--white-filament-surface); pointer-events: none; }
+.ams-slot.is-white .ams-slot-name { color: var(--white-filament-ink); }
+.ams-slot.is-white .ams-slot-label { color: var(--white-filament-label); }
 .ams-slot.is-empty { border: 2px dashed var(--line); background: transparent; pointer-events: none; }
 .ams-swap-label { font-size: 9px; font-weight: 600; color: var(--warn-ink); margin-top: 2px; }
 .ams-slot.is-swap { border: 1px dashed var(--warn-ink); background: var(--warn-bg); }

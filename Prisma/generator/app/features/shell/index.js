@@ -613,7 +613,10 @@ export function installFeaturesShellIndex(app) {
     if (elapsed && elapsedVal != null) app.commands.setOperationElapsedSeconds(elapsedVal);
   }
 
-  function appConfirm(message, { ok = "OK", cancel = "Cancel", title = "Confirm" } = {}) {
+  function appConfirm(
+    message,
+    { ok = "OK", cancel = "Cancel", title = "Confirm", restoreFocus = null } = {},
+  ) {
     return new Promise(resolve => {
       const overlay = app.state.ui.$("#appDialog");
       const titleEl = app.state.ui.$("#appDialogTitle");
@@ -622,6 +625,13 @@ export function installFeaturesShellIndex(app) {
       const buttons = app.state.ui.$("#appDialogButtons");
       const closeBtn = app.state.ui.$("#appDialogClose");
       const hint = app.state.ui.$("#appDialogHint");
+      if (!overlay || !msg || !input || !buttons) {
+        resolve(false);
+        return;
+      }
+      const dialogDocument = overlay.ownerDocument || document;
+      const previousFocus = dialogDocument.activeElement;
+      const focusRestoreTarget = restoreFocus || previousFocus;
       if (titleEl) titleEl.textContent = title;
       msg.textContent = message;
       input.style.display = "none";
@@ -634,11 +644,64 @@ export function installFeaturesShellIndex(app) {
         <button class="primary-button small" id="appDialogYes">${app.commands.esc2(ok)}</button>
       `;
       overlay.setAttribute("aria-hidden", "false");
-      const close = (val) => { overlay.setAttribute("aria-hidden", "true"); resolve(val); };
-      app.state.ui.$("#appDialogNo").onclick = () => close(false);
-      app.state.ui.$("#appDialogYes").onclick = () => close(true);
+      let settled = false;
+      const cancelBtn = app.state.ui.$("#appDialogNo");
+      const okBtn = app.state.ui.$("#appDialogYes");
+      const focusable = [closeBtn, cancelBtn, okBtn].filter(
+        element => element && !element.disabled && typeof element.focus === "function",
+      );
+      const onDocumentKeyDown = (event) => {
+        if (overlay.getAttribute("aria-hidden") !== "false") return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          close(false);
+          return;
+        }
+        if (event.key !== "Tab" || !focusable.length) return;
+        const currentIndex = focusable.indexOf(dialogDocument.activeElement);
+        let nextIndex = null;
+        if (event.shiftKey && currentIndex <= 0) nextIndex = focusable.length - 1;
+        if (!event.shiftKey && (currentIndex < 0 || currentIndex === focusable.length - 1)) nextIndex = 0;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        focusable[nextIndex].focus();
+      };
+      const cleanup = () => {
+        dialogDocument.removeEventListener("keydown", onDocumentKeyDown);
+        overlay.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (okBtn) okBtn.onclick = null;
+        if (closeBtn) closeBtn.onclick = null;
+      };
+      const close = (val) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        overlay.setAttribute("aria-hidden", "true");
+        resolve(val);
+        // Solve-start controls remain disabled until the awaiting handler's
+        // finally block runs. Restore focus on the next task so the original
+        // control can receive it after that cleanup.
+        setTimeout(() => {
+          if (
+            focusRestoreTarget
+            && dialogDocument.body?.contains(focusRestoreTarget)
+            && typeof focusRestoreTarget.focus === "function"
+            && !focusRestoreTarget.disabled
+          ) {
+            focusRestoreTarget.focus();
+          }
+        }, 0);
+      };
+      if (cancelBtn) cancelBtn.onclick = () => close(false);
+      if (okBtn) okBtn.onclick = () => close(true);
       if (closeBtn) closeBtn.onclick = () => close(false);
       overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+      dialogDocument.addEventListener("keydown", onDocumentKeyDown);
+      setTimeout(() => {
+        if (settled || overlay.getAttribute("aria-hidden") !== "false") return;
+        okBtn?.focus();
+      }, 50);
     });
   }
 

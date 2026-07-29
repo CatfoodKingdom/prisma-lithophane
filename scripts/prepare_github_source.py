@@ -45,7 +45,7 @@ SCRIPT_FILES = (
     "scripts/standard_model_library.py",
 )
 PRISMA_SUFFIXES = {".py", ".js", ".css", ".html", ".sql", ".json"}
-TEST_SUFFIXES = {".py", ".js", ".json", ".txt"}
+TEST_SUFFIXES = {".py", ".js", ".cjs", ".json", ".txt"}
 
 EXCLUDED_PREFIXES = (
     ".claude/",

@@ -1411,10 +1411,32 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   function buildSolvePitchNozzleIssue(pitch, nozzleSize) {
-    const pitchText = Number(pitch).toFixed(3).replace(/\.?0+$/, "");
-    const nozzleText = Number(nozzleSize).toFixed(3).replace(/\.?0+$/, "");
+    const pitchText = app.commands.formatSolvePitchMm(pitch);
+    const nozzleText = app.commands.formatSolvePitchMm(nozzleSize);
     return `Solve Pitch (${pitchText} mm) cannot be smaller than the active nozzle diameter (${nozzleText} mm). `
       + "Increase Solve Pitch or choose a smaller nozzle.";
+  }
+
+  function formatSolvePitchMm(value) {
+    return Number(value).toFixed(3).replace(/\.?0+$/, "");
+  }
+
+  function getSolvePitchNozzleMismatch() {
+    const pitch = app.commands.readSolvePreflightNumber(
+      "cfgSolvePitch",
+      "solver_fine_pitch_mm",
+      parseFloat(app.state.settings.config?.image_sample_pitch_mm) || 0.20,
+    );
+    const nozzleSize = Number(app.state.session.activeNozzle?.size);
+    const pitchEps = 1e-6;
+    if (!Number.isFinite(nozzleSize) || !(nozzleSize > 0) || pitch >= nozzleSize - pitchEps) {
+      return null;
+    }
+    return {
+      pitch,
+      nozzleSize,
+      message: app.commands.buildSolvePitchNozzleIssue(pitch, nozzleSize),
+    };
   }
 
   function getSolveSettingsPreflightIssues() {
@@ -1423,14 +1445,8 @@ export function installFeaturesSettingsProfiles(app) {
     const dwcMinLayers = app.commands.readSolvePreflightMinCapLayers(lh);
     const dwcMin = app.commands.minCapThicknessFromLayers(dwcMinLayers, lh);
     const tMax = app.commands.readSolvePreflightNumber("cfgTMax", "t_max", 2.5);
-    const solvePitch = app.commands.readSolvePreflightNumber(
-      "cfgSolvePitch",
-      "solver_fine_pitch_mm",
-      parseFloat(app.state.settings.config?.image_sample_pitch_mm) || 0.20,
-    );
     const nozzle = typeof app.state.session.activeNozzle !== "undefined" ? app.state.session.activeNozzle : null;
     const eps = 0.001;
-    const pitchEps = 1e-6;
     const issues = [];
 
     if (nozzle) {
@@ -1439,11 +1455,9 @@ export function installFeaturesSettingsProfiles(app) {
       } else if (lh > nozzle.max_layer_height + eps) {
         issues.push(`Layer Height (${lh} mm) exceeds the ${nozzle.size} mm nozzle maximum (${nozzle.max_layer_height} mm)`);
       }
-      const nozzleSize = Number(nozzle.size);
-      if (Number.isFinite(nozzleSize) && solvePitch < nozzleSize - pitchEps) {
-        issues.push(app.commands.buildSolvePitchNozzleIssue(solvePitch, nozzleSize));
-      }
     }
+    const pitchMismatch = app.commands.getSolvePitchNozzleMismatch();
+    if (pitchMismatch) issues.push(pitchMismatch.message);
 
     const alignment = app.commands.calculateStackLayerAlignment(lh, dwb, dwcMin, tMax);
     if (alignment.colorBudget <= 0) {
@@ -1459,6 +1473,55 @@ export function installFeaturesSettingsProfiles(app) {
 
   function buildSolveSettingsPreflightMessage(issues) {
     return `Can't solve. Fix settings: ${(issues || []).join(" ")}`.trim();
+  }
+
+  async function syncSolveSettingsWithPitchRemediation({ intent = "single" } = {}) {
+    const mismatch = app.commands.getSolvePitchNozzleMismatch();
+    let corrected = false;
+    if (mismatch) {
+      const allIssues = app.commands.getSolveSettingsPreflightIssues();
+      const otherIssues = allIssues.filter(issue => issue !== mismatch.message);
+      const requiredText = app.commands.formatSolvePitchMm(mismatch.nozzleSize);
+      const currentText = app.commands.formatSolvePitchMm(mismatch.pitch);
+      const canSolveImmediately = intent === "single" && otherIssues.length === 0;
+      const confirmed = await app.commands.appConfirm(
+        `The current Solve Pitch is ${currentText} mm. The active ${requiredText} mm nozzle requires a Solve Pitch of at least ${requiredText} mm.\n\n`
+          + `Prisma can change Solve Pitch to ${requiredText} mm and continue.`,
+        {
+          ok: canSolveImmediately
+            ? `Use ${requiredText} mm and Solve`
+            : `Use ${requiredText} mm and Continue`,
+          cancel: "Cancel",
+          title: "Solve Pitch Is Too Small",
+          restoreFocus: app.state.ui.$("#startSolveBtn"),
+        },
+      );
+      if (!confirmed) return { proceed: false, corrected: false };
+
+      const pitchInput = app.state.ui.$("#cfgSolvePitch");
+      if (!app.commands.applySolvePitchDraft(requiredText, pitchInput)) {
+        app.commands.showToast("Couldn't apply the required Solve Pitch.", "error");
+        return { proceed: false, corrected: false };
+      }
+      app.commands.updateDerivedParams();
+      corrected = true;
+    }
+
+    try {
+      await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+    } catch {
+      return { proceed: false, corrected };
+    }
+
+    const unresolved = app.commands.getSolvePitchNozzleMismatch();
+    if (unresolved) {
+      app.commands.showToast(
+        `Couldn't apply the required Solve Pitch. ${unresolved.message}`,
+        "error",
+      );
+      return { proceed: false, corrected };
+    }
+    return { proceed: true, corrected };
   }
 
   function updateDerivedParams() {
@@ -1905,8 +1968,11 @@ export function installFeaturesSettingsProfiles(app) {
     calculateStackLayerAlignment,
     buildStackLayerAlignmentIssue,
     buildSolvePitchNozzleIssue,
+    formatSolvePitchMm,
+    getSolvePitchNozzleMismatch,
     getSolveSettingsPreflightIssues,
     buildSolveSettingsPreflightMessage,
+    syncSolveSettingsWithPitchRemediation,
     updateDerivedParams,
     applyDraftNumberField,
     bindDraftNumberInput,

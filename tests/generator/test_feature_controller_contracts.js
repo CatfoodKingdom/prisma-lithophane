@@ -127,6 +127,179 @@ test("solve preflight math reports layer alignment and nozzle constraints", asyn
   assert.match(app.commands.buildSolvePitchNozzleIssue(0.2, 0.4), /cannot be smaller/);
 });
 
+test("solve pitch mismatch detection distinguishes invalid, equal, and coarser pitches", async () => {
+  const solvePitch = fakeElement();
+  solvePitch.value = "0.2";
+  const { app } = await harness({ elements: { "#cfgSolvePitch": solvePitch } });
+  app.state.session.activeNozzle = { size: 0.4 };
+
+  assert.deepEqual(app.commands.getSolvePitchNozzleMismatch(), {
+    pitch: 0.2,
+    nozzleSize: 0.4,
+    message: app.commands.buildSolvePitchNozzleIssue(0.2, 0.4),
+  });
+  solvePitch.value = "0.4";
+  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
+  solvePitch.value = "0.6";
+  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
+  solvePitch.value = "0.3999995";
+  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
+});
+
+test("solve pitch remediation preserves smoothing radius and synchronizes the canonical setting", async () => {
+  const solvePitch = fakeElement();
+  solvePitch.value = "0.2";
+  const layerHeight = fakeElement();
+  layerHeight.value = "0.08";
+  const baseThickness = fakeElement();
+  baseThickness.value = "0.2";
+  const capLayers = fakeElement();
+  capLayers.value = "2";
+  const maxThickness = fakeElement();
+  maxThickness.value = "3";
+  const smoothRadius = fakeElement();
+  const { app } = await harness({ elements: {
+    "#cfgSolvePitch": solvePitch,
+    "#cfgLayerHeight": layerHeight,
+    "#cfgDWb": baseThickness,
+    "#cfgDWcMin": capLayers,
+    "#cfgTMax": maxThickness,
+    "#cfgSmoothKernel": smoothRadius,
+  } });
+  app.state.session.activeNozzle = {
+    size: 0.4,
+    min_layer_height: 0.04,
+    max_layer_height: 0.2,
+  };
+  app.state.settings.config.solver_fine_pitch_mm = 0.2;
+  app.state.settings.config.image_sample_pitch_mm = 0.2;
+  app.state.settings.config.smooth_kernel = 5;
+  const initialRadius = app.commands.smoothingRadiusMmFromCells(5, 0.2);
+  let dialogOptions = null;
+  let syncs = 0;
+  app.commands.appConfirm = async (_message, options) => {
+    dialogOptions = options;
+    return true;
+  };
+  app.commands.updateDerivedParams = () => {};
+  app.commands.syncConfigToServer = async () => { syncs += 1; };
+
+  const result = await app.commands.syncSolveSettingsWithPitchRemediation({ intent: "single" });
+
+  assert.deepEqual(result, { proceed: true, corrected: true });
+  assert.equal(dialogOptions.title, "Solve Pitch Is Too Small");
+  assert.equal(dialogOptions.ok, "Use 0.4 mm and Solve");
+  assert.equal(solvePitch.value, "0.4");
+  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.4);
+  assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.4);
+  assert.equal(
+    app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel, 0.4),
+    initialRadius,
+  );
+  assert.equal(syncs, 1);
+});
+
+test("solve pitch remediation cancels without mutation and uses Continue when other errors remain", async () => {
+  const solvePitch = fakeElement();
+  solvePitch.value = "0.2";
+  const { app } = await harness({ elements: { "#cfgSolvePitch": solvePitch } });
+  app.state.session.activeNozzle = { size: 0.4 };
+  app.state.settings.config.solver_fine_pitch_mm = 0.2;
+  app.state.settings.config.image_sample_pitch_mm = 0.2;
+  let dialogOptions = null;
+  let syncs = 0;
+  const mismatchMessage = app.commands.buildSolvePitchNozzleIssue(0.2, 0.4);
+  app.commands.getSolveSettingsPreflightIssues = () => [
+    mismatchMessage,
+    "Max Total Thickness is not aligned",
+  ];
+  app.commands.appConfirm = async (_message, options) => {
+    dialogOptions = options;
+    return false;
+  };
+  app.commands.syncConfigToServer = async () => { syncs += 1; };
+
+  const result = await app.commands.syncSolveSettingsWithPitchRemediation({ intent: "single" });
+
+  assert.deepEqual(result, { proceed: false, corrected: false });
+  assert.equal(dialogOptions.ok, "Use 0.4 mm and Continue");
+  assert.equal(solvePitch.value, "0.2");
+  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.2);
+  assert.equal(syncs, 0);
+});
+
+test("confirmation dialog traps focus, cancels on Escape, and restores prior focus", async () => {
+  const overlay = fakeElement();
+  const title = fakeElement();
+  const message = fakeElement();
+  const input = fakeElement();
+  const buttons = fakeElement();
+  const closeButton = fakeElement();
+  const cancelButton = fakeElement();
+  const confirmButton = fakeElement();
+  const hint = fakeElement();
+  const listeners = new Map();
+  let restoredFocus = 0;
+  const previousFocus = {
+    focus() {
+      restoredFocus += 1;
+      dialogDocument.activeElement = previousFocus;
+    },
+  };
+  const dialogDocument = {
+    activeElement: previousFocus,
+    body: { contains: () => true },
+    addEventListener(type, listener) { listeners.set(type, listener); },
+    removeEventListener(type, listener) {
+      if (listeners.get(type) === listener) listeners.delete(type);
+    },
+  };
+  overlay.ownerDocument = dialogDocument;
+  for (const element of [closeButton, cancelButton, confirmButton]) {
+    element.focus = () => { dialogDocument.activeElement = element; };
+  }
+  const { app } = await harness({ elements: {
+    "#appDialog": overlay,
+    "#appDialogTitle": title,
+    "#appDialogMsg": message,
+    "#appDialogInput": input,
+    "#appDialogButtons": buttons,
+    "#appDialogClose": closeButton,
+    "#appDialogNo": cancelButton,
+    "#appDialogYes": confirmButton,
+    "#appDialogHint": hint,
+  } });
+  app.commands.esc2 = value => String(value);
+
+  const resultPromise = app.commands.appConfirm("Proceed?", {
+    title: "Confirm Action",
+    ok: "Proceed",
+  });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(dialogDocument.activeElement, confirmButton);
+
+  let tabPrevented = false;
+  listeners.get("keydown")({
+    key: "Tab",
+    shiftKey: false,
+    preventDefault() { tabPrevented = true; },
+  });
+  assert.equal(tabPrevented, true);
+  assert.equal(dialogDocument.activeElement, closeButton);
+
+  let escapePrevented = false;
+  listeners.get("keydown")({
+    key: "Escape",
+    preventDefault() { escapePrevented = true; },
+  });
+  assert.equal(await resultPromise, false);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(escapePrevented, true);
+  assert.equal(overlay.getAttribute("aria-hidden"), "true");
+  assert.equal(restoredFocus, 1);
+  assert.equal(listeners.has("keydown"), false);
+});
+
 test("printer printability uses bounded whole-nozzle length multipliers", async () => {
   const { app } = await harness();
   assert.deepEqual(app.commands.defaultNozzleLineWidths(0.2), {
@@ -442,6 +615,11 @@ test("Batch mode seeds the active palette and preserves deck-order selection", a
   app.commands.setSolveMode("single");
   app.commands.setSolveMode("batch");
   assert.equal(app.state.solve.batchSelectedDeckIds.size, 10);
+
+  app.state.solve.paletteBatchStartPending = true;
+  assert.equal(app.commands.setSolveMode("single"), false);
+  assert.equal(app.state.solve.solveMode, "batch");
+  app.state.solve.paletteBatchStartPending = false;
 });
 
 test("palette variants preserve the source, slot order, and manual draft on cancel", async () => {
@@ -673,8 +851,14 @@ test("an accepted batch stays locked and tracked if Preview initialization fails
 
 test("batch confirmation cancellation performs no work and preserves selection", async () => {
   let starts = 0;
+  const events = [];
   const { app } = await harness({
     api: {
+      getExportStatus: async () => ({ status: "idle" }),
+      apiPost: async () => {
+        events.push("palette validation");
+        return { valid: true };
+      },
       startPaletteBatch: async () => {
         starts += 1;
         return {};
@@ -689,13 +873,28 @@ test("batch confirmation cancellation performs no work and preserves selection",
   ];
   app.state.solve.batchSelectedDeckIds = new Set(["deck-1", "deck-2"]);
   app.state.solve.solveMode = "batch";
-  app.commands.appConfirm = async () => false;
+  app.commands.syncSolveSettingsWithPitchRemediation = async () => {
+    events.push("settings preflight");
+    return { proceed: true, corrected: false };
+  };
+  app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.appConfirm = async () => {
+    events.push("batch confirmation");
+    return false;
+  };
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
 
   await app.commands.handleStartPaletteBatch();
 
+  assert.deepEqual(events, [
+    "settings preflight",
+    "palette validation",
+    "palette validation",
+    "batch confirmation",
+  ]);
   assert.equal(starts, 0);
+  assert.equal(app.state.solve.paletteBatchStartPending, false);
   assert.equal(app.state.solve.batchDeckLocked, false);
   assert.equal(app.state.solve.solveMode, "batch");
   assert.deepEqual([...app.state.solve.batchSelectedDeckIds], ["deck-1", "deck-2"]);
@@ -1425,6 +1624,32 @@ test("profile load failures restore prior local state and do not claim clean suc
   assert.equal(app.state.settings.config.t_max, 4);
   assert.equal(app.state.settings.loadedProfileRef, null);
   assert.equal(app.state.settings.loadedProfileSnapshot, null);
+});
+
+test("solve start stops cleanly when solve-pitch remediation is cancelled", async () => {
+  let starts = 0;
+  let remediationCalls = 0;
+  const { app } = await harness({ api: {
+    getExportStatus: async () => ({ status: "idle" }),
+    startSolve: async () => {
+      starts += 1;
+      return { job_id: "unexpected" };
+    },
+  } });
+  app.state.session.apiConnected = true;
+  app.state.image.selectedImage = { filename: "image.png", source_ref: null };
+  app.commands.updateSolveReadiness = () => {};
+  app.commands.syncSolveSettingsWithPitchRemediation = async () => {
+    remediationCalls += 1;
+    return { proceed: false, corrected: false };
+  };
+
+  await app.commands.handleStartSolve();
+
+  assert.equal(remediationCalls, 1);
+  assert.equal(starts, 0);
+  assert.equal(app.state.solve.solveStartPending, false);
+  assert.equal(app.state.solve.solveRuns.length, 0);
 });
 
 test("solve start uses the injected palette preflight and blocks invalid palettes", async () => {

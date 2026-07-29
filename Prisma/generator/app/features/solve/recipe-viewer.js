@@ -640,11 +640,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         // If the status check fails, continue through the normal solve-start path
         // and let the server return any authoritative error.
       }
-      try {
-        await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
-      } catch {
-        return;
-      }
+      const preparedSettings = await app.commands.syncSolveSettingsWithPitchRemediation({
+        intent: "single",
+      });
+      if (!preparedSettings.proceed) return;
 
       const settingsIssues = app.commands.getSolveSettingsPreflightIssues();
       if (settingsIssues.length) {
