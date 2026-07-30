@@ -50,11 +50,10 @@ class PreprocessingContractError(RuntimeError):
 class PreprocessingContext:
     """Read-only context handed to every operator's `apply()`.
 
-    F2/F3 hooks are present as optional fields. Operators that don't declare
-    `required_context` see them as `None`. Foundation does not ship F2/F3
-    services themselves — currently `palette_metadata` — stay None until those
-    services land. PreprocessingModule.required_context lets the
-    runner fail fast when an operator asks for a context the runner can't fill.
+    The optional `palette_metadata` field carries the live F2 service result
+    when an enabled operator declares that requirement. It remains `None` when
+    no operator requests it. `PreprocessingModule.required_context` lets the
+    runner fail fast when an operator asks for context it cannot fill.
     """
     config: "PipelineConfig"
     image_fingerprint: str

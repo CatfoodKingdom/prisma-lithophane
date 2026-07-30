@@ -11,7 +11,7 @@
     "t_max": 3.0,
     "k_max": 4,
     "de_threshold": 0.01,
-    "smooth_kernel": 5.0,
+    "smooth_kernel": 2.5,
     "use_corrections": true,
     "appearance_model_provider": "photo_stack_bundle",
     "photo_stack_bundle_path": null,

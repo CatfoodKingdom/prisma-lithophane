@@ -104,7 +104,6 @@ export function installFeaturesSettingsModules(app) {
   function refreshModuleDrivenViews(moduleId = null) {
     if (moduleId) app.commands.applyShowWhenRules(moduleId);
     if (moduleId) app.commands.refreshPreprocessingPresetSelect(moduleId);
-    app.commands.updateSettingsSummaries();
     app.commands.updateDerivedParams();
     app.commands.updateAccordionSummaries();
     app.commands.checkPresetModified();

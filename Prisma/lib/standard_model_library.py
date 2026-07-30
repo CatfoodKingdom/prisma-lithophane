@@ -131,6 +131,12 @@ def _database_tables(conn: sqlite3.Connection) -> set[str]:
 
 
 def _generator_filament_catalog(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Build the public Generator catalog from generation-available filaments.
+
+    ``exclude_from_model`` is Calibration-owned policy. Excluded rows and their
+    samples remain in SQLite, but they are not members of a published model
+    library's user-facing filament catalog.
+    """
     required = {"filaments", "filament_special_roles"}
     missing = required - _database_tables(conn)
     if missing:
@@ -169,6 +175,8 @@ def _generator_filament_catalog(conn: sqlite3.Connection) -> dict[str, dict[str,
 
     catalog: dict[str, dict[str, Any]] = {}
     for row in rows:
+        if bool(row[6]):
+            continue
         filament_id = str(row[0] or "").strip()
         if not filament_id or filament_id in catalog:
             raise StandardModelLibraryError(f"invalid or duplicate filament id: {filament_id!r}")
@@ -188,7 +196,6 @@ def _generator_filament_catalog(conn: sqlite3.Connection) -> dict[str, dict[str,
                 if str(role).strip().lower() in {"black", "transparent"}
             }
         )
-        excluded = bool(row[6])
         catalog[filament_id] = {
             "display_name": name,
             "manufacturer": manufacturer,
@@ -197,9 +204,13 @@ def _generator_filament_catalog(conn: sqlite3.Connection) -> dict[str, dict[str,
             "hex": str(row[4] or ""),
             "white_cap_eligible": bool(row[5]),
             "special_roles": special_roles,
-            "exclude_from_model": excluded,
-            "generation_available": not excluded,
+            "exclude_from_model": False,
+            "generation_available": True,
         }
+    if not catalog:
+        raise StandardModelLibraryError(
+            "calibration database contains no generation-available filaments"
+        )
     return catalog
 
 
@@ -844,6 +855,12 @@ def validate_standard_model_library(library_root: str | Path) -> dict[str, Any]:
             raise StandardModelLibraryError(
                 f"library filament registry contains non-public or missing fields for {filament_id}"
             )
+    generation_available_filament_count = sum(
+        1
+        for record in registry.values()
+        if not bool(record.get("exclude_from_model", False))
+        and record.get("generation_available") is not False
+    )
 
     photo_pointer = _read_json(root / "filaments" / "photo_stack_models" / "latest.json")
     if set(photo_pointer) != {"run_id", "path", "model_family", "model_version"}:
@@ -963,7 +980,10 @@ def validate_standard_model_library(library_root: str | Path) -> dict[str, Any]:
         "maximum_prisma_version": str(maximum_prisma_version) if maximum_prisma_version is not None else None,
         "file_count": len(files),
         "total_bytes": sum(int(item["byte_size"]) for item in files),
-        "filament_count": len(registry),
+        # Older schema-2 libraries may still contain excluded catalog records.
+        # Keep them installable, but never advertise those records as filaments
+        # included for generation.
+        "filament_count": generation_available_filament_count,
         "model_kinds": list(REQUIRED_MODEL_KINDS),
     }
 
@@ -1076,6 +1096,9 @@ def export_standard_model_library(
             if str(artifact["artifact_rel_path"]) == "filaments/pair_corrections.json"
         )
         for artifact in profiles:
+            filament_id = str(artifact["artifact_kind"]).partition(":")[2]
+            if filament_id not in catalog:
+                continue
             copy_registered(artifact, model_kind="legacy_spline")
         copy_registered(pair_corrections, model_kind="legacy_spline")
 

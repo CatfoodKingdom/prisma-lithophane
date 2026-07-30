@@ -820,8 +820,8 @@
 .run-settings-panel {
   position: fixed;
   z-index: var(--z-modal-overlay);
-  width: min(640px, calc(100vw - 20px));
-  max-height: min(82vh, 760px);
+  width: min(760px, calc(100vw - 20px));
+  max-height: min(calc(100vh - 16px), 900px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -848,27 +848,40 @@
   white-space: nowrap;
 }
 .run-settings-advanced-toggle {
+  height: var(--window-header-control-height);
+  min-height: var(--window-header-control-height);
+  padding: 0 14px;
+  font-size: 13px;
+  line-height: 1;
+  box-sizing: border-box;
   white-space: nowrap;
 }
 .run-settings-load-btn {
   white-space: nowrap;
+  font-weight: 600;
 }
 .run-settings-body {
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: start;
-  gap: 12px;
   padding: 10px 12px 14px;
   background: var(--bg);
 }
 .run-settings-note {
-  grid-column: 1 / -1;
-  margin: 0;
+  margin: 0 0 10px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.35;
+}
+.run-settings-sections {
+  columns: 2 280px;
+  column-gap: 12px;
+}
+.run-settings-section {
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 12px;
+  break-inside: avoid;
+  vertical-align: top;
 }
 .run-settings-section + .run-settings-section {
   margin-top: 0;
@@ -918,10 +931,10 @@
     max-height: calc(100vh - 16px);
   }
   .run-settings-body {
-    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 10px;
   }
-  .run-settings-note {
-    grid-column: auto;
+  .run-settings-sections {
+    columns: 1;
   }
   .run-settings-row {
     grid-template-columns: minmax(0, 1fr) minmax(96px, 46%);

@@ -191,7 +191,7 @@ _SETTINGS_PROFILE_STATE_NAME = "state.json"
 _BUNDLED_SETTINGS_PROFILES_DIR = (
     _PRISMA_DIR / "data" / "generator" / "settings_profiles"
 )
-_BUNDLED_SETTINGS_PROFILE_REVISION = 1
+_BUNDLED_SETTINGS_PROFILE_REVISION = 2
 _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS = frozenset(
     {"wing-c-minimal", "wing-c-standard"}
 )

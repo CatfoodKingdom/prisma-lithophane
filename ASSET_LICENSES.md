@@ -11,18 +11,14 @@ CC0. Anyone may copy, use, modify, and redistribute that model data for any
 purpose without requesting permission. CC0 does not grant trademark rights,
 and the data is provided without warranty.
 
-The following independently maintained test/reference assets are not included
-in the GitHub source staging tree or release packages and remain outside that
-authorization:
+The independently maintained
+`Prisma/lib/photo_stack_model/bundles/runtime_bundle.json`
+calibration-derived reference/test model is not included in the GitHub source
+staging tree or release packages and remains outside that authorization.
 
-- `Prisma/lib/photo_stack_model/bundles/runtime_bundle.json`, a
-  calibration-derived reference/test model;
-- photographic preprocessing fixtures under
-  `tests/generator/preprocessing/fixtures/wing_d/`.
-
-These items must not be treated as GPL-licensed merely because they appear near
+This model must not be treated as GPL-licensed merely because it appears near
 GPL-covered source. The first public source staging tree excludes the
-photographic fixture directory and the calibration-derived reference bundle.
+calibration-derived reference bundle.
 
 The user documentation vault is maintained separately in
 <https://github.com/CatfoodKingdom/prisma-docs> and is not part of the main

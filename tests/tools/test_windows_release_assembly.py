@@ -13,7 +13,7 @@ from tests.tools.release_license_fixture import make_license_bundle
 def _sources(tmp_path: Path) -> tuple[Path, Path]:
     app = tmp_path / "pyinstaller"
     (app / "_internal" / "Prisma" / "generator" / "app").mkdir(parents=True)
-    (app / "Prisma.exe").write_bytes(b"exe")
+    (app / release.GENERATOR_EXE).write_bytes(b"exe")
     (app / "_internal" / "runtime.dll").write_bytes(b"runtime")
     (app / "_internal" / "Prisma" / "generator" / "app" / "index.html").write_text("Prisma")
     library = tmp_path / "library"
@@ -48,15 +48,17 @@ def test_assembly_stages_validates_and_zips_exact_release(
 
     assert report["ok"] is True
     assert report["model_library_version"] == "2026.07"
-    assert (destination / "Prisma.exe").read_bytes() == b"exe"
+    assert (destination / release.GENERATOR_EXE).read_bytes() == b"exe"
     assert (destination / "_internal" / "seed-model-library" / "model.bin").read_bytes() == b"model"
     for name in release.LEGAL_FILES:
         assert (destination / name).read_bytes() == (release.PROJECT_ROOT / name).read_bytes()
-    assert "Double-click Prisma.exe" in (destination / "README.txt").read_text(encoding="utf-8")
+    readme = (destination / "README.txt").read_text(encoding="utf-8")
+    assert readme.startswith("Prisma Generator 0.1.0-test1 for Windows")
+    assert "Double-click Prisma Generator.exe" in readme
     assert release.validate_windows_release(destination)["ok"] is True
     with zipfile.ZipFile(zip_path) as archive:
         names = set(archive.namelist())
-    assert "Prisma-0.1.0/Prisma.exe" in names
+    assert "Prisma-0.1.0/Prisma Generator.exe" in names
     assert "Prisma-0.1.0/_internal/seed-model-library/model.bin" in names
     assert "Prisma-0.1.0/prisma-release.json" in names
     for name in release.LEGAL_FILES:
@@ -84,6 +86,25 @@ def test_forbidden_private_file_aborts_before_destination_promotion(
 
     assert not destination.exists()
     assert list(tmp_path.glob(".release.staging-*")) == []
+
+
+def test_legacy_generator_executable_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, library = _sources(tmp_path)
+    (app / release.GENERATOR_EXE).rename(app / release.LEGACY_GENERATOR_EXE)
+    monkeypatch.setattr(release, "validate_standard_model_library", _library_report)
+
+    with pytest.raises(release.WindowsReleaseError, match="legacy Generator executable"):
+        release.assemble_windows_release(
+            pyinstaller_root=app,
+            model_library_root=library,
+            third_party_licenses_root=make_license_bundle(tmp_path / "licenses"),
+            destination=tmp_path / "release",
+            release_version="test",
+            app_version="0.1.0",
+        )
 
 
 def test_obsolete_bundled_printer_profile_aborts_assembly(
@@ -184,7 +205,7 @@ def test_release_validator_detects_changed_file(
         release_version="test",
         app_version="0.1.0",
     )
-    (destination / "Prisma.exe").write_bytes(b"changed")
+    (destination / release.GENERATOR_EXE).write_bytes(b"changed")
 
     with pytest.raises(release.WindowsReleaseError, match="(?:size|hash) mismatch"):
         release.validate_windows_release(destination)

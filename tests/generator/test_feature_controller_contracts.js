@@ -93,6 +93,79 @@ test("temporary settings profiles prefer durable run snapshots", async () => {
   assert.deepEqual(profile.modules, { denoise: true });
 });
 
+test("white-point rescale is basic, grouped in run settings, and summarized only when enabled", async () => {
+  const { app } = await harness();
+  const run = {
+    id: "run-1",
+    label: "Rescaled portrait",
+    config: {
+      luminance_mode: "standard",
+      solver_fine_pitch_mm: 0.4,
+      image_sample_pitch_mm: 0.4,
+      t_max: 3,
+      layer_height: 0.08,
+      base_filament: "white",
+      d_wb: 0.2,
+      d_wc_min: 0.16,
+      smooth_kernel: 2.5,
+      detail_cap_max_layers: 5,
+      appearance_model_provider: "photo_stack_bundle",
+      use_corrections: true,
+      k_max: 3,
+      color_region_target_mm: 0.6,
+      gamut_white_rescale: true,
+    },
+  };
+
+  const summary = app.commands.getSolveRunEssentialsItems(run);
+  assert.deepEqual(
+    summary.find((item) => item.label === "White-point rescale"),
+    { label: "White-point rescale", value: "On" },
+  );
+  assert.equal(
+    app.commands.getSolveRunEssentialsItems({
+      ...run,
+      config: { ...run.config, gamut_white_rescale: false },
+    }).some((item) => item.label === "White-point rescale"),
+    false,
+  );
+
+  const solverSection = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.find(
+    (section) => section.key === "solver",
+  );
+  const frozen = app.commands.getFrozenSolveRunSnapshot(run);
+  const rows = app.commands.buildReadOnlyRunSectionRows(solverSection, frozen);
+  assert.equal(rows.find((row) => row.label === "White-point Rescale").advanced, false);
+
+  app.commands.esc = (value) => String(value);
+  const html = app.commands.buildReadOnlyRunSettingsHtml(run);
+  assert.match(html, /class="run-settings-sections"/);
+  assert.match(html, /Color Solver · Recipe Search/);
+  const whitePointIndex = html.indexOf("White-point Rescale");
+  const whitePointRowStart = html.lastIndexOf('<div class="run-settings-row', whitePointIndex);
+  assert.ok(whitePointRowStart >= 0);
+  assert.equal(
+    html.slice(whitePointRowStart, whitePointIndex).includes("is-advanced"),
+    false,
+  );
+});
+
+test("settings columns preserve order while balancing subsection flow units", async () => {
+  const { app } = await harness();
+  const items = Array.from({ length: 10 }, (_, index) => ({ index }));
+  const heights = [98, 1, 225, 138, 61, 111, 59, 61, 59, 59];
+
+  const columns = app.commands.partitionSettingsItems(items, heights, 2, 456);
+  assert.deepEqual(
+    columns.map((column) => column.map((item) => item.index)),
+    [[0, 1, 2, 3], [4, 5, 6, 7, 8, 9]],
+  );
+  assert.deepEqual(
+    app.commands.partitionSettingsItems(items, heights, 3, 1000),
+    [items],
+  );
+});
+
 test("chroma controls round-trip raw multipliers without quantization", async () => {
   const { app } = await harness();
   for (let quarterSteps = -12; quarterSteps <= 12; quarterSteps += 1) {

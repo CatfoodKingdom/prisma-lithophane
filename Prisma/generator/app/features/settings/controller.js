@@ -303,7 +303,6 @@ export function installFeaturesSettingsController(app) {
     // Printer summary removed — info is in the left rail printer card
 
     app.commands.renderPresetBar();
-    app.commands.updateSettingsSummaries();
     app.commands.updateBorderVisibility();
     app.commands.updateDerivedParams();
     app.commands.updateAccordionSummaries();
@@ -328,7 +327,6 @@ export function installFeaturesSettingsController(app) {
       if (input.id === "cfgChromaWeight") {
         input.addEventListener("input", () => {
           app.commands.applyChromaWeightSliderInput(input.value);
-          app.commands.updateSettingsSummaries();
           app.commands.checkPresetModified();
         });
       }
@@ -340,7 +338,6 @@ export function installFeaturesSettingsController(app) {
         app.commands.updateStage4DetailFields();
         app.commands.readConfigFromUI();
         app.commands.updateBorderVisibility();
-        app.commands.updateSettingsSummaries();
         app.commands.updateDerivedParams();
         app.commands.updateAccordionSummaries();
         app.commands.checkPresetModified();
@@ -431,40 +428,6 @@ export function installFeaturesSettingsController(app) {
     });
   }
 
-  function setSettingsSummary(id, title, body) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (!body) {
-      el.innerHTML = "";
-      el.classList.add("is-hidden");
-      return;
-    }
-    el.classList.remove("is-hidden");
-    el.innerHTML = `<strong>${app.commands.esc(title)}:</strong> ${app.commands.esc(body)}`;
-  }
-
-  function updateSettingsSummaries() {
-    if (app.commands.normalizeLuminanceMode(app.commands.getSolveModeControlValue()) === "luminance_detail") {
-      app.commands.setSettingsSummary("capSummary", "", "");
-    } else {
-      const capMode = app.state.settings.config.cap_mode || "appearance_bounded_smooth";
-      if (capMode === "appearance_bounded_smooth") {
-        app.commands.setSettingsSummary(
-          "capSummary",
-          "Detail Aware",
-          `Keeps the boundary cap structural, preserves appearance against the active model, and places the remaining tonal relief in detail where it stays within ${(app.state.settings.config.boundary_cap_de_budget ?? 0.004).toFixed(3)} dE.`
-        );
-      } else {
-        app.commands.setSettingsSummary(
-          "capSummary",
-          "Smooth",
-          `Smooths the viewing-side cap-height map with a ${app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel).toFixed(2)} mm radius, prioritizing a continuous white cap surface.`
-        );
-      }
-    }
-
-  }
-
   function readPrinterConfig() {
     // Printer config is now loaded from the server via loadPrinters().
     app.state.session.printerConfig.ams_slots = app.state.session.printerConfig.ams_units * app.state.session.printerConfig.slots_per_unit;
@@ -499,8 +462,6 @@ export function installFeaturesSettingsController(app) {
     updateCapModeFields,
     updateBoundaryMutationFields,
     updateStage4DetailFields,
-    setSettingsSummary,
-    updateSettingsSummaries,
     readPrinterConfig,
     _currentSettingsSnapshot,
   });}

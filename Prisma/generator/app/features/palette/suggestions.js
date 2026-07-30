@@ -77,7 +77,6 @@ function applyPaletteSuggestModeToSettings(mode) {
     app.commands.updateStage4DetailFields();
     app.commands.readConfigFromUI();
     app.commands.renderSettingsTab({ preservePendingUi: true });
-    app.commands.updateSettingsSummaries();
     app.commands.updateDerivedParams();
     app.commands.updateAccordionSummaries();
     app.commands.checkPresetModified();
@@ -461,7 +460,6 @@ async function handleSuggestBaseShadingLimit() {
           ?? 0.75,
       );
       app.commands.syncBaseShadingLimitControls(app.commands.formatLuminanceBaseShadingLimitPercent(value));
-      app.commands.updateSettingsSummaries();
       app.commands.checkPresetModified();
       await app.commands.syncConfigToServer();
       app.commands.showToast(`Shading balance set to ${app.commands.formatLuminanceBaseShadingLimitPercent(value)}%`, "success");

@@ -76,13 +76,13 @@ class PreprocessingModule(ABC):
     inserts conversions from `preprocessing/color_convert.py` between
     adjacent operators when their declared domains differ (R2-E).
 
-    `order` controls position within the chain (R2-C). Conventional bands:
-    Wing A 100-199, Wing B 200-299, Wing C 300-399, Wing D 400-499. Ties
-    on `order` resolve by lex import path (R3-C).
+    `order` controls position within the chain (R2-C). Active operators use
+    the 100-199, 200-299, and 300-399 ranges. Ties on `order` resolve by lex
+    import path (R3-C).
 
-    `required_context` lists optional shared services (F2/F3) the runner
-    must resolve before calling `apply()`. Operators that need none leave
-    this empty.
+    `required_context` lists optional shared services, currently F2 palette
+    metadata, that the runner must resolve before calling `apply()`. Operators
+    that need none leave this empty.
     """
     name: str = ""
     description: str = ""

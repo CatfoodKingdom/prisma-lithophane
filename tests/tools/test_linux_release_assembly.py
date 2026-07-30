@@ -24,7 +24,7 @@ def _sources(tmp_path: Path, *, product: release.Product) -> tuple[Path, Path]:
     (generator_app / "index.html").write_text("Generator")
     (app / "_internal" / "runtime.so").write_bytes(b"runtime")
     executable_names = (
-        (release.GENERATOR_ONLY_EXE,)
+        (release.GENERATOR_EXE,)
         if product == "generator"
         else (release.GENERATOR_EXE, release.CALIBRATION_EXE)
     )
@@ -79,12 +79,18 @@ def test_assembly_stages_validates_and_archives_release(
     for relative in release._visible_directories(product):
         assert destination.joinpath(*relative.split("/")).is_dir()
     assert release.validate_linux_release(destination)["ok"] is True
+    readme = (destination / release.README_NAME).read_text(encoding="utf-8")
+    assert 'Run ./"Prisma Generator"' in readme
+    expected_title = "Prisma Generator" if product == "generator" else "Prisma Suite"
+    assert readme.startswith(f"{expected_title} 0.1.0-test1 for Linux x86_64")
 
     with tarfile.open(tar_path, "r:gz") as archive:
         members = archive.getmembers()
     assert members
     assert all((member.uid, member.gid, member.uname, member.gname) == (0, 0, "root", "root") for member in members)
-    assert f"{target_name}/{release.RELEASE_MANIFEST}" in {member.name for member in members}
+    member_names = {member.name for member in members}
+    assert f"{target_name}/{release.RELEASE_MANIFEST}" in member_names
+    assert f"{target_name}/{release.GENERATOR_EXE}" in member_names
 
 
 def test_safe_pyinstaller_symlink_is_preserved_and_manifested(
@@ -158,6 +164,26 @@ def test_private_runtime_data_is_rejected_before_promotion(
         )
 
 
+def test_legacy_generator_executable_is_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app, library = _sources(tmp_path, product="generator")
+    (app / release.GENERATOR_EXE).rename(app / release.LEGACY_GENERATOR_EXE)
+    monkeypatch.setattr(release, "validate_standard_model_library", _library_report)
+
+    with pytest.raises(release.LinuxReleaseError, match="legacy Generator executable"):
+        release.assemble_linux_release(
+            product="generator",
+            pyinstaller_root=app,
+            model_library_root=library,
+            third_party_licenses_root=make_license_bundle(tmp_path / "licenses"),
+            destination=tmp_path / "release",
+            release_version="test",
+            app_version="0.1.0",
+        )
+
+
 def test_obsolete_bundled_printer_profile_aborts_assembly(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -200,7 +226,7 @@ def test_validator_detects_changed_executable_mode(
         release_version="test",
         app_version="0.1.0",
     )
-    (destination / release.GENERATOR_ONLY_EXE).chmod(0o644)
+    (destination / release.GENERATOR_EXE).chmod(0o644)
 
     with pytest.raises(release.LinuxReleaseError, match="not executable"):
         release.validate_linux_release(destination)

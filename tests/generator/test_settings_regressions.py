@@ -25,6 +25,11 @@ def test_reviewed_solve_quality_defaults_are_consistent():
     for config in configs:
         assert config["d_wc_min"] == 0.16
         assert config["smooth_kernel"] == 5.0
+        if config.get("solver_fine_pitch_mm") is not None:
+            assert (
+                config["smooth_kernel"] * config["solver_fine_pitch_mm"]
+                == 1.0
+            )
         assert config["boundary_cap_de_budget"] == 0.004
         assert config["gamut_white_rescale"] is False
         assert config["stage2_boundary_mutation_enabled"] is True
@@ -39,10 +44,43 @@ def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
 
     assert "d_wc_min: 0.16," in application_context
     assert "smooth_kernel: 5.0," in application_context
+    assert "solver_fine_pitch_mm: 0.20," in application_context
     assert "boundary_cap_de_budget: 0.004," in application_context
     assert 'id="cfgDWcMin" class="unit-input" value="2"' in index_html
     assert 'id="cfgSmoothKernel" class="unit-input" value="1"' in index_html
     assert 'id="cfgBoundaryCapDeBudget" class="unit-input" value="0.004"' in index_html
+
+
+def test_basic_white_point_and_subsection_flow_contracts_are_present():
+    app_root = (
+        Path(__file__).resolve().parents[2]
+        / "Prisma"
+        / "generator"
+        / "app"
+    )
+    index_html = (app_root / "index.html").read_text(encoding="utf-8")
+    layout_source = (
+        app_root / "features" / "settings" / "layout.js"
+    ).read_text(encoding="utf-8")
+    layout_css = (
+        app_root / "styles" / "printers-and-modules.css"
+    ).read_text(encoding="utf-8")
+
+    white_point_row = re.search(
+        r"<tr(?P<attrs>[^>]*)><td[^>]*>White-point rescale</td>",
+        index_html,
+    )
+    assert white_point_row is not None
+    assert "advanced-setting" not in white_point_row.group("attrs")
+    assert "extractSettingsSubsectionFlowUnits" in layout_source
+    assert 'settingsFlowWrapper = "true"' in layout_source
+    assert "wrapper.appendChild(group)" in layout_source
+    assert layout_source.index("insertionPoint.after(wrapper)") < layout_source.index(
+        "wrapper.appendChild(group)"
+    )
+    assert "if (parentGroup) unit.before(parentGroup)" in layout_source
+    assert ".settings-subsection-flow-unit" in layout_css
+    assert 'content: attr(data-settings-parent-title) " · "' in layout_css
 
 
 def test_missing_product_min_cap_defaults_to_two_layers_but_one_remains_allowed():
@@ -106,7 +144,7 @@ def test_bundled_named_profiles_are_only_the_reviewed_refinement_recipes():
         assert settings["d_wc_min"] == 0.16
         assert settings["image_sample_pitch_mm"] == 0.4
         assert settings["solver_fine_pitch_mm"] == 0.4
-        assert settings["smooth_kernel"] * settings["solver_fine_pitch_mm"] == 2.0
+        assert settings["smooth_kernel"] * settings["solver_fine_pitch_mm"] == 1.0
         assert settings["color_region_target_mm"] == 0.8
         assert settings["cell_mode"] == "felzenszwalb"
         assert settings["gamut_mode"] == "hull"
@@ -127,6 +165,27 @@ def test_default_detail_cap_depth_is_5_layers():
     assert server.ConfigPayload().detail_cap_max_layers == 5
     assert SolveConfig(palette=[], white_base="bambu-tough-white").detail_cap_max_layers == 5
     assert PipelineConfig(palette=[], white_base="bambu-tough-white").detail_cap_max_layers == 5
+
+
+def test_boundary_cap_mode_uses_standard_setting_help_without_an_inline_callout():
+    app_root = (
+        Path(__file__).resolve().parents[2]
+        / "Prisma"
+        / "generator"
+        / "app"
+    )
+    index_html = (app_root / "index.html").read_text(encoding="utf-8")
+    controller_source = (
+        app_root / "features" / "settings" / "controller.js"
+    ).read_text(encoding="utf-8")
+    settings_css = (app_root / "styles" / "settings.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'id="cfgCapMode"' in index_html
+    assert 'id="capSummary"' not in index_html
+    assert "updateSettingsSummaries" not in controller_source
+    assert ".settings-summary" not in settings_css
 
 
 def test_retired_luminance_tiebreak_has_no_active_configuration_surface():
@@ -894,6 +953,57 @@ def test_settings_profile_store_bootstraps_system_and_reviewed_bundled_profiles(
     assert "refinement-strong" in {
         profile.id for profile in after_user_delete["profiles"]
     }
+
+
+def test_bundled_profile_revision_two_updates_refinement_smoothing_to_1mm(
+    tmp_path, monkeypatch
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir(parents=True)
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    (settings_dir / "state.json").write_text(
+        server.json.dumps(
+            {
+                "schema_version": 1,
+                "user_default_profile_id": server._SYSTEM_SETTINGS_PROFILE_ID,
+                "bundled_profile_revision": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (settings_dir / "refinement-balanced.json").write_text(
+        server.json.dumps(
+            {
+                "id": "refinement-balanced",
+                "kind": "named",
+                "name": "Refinement — Balanced",
+                "settings": {
+                    "solver_fine_pitch_mm": 0.4,
+                    "image_sample_pitch_mm": 0.4,
+                    "smooth_kernel": 5.0,
+                },
+                "modules": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = server._ensure_settings_profile_store()
+    balanced = next(
+        profile
+        for profile in store["profiles"]
+        if profile.id == "refinement-balanced"
+    )
+
+    assert server._BUNDLED_SETTINGS_PROFILE_REVISION == 2
+    assert store["state"]["bundled_profile_revision"] == 2
+    assert (
+        balanced.settings["smooth_kernel"]
+        * balanced.settings["solver_fine_pitch_mm"]
+        == 1.0
+    )
 
 
 def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_overrides(tmp_path, monkeypatch):

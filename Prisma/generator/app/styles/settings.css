@@ -277,18 +277,6 @@
   line-height: 0;
 }
 .settings-derived strong { color: var(--ink); }
-.settings-summary {
-  margin-top: 7px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface-raised);
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--muted);
-}
-.settings-summary strong { color: var(--ink); }
-
 .border-sub { padding-left: 20px; }
 .border-sub.is-hidden { display: none; }
 

@@ -41,7 +41,7 @@ LEGAL_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md", "ASSET_LICENSES.md")
 THIRD_PARTY_LICENSES_DIR = "THIRD_PARTY_LICENSES"
 GENERATOR_EXE = "Prisma Generator"
 CALIBRATION_EXE = "Prisma Calibration"
-GENERATOR_ONLY_EXE = "Prisma"
+LEGACY_GENERATOR_EXE = "Prisma"
 
 GENERATOR_DIRECTORIES = (
     "Generator",
@@ -205,18 +205,18 @@ def _visible_directories(product: Product) -> tuple[str, ...]:
 
 def _release_readme(*, product: Product, release_version: str, library_version: str) -> str:
     if product == "suite":
-        launch = """2. Run ./Prisma\\ Generator to make lithophanes.
-3. Run ./Prisma\\ Calibration to capture calibration data, fit models, and
+        launch = """2. Run ./"Prisma Generator" to make lithophanes.
+3. Run ./"Prisma Calibration" to capture calibration data, fit models, and
    publish model libraries.
 4. Keep an app's terminal open while using its browser interface. Closing it
    stops only that app. Both apps may run at the same time."""
         title = "Prisma Suite"
         ownership = "Generator files live under Generator. Calibration files live under Calibration."
     else:
-        launch = """2. Run ./Prisma to make lithophanes.
+        launch = """2. Run ./"Prisma Generator" to make lithophanes.
 3. Keep its terminal open while using the browser interface. Closing it stops
    the local server."""
-        title = "Prisma"
+        title = "Prisma Generator"
         ownership = "Images, exports, installed model libraries, and workspace files live under Generator."
     return f"""{title} {release_version} for Linux x86_64
 
@@ -277,8 +277,12 @@ def _safe_manifest_path(root: Path, value: str) -> tuple[str, Path]:
 
 
 def _require_shape(root: Path, product: Product) -> None:
-    executables = (GENERATOR_ONLY_EXE,) if product == "generator" else (GENERATOR_EXE, CALIBRATION_EXE)
-    disallowed = (GENERATOR_EXE, CALIBRATION_EXE) if product == "generator" else (GENERATOR_ONLY_EXE,)
+    executables = (GENERATOR_EXE,) if product == "generator" else (GENERATOR_EXE, CALIBRATION_EXE)
+    disallowed = (
+        (CALIBRATION_EXE, LEGACY_GENERATOR_EXE)
+        if product == "generator"
+        else (LEGACY_GENERATOR_EXE,)
+    )
     for name in executables:
         path = root / name
         if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):
@@ -478,7 +482,17 @@ def assemble_linux_release(
         raise LinuxReleaseError("PyInstaller source must not already contain a seed model library")
     if (source_app / "Generator").exists() or (source_app / "Calibration").exists():
         raise LinuxReleaseError("PyInstaller source must not contain live user-data directories")
-    expected_executables = (GENERATOR_ONLY_EXE,) if product == "generator" else (GENERATOR_EXE, CALIBRATION_EXE)
+    if (source_app / LEGACY_GENERATOR_EXE).exists() or (
+        source_app / LEGACY_GENERATOR_EXE
+    ).is_symlink():
+        raise LinuxReleaseError(
+            f"PyInstaller source contains the legacy Generator executable: {LEGACY_GENERATOR_EXE}"
+        )
+    expected_executables = (
+        (GENERATOR_EXE,)
+        if product == "generator"
+        else (GENERATOR_EXE, CALIBRATION_EXE)
+    )
     for name in expected_executables:
         path = source_app / name
         if not path.is_file() or path.is_symlink() or not os.access(path, os.X_OK):

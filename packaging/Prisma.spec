@@ -90,7 +90,7 @@ executable = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="Prisma",
+    name="Prisma Generator",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
