@@ -450,7 +450,7 @@ export function installFeaturesSolveController(app) {
     app.state.solve.savedRunsModalMode = mode === "settings" ? "settings" : "run";
     const title = app.state.ui.$("#savedRunsModalTitle");
     if (title) title.textContent = app.state.solve.savedRunsModalMode === "settings"
-      ? "Load Settings from Saved Run"
+      ? "Use Settings from Saved Run"
       : "Saved Runs";
     const uploadLabel = app.state.ui.$("#savedRunUploadLabel");
     if (uploadLabel) {
@@ -1024,6 +1024,9 @@ export function installFeaturesSolveController(app) {
     });
     if (preprocessing.length) {
       items.push({ label: "Pre-processing", value: preprocessing.join(", ") });
+    }
+    if (settings.gamut_white_rescale === true) {
+      items.push({ label: "White-point rescale", value: "On" });
     }
     const swapGrouping = run?.results?.staged_metrics?.swap_grouping;
     const swapGroups = Array.isArray(swapGrouping?.groups) ? swapGrouping.groups : [];

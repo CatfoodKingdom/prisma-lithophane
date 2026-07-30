@@ -35,6 +35,8 @@ RELEASE_MANIFEST = "prisma-release.json"
 README_NAME = "README.txt"
 LEGAL_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md", "ASSET_LICENSES.md")
 THIRD_PARTY_LICENSES_DIR = "THIRD_PARTY_LICENSES"
+GENERATOR_EXE = "Prisma Generator.exe"
+LEGACY_GENERATOR_EXE = "Prisma.exe"
 
 FORBIDDEN_SUFFIXES = {
     ".cr2",
@@ -151,13 +153,13 @@ def _copy_legal_files(destination: Path) -> None:
 
 
 def _release_readme(*, release_version: str, library_version: str) -> str:
-    return f"""Prisma {release_version} for Windows
+    return f"""Prisma Generator {release_version} for Windows
 
 Standard Model Library: {library_version}
 
 1. Extract the entire Prisma folder from the ZIP. Do not run Prisma from
    inside the ZIP preview.
-2. Double-click Prisma.exe.
+2. Double-click Prisma Generator.exe.
 3. Keep the Prisma window open while using the browser interface. Closing the
    window stops the local server.
 
@@ -192,8 +194,12 @@ def _file_records(root: Path) -> list[dict[str, Any]]:
 
 def validate_windows_release(release_root: str | Path) -> dict[str, Any]:
     root = Path(release_root).expanduser().resolve()
-    if not (root / "Prisma.exe").is_file():
-        raise WindowsReleaseError(f"Prisma.exe is missing from release root: {root}")
+    if (root / LEGACY_GENERATOR_EXE).exists() or _is_link(root / LEGACY_GENERATOR_EXE):
+        raise WindowsReleaseError(
+            f"legacy Generator executable may not appear in a release: {LEGACY_GENERATOR_EXE}"
+        )
+    if not (root / GENERATOR_EXE).is_file():
+        raise WindowsReleaseError(f"{GENERATOR_EXE} is missing from release root: {root}")
     if not (root / "_internal").is_dir():
         raise WindowsReleaseError(f"PyInstaller _internal directory is missing: {root}")
     for name in LEGAL_FILES:
@@ -304,7 +310,13 @@ def assemble_windows_release(
         raise WindowsReleaseError(f"ZIP destination already exists: {target_zip}")
     if not str(release_version or "").strip() or not str(app_version or "").strip():
         raise WindowsReleaseError("release_version and app_version are required")
-    if not (source_app / "Prisma.exe").is_file() or not (source_app / "_internal").is_dir():
+    if (source_app / LEGACY_GENERATOR_EXE).exists() or _is_link(
+        source_app / LEGACY_GENERATOR_EXE
+    ):
+        raise WindowsReleaseError(
+            f"PyInstaller source contains the legacy Generator executable: {LEGACY_GENERATOR_EXE}"
+        )
+    if not (source_app / GENERATOR_EXE).is_file() or not (source_app / "_internal").is_dir():
         raise WindowsReleaseError(f"PyInstaller one-folder source is incomplete: {source_app}")
     if (source_app / "_internal" / "seed-model-library").exists():
         raise WindowsReleaseError("PyInstaller source must not already contain a seed model library")

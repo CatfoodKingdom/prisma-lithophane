@@ -334,6 +334,110 @@ def test_export_builds_complete_database_free_library(tmp_path: Path, monkeypatc
     assert source.is_dir()
 
 
+def test_export_omits_excluded_filaments_without_changing_calibration_data(
+    tmp_path: Path,
+) -> None:
+    source, database = _build_source(tmp_path)
+    excluded_profile = source / "filaments" / "profiles" / "excluded-black.json"
+    _write_json(
+        excluded_profile,
+        {"filament_id": "excluded-black", "model": "spline", "schema_version": 1},
+    )
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            """
+            INSERT INTO filaments VALUES (
+              'excluded-black', 'Maker Opaque Black', 'Maker', 'PLA',
+              '#050505', 0, 1, 'retain this calibration record'
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO filament_special_roles VALUES ('excluded-black', 'black')"
+        )
+        conn.execute(
+            "INSERT INTO model_artifacts VALUES (?, ?, ?, ?)",
+            (
+                "fit-spline",
+                "spline_profile:excluded-black",
+                "filaments/profiles/excluded-black.json",
+                _sha256(excluded_profile),
+            ),
+        )
+    database_before = database.read_bytes()
+    destination = tmp_path / "filtered-library"
+
+    readiness = standard_model_library_readiness(data_root=source, sqlite_path=database)
+    report = export_standard_model_library(
+        data_root=source,
+        sqlite_path=database,
+        destination=destination,
+        library_name="Filtered Test Library",
+        library_version="1.0",
+        publisher="Test Publisher",
+        minimum_prisma_version="0.1.0",
+    )
+
+    registry = json.loads(
+        (destination / "filaments" / "registry.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((destination / MANIFEST_NAME).read_text(encoding="utf-8"))
+    assert readiness["components"]["filament_catalog"]["filament_count"] == 1
+    assert report["filament_count"] == 1
+    assert manifest["filament_count"] == 1
+    assert set(registry) == {"maker-red"}
+    assert not (destination / "filaments" / "profiles" / "excluded-black.json").exists()
+
+    # Publication filters only its derived output. The Calibration source row,
+    # notes, profile, and database bytes remain exactly as they were.
+    assert database.read_bytes() == database_before
+    assert excluded_profile.is_file()
+    with sqlite3.connect(database) as conn:
+        assert conn.execute(
+            "SELECT exclude_from_model, notes FROM filaments WHERE filament_id = ?",
+            ("excluded-black",),
+        ).fetchone() == (1, "retain this calibration record")
+
+
+def test_older_schema_two_library_reports_only_generation_available_count(
+    tmp_path: Path,
+) -> None:
+    _source, destination, _report = _export(tmp_path)
+    registry_path = destination / "filaments" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["excluded-black"] = {
+        **registry["maker-red"],
+        "display_name": "Excluded Black",
+        "color_name": "Excluded Black",
+        "exclude_from_model": True,
+        "generation_available": False,
+    }
+    _write_json(registry_path, registry)
+
+    manifest_path = destination / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["filament_count"] = 2
+    registry_record = next(
+        item for item in manifest["files"]
+        if item["path"] == "filaments/registry.json"
+    )
+    registry_record["byte_size"] = registry_path.stat().st_size
+    registry_record["sha256"] = _sha256(registry_path)
+    _write_json(manifest_path, manifest)
+
+    validation = validate_standard_model_library(destination)
+    store = ModelLibraryStore(
+        tmp_path / "installed" / "Model Libraries",
+        tmp_path / "installed" / "Workspace",
+    )
+    installed = store.install(destination)
+    listed = store.list()["libraries"]
+
+    assert validation["filament_count"] == 1
+    assert installed["filament_count"] == 1
+    assert listed[0]["filament_count"] == 1
+
+
 def test_export_ignores_every_unregistered_source_file(tmp_path: Path) -> None:
     source, database = _build_source(tmp_path)
     (source / "images").mkdir()

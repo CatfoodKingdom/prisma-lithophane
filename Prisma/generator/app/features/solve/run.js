@@ -386,6 +386,7 @@ function buildReadOnlyRunSectionRows(section, frozen) {
         label: row.label,
         value: app.commands.formatReadOnlyRunSetting(row, value, frozen.settings),
         advanced: !!row.advanced,
+        group: row.group || "",
       };
     });
 
@@ -397,6 +398,7 @@ function buildReadOnlyRunSectionRows(section, frozen) {
         label: app.commands.moduleDisplayName(mod),
         value: frozen.preprocessingStateKnown ? (enabled ? "On" : "Off") : "Not recorded",
         advanced: false,
+        group: "",
       });
       if (!frozen.preprocessingStateKnown || !enabled) continue;
       const projected = app.commands.projectModuleConfigValues(mod.name, mod, frozen.settings);
@@ -406,6 +408,7 @@ function buildReadOnlyRunSectionRows(section, frozen) {
           label: `${app.commands.moduleDisplayName(mod)} · ${param.label || app.commands.humanizeModuleName(param.name)}`,
           value: String(app.commands.formatSolveSummaryValue(param, projected[param.name] ?? param.default)),
           advanced: true,
+          group: app.commands.moduleDisplayName(mod),
         });
       }
     }
@@ -413,7 +416,7 @@ function buildReadOnlyRunSectionRows(section, frozen) {
     for (const moduleId of frozen.activePreprocessing) {
       if (knownModuleIds.has(moduleId)) continue;
       const label = app.commands.humanizeModuleName(moduleId).replace(/\b\w/g, (letter) => letter.toUpperCase());
-      rows.push({ label, value: "On", advanced: false });
+      rows.push({ label, value: "On", advanced: false, group: "" });
       const values = frozen.settings.preprocessing_params?.[moduleId];
       if (!values || typeof values !== "object") continue;
       for (const [key, value] of Object.entries(values)) {
@@ -421,6 +424,7 @@ function buildReadOnlyRunSectionRows(section, frozen) {
           label: `${label} · ${app.commands.getSolveSettingLabel(key)}`,
           value: app.commands.formatSolveSettingValue(key, value),
           advanced: true,
+          group: label,
         });
       }
     }
@@ -429,22 +433,35 @@ function buildReadOnlyRunSectionRows(section, frozen) {
 
 function buildReadOnlyRunSettingsHtml(run) {
     const frozen = app.commands.getFrozenSolveRunSnapshot(run);
-    const sections = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.map((section) => {
-      const rows = app.commands.buildReadOnlyRunSectionRows(section, frozen)
-        .map((row) => `<div class="run-settings-row${row.advanced ? " is-advanced" : ""}">
-          <span class="run-settings-label">${app.commands.esc(row.label)}</span>
-          <span class="run-settings-value">${app.commands.esc(row.value)}</span>
-        </div>`)
-        .join("");
-      return `<section class="run-settings-section" data-run-settings-section="${app.commands.esc(section.key)}">
-        <h4 class="settings-group-cap run-settings-section-cap">${app.commands.esc(section.title)}</h4>
-        <div class="run-settings-rows">${rows}</div>
-      </section>`;
+    const sections = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.flatMap((section) => {
+      const groupedRows = [];
+      for (const row of app.commands.buildReadOnlyRunSectionRows(section, frozen)) {
+        const group = row.group || "";
+        let block = groupedRows[groupedRows.length - 1];
+        if (!block || block.group !== group) {
+          block = { group, rows: [] };
+          groupedRows.push(block);
+        }
+        block.rows.push(row);
+      }
+      return groupedRows.map((block) => {
+        const rows = block.rows
+          .map((row) => `<div class="run-settings-row${row.advanced ? " is-advanced" : ""}">
+            <span class="run-settings-label">${app.commands.esc(row.label)}</span>
+            <span class="run-settings-value">${app.commands.esc(row.value)}</span>
+          </div>`)
+          .join("");
+        const title = block.group ? `${section.title} · ${block.group}` : section.title;
+        return `<section class="run-settings-section" data-run-settings-section="${app.commands.esc(section.key)}">
+          <h4 class="settings-group-cap run-settings-section-cap">${app.commands.esc(title)}</h4>
+          <div class="run-settings-rows">${rows}</div>
+        </section>`;
+      });
     }).join("");
     const archiveNote = frozen.hasDiagnostics
       ? "Values captured when this solve started."
       : "Older saved run: unavailable values are marked as not recorded.";
-    return `<div class="run-settings-note">${app.commands.esc(archiveNote)}</div>${sections}`;
+    return `<div class="run-settings-note">${app.commands.esc(archiveNote)}</div><div class="run-settings-sections">${sections}</div>`;
   }
 
 function clearSolveRunHoverTimer() {
@@ -578,7 +595,7 @@ function showSolveRunSettingsPanel(runId, context, anchorEl) {
           <span class="run-settings-run-label">${app.commands.esc(run.label)}</span>
         </div>
         <div class="window-header__actions surface-header-actions">
-          <button class="ghost-button xxs run-settings-load-btn" type="button" title="Apply these captured settings as a temporary Settings Profile">Load Settings</button>
+          <button class="ghost-button window-header__button surface-header-button run-settings-load-btn" type="button" title="Use these captured settings as a temporary Settings Profile">Use These Settings</button>
           <button class="view-option-toggle run-settings-advanced-toggle" type="button" aria-pressed="false">Advanced: Off</button>
           <div class="surface-window-controls">
             <button class="close-button window-header__button surface-header-button surface-close run-settings-close" type="button" aria-label="Close run settings" title="Close run settings">${app.commands.xIconSvg()}</button>

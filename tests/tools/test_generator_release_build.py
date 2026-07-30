@@ -54,3 +54,10 @@ def test_generator_frontend_has_no_obsolete_bundled_printer_profile() -> None:
 
 def test_generator_spec_bundles_reviewed_settings_profiles() -> None:
     assert '"Prisma/data/generator/settings_profiles"' in SPEC
+
+
+def test_generator_executable_uses_application_name_without_renaming_distribution_folder() -> None:
+    executable = SPEC.split("executable = EXE(", 1)[1].split(")\n\ndistribution", 1)[0]
+    distribution = SPEC.split("distribution = COLLECT(", 1)[1]
+    assert 'name="Prisma Generator"' in executable
+    assert 'name="Prisma"' in distribution

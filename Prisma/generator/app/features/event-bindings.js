@@ -159,7 +159,6 @@ function bindEvents() {
         app.commands.updateStage4DetailFields();
         app.commands.readConfigFromUI();
         app.commands.renderSettingsTab({ preservePendingUi: true });
-        app.commands.updateSettingsSummaries();
         app.commands.updateDerivedParams();
         app.commands.updateAccordionSummaries();
         app.commands.checkPresetModified();

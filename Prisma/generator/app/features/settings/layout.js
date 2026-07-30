@@ -15,10 +15,66 @@ function restoreSettingsFlowUnits(grid = document.querySelector(".settings-grid"
       const ownerId = unit.dataset.settingsFlowOwner;
       const owner = ownerId ? document.getElementById(ownerId) : null;
       if (!owner) return;
+      if (unit.dataset.settingsFlowWrapper === "true") {
+        const parentGroup = Array.from(unit.children)
+          .find((child) => child.classList.contains("settings-group"));
+        if (parentGroup) unit.before(parentGroup);
+        while (unit.firstChild) {
+          const child = unit.firstChild;
+          child.removeAttribute?.("data-settings-parent-title");
+          owner.appendChild(child);
+        }
+        unit.remove();
+        return;
+      }
       owner.appendChild(unit);
       unit.classList.remove("preprocessing-flow-unit");
       unit.removeAttribute("data-settings-flow-owner");
+      unit.removeAttribute("data-settings-flow-order");
       unit.removeAttribute("data-bucket");
+    });
+  }
+
+function extractSettingsSubsectionFlowUnits(grid) {
+    const groups = Array.from(grid?.querySelectorAll(".settings-group.is-expanded") || []);
+    groups.forEach((group) => {
+      const body = Array.from(group.children).find((child) => child.classList.contains("section-collapse-body"));
+      if (!body) return;
+      if (!body.id) {
+        const key = group.dataset.settingsGroup || group.dataset.bucket || "section";
+        body.id = `settingsFlowOwner-${key}`;
+      }
+
+      const parentTitle = group.querySelector(".section-collapse-title")?.textContent?.trim()
+        || group.dataset.settingsGroup
+        || "Settings";
+      const heads = Array.from(body.children).filter((child) => child.classList.contains("settings-subsection-head"));
+      let insertionPoint = group;
+
+      heads.forEach((head, order) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "settings-subsection-flow-unit";
+        wrapper.dataset.settingsFlowOwner = body.id;
+        wrapper.dataset.settingsFlowOrder = String(order);
+        wrapper.dataset.settingsFlowWrapper = "true";
+        wrapper.dataset.bucket = group.dataset.bucket || group.dataset.settingsGroup || "settings";
+        insertionPoint.after(wrapper);
+        if (order === 0) {
+          wrapper.appendChild(group);
+        } else {
+          head.dataset.settingsParentTitle = parentTitle;
+        }
+
+        let node = head;
+        while (node) {
+          const next = node.nextElementSibling;
+          if (node !== head && node.classList.contains("settings-subsection-head")) break;
+          wrapper.appendChild(node);
+          node = next;
+        }
+
+        insertionPoint = wrapper;
+      });
     });
   }
 
@@ -38,6 +94,50 @@ function extractPreprocessingFlowUnits(grid) {
       insertionPoint.after(unit);
       insertionPoint = unit;
       });
+  }
+
+function partitionSettingsItems(items, heights, maxColumns, availableHeight, gap = 8) {
+    const count = items.length;
+    if (!count) return [];
+    const totalHeight = heights.reduce((sum, height) => sum + height, 0)
+      + (gap * Math.max(0, count - 1));
+    const columnCount = Math.max(
+      1,
+      Math.min(maxColumns, count, Math.ceil(totalHeight / Math.max(1, availableHeight))),
+    );
+    if (columnCount === 1) return [items.slice()];
+
+    const prefix = [0];
+    heights.forEach((height) => prefix.push(prefix[prefix.length - 1] + height));
+    const segmentHeight = (start, end) => (
+      (prefix[end] - prefix[start]) + (gap * Math.max(0, end - start - 1))
+    );
+    const best = Array.from({ length: columnCount + 1 }, () => (
+      Array(count + 1).fill(Number.POSITIVE_INFINITY)
+    ));
+    const split = Array.from({ length: columnCount + 1 }, () => Array(count + 1).fill(-1));
+    best[0][0] = 0;
+
+    for (let columns = 1; columns <= columnCount; columns++) {
+      for (let end = columns; end <= count; end++) {
+        for (let start = columns - 1; start < end; start++) {
+          const cost = Math.max(best[columns - 1][start], segmentHeight(start, end));
+          if (cost < best[columns][end]) {
+            best[columns][end] = cost;
+            split[columns][end] = start;
+          }
+        }
+      }
+    }
+
+    const ranges = [];
+    let end = count;
+    for (let columns = columnCount; columns > 0; columns--) {
+      const start = split[columns][end];
+      ranges.push([start, end]);
+      end = start;
+    }
+    return ranges.reverse().map(([start, stop]) => items.slice(start, stop));
   }
 
 function distributeSettingsColumns() {
@@ -79,10 +179,13 @@ function distributeSettingsColumns() {
       col.remove();
     });
 
-    // Enabled preprocessing module cards are independent layout units. Moving
-    // the live nodes lets them flow across columns without splitting a card or
-    // losing input values, event handlers, focus, or slider state.
+    // Enabled preprocessing cards must leave their canonical subsection before
+    // the parent group is wrapped with its first static subsection.
     app.commands.extractPreprocessingFlowUnits(grid);
+    // Static subsections and enabled preprocessing module cards are independent
+    // layout units. Moving the live nodes lets them flow across columns without
+    // splitting a heading from its controls or losing input state and handlers.
+    app.commands.extractSettingsSubsectionFlowUnits(grid);
 
     // All items participate in column distribution — no exceptions
     const items = Array.from(grid.children);
@@ -125,28 +228,17 @@ function distributeSettingsColumns() {
     // Measure each item's height
     const heights = items.map(el => el.getBoundingClientRect().height);
 
-    // Fill each column top-to-bottom before starting the next
-    const columns = [];
-    let colIdx = 0;
-    let colHeight = 0;
+    // Keep the reading order contiguous while choosing the column breaks that
+    // minimize the tallest column. This avoids a mostly empty early column and
+    // a needless scrollbar caused by overflowing everything into the last one.
+    let columns = app.commands.partitionSettingsItems(
+      items,
+      heights,
+      maxCols,
+      availHeight,
+    );
 
-    for (let i = 0; i < items.length; i++) {
-      if (colIdx >= maxCols) colIdx = maxCols - 1; // overflow into last column
-      if (!columns[colIdx]) columns[colIdx] = [];
-
-      // If this column is non-empty and adding this item would overflow, start next column
-      if (columns[colIdx].length > 0 && colHeight + heights[i] > availHeight && colIdx < maxCols - 1) {
-        colIdx++;
-        colHeight = 0;
-        if (!columns[colIdx]) columns[colIdx] = [];
-      }
-
-      columns[colIdx].push(items[i]);
-      colHeight += heights[i] + 8; // 8px gap
-    }
-
-    // Build column divs and move items into them
-    columns.forEach(colItems => {
+    const mountColumns = (columnItems) => columnItems.map((colItems) => {
       const colDiv = document.createElement("div");
       colDiv.className = "settings-column";
       // Attach the destination before moving live controls into it. Reparenting
@@ -155,7 +247,29 @@ function distributeSettingsColumns() {
       // temporarily absent from document queries.
       grid.appendChild(colDiv);
       colItems.forEach(el => colDiv.appendChild(el));
+      return colDiv;
     });
+    let columnElements = mountColumns(columns);
+
+    // Some controls acquire their final wrapped height only after entering a
+    // fixed-width column. Repartition once from those rendered measurements so
+    // the plan cannot retain a stale pre-column height estimate.
+    if (columns.length > 1) {
+      const renderedItems = columnElements.flatMap((column) => Array.from(column.children));
+      const renderedHeights = renderedItems.map((item) => item.getBoundingClientRect().height);
+      const renderedColumns = app.commands.partitionSettingsItems(
+        renderedItems,
+        renderedHeights,
+        columns.length,
+        availHeight,
+      );
+      columnElements.forEach((column) => {
+        while (column.firstChild) grid.appendChild(column.firstChild);
+        column.remove();
+      });
+      columns = renderedColumns;
+      columnElements = mountColumns(columns);
+    }
 
     if (focusedElement && grid.contains(focusedElement)) {
       focusedElement.focus({ preventScroll: true });
@@ -233,7 +347,9 @@ function initCollapsibleSections() {
 
   Object.assign(app.commands, {
     restoreSettingsFlowUnits,
+    extractSettingsSubsectionFlowUnits,
     extractPreprocessingFlowUnits,
+    partitionSettingsItems,
     distributeSettingsColumns,
     initCollapsibleSections,
   });
