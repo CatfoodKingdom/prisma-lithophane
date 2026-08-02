@@ -26,6 +26,7 @@ export function installFeaturesSettingsController(app) {
     // Hide drawer — the settings drawer no longer owns #drawerOverlay (detail drawer does).
     drawer.setAttribute("aria-hidden", "true");
     app.state.settings.settingsDrawerOpen = false;
+    app.events.emit("settings.closed", { source: "settings-drawer" });
   }
 
   function scheduleSettingsDrawerDistribution() {
@@ -272,6 +273,7 @@ export function installFeaturesSettingsController(app) {
     _set("#cfgAppearanceModelProvider", app.state.settings.config.appearance_model_provider || "photo_stack_bundle");
     _set("#cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor ?? 1);
     _set("#cfgColorRegionTarget", app.state.settings.config.color_region_target_mm ?? 0.60);
+    _set("#cfgNeutralFieldProtection", app.state.settings.config.neutral_field_protection_mode || "off");
     _chk("#cfgStage2FineOverride", app.state.settings.config.stage2_fine_override_enabled !== false);
     _chk("#cfgStage2BoundaryMutation", app.state.settings.config.stage2_boundary_mutation_enabled);
     app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationPercentile", app.state.settings.config.stage2_boundary_mutation_current_de_percentile);

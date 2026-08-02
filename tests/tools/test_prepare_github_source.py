@@ -25,6 +25,18 @@ def test_source_allowlist_excludes_generator_runtime_scratch(tmp_path: Path) -> 
         tmp_path,
         "Prisma/data/generator/settings_profiles/refinement/balanced.json",
     )
+    public_tutorial_image = _write(
+        tmp_path,
+        "Prisma/data/generator/tutorial_images/bubba_blanket.jpg",
+    )
+    private_generator_photo = _write(
+        tmp_path,
+        "Prisma/generator/private-development-photo.jpg",
+    )
+    misplaced_data_photo = _write(
+        tmp_path,
+        "Prisma/data/generator/settings_profiles/private-development-photo.jpg",
+    )
     private_data = _write(tmp_path, "Prisma/data/private.json")
     _write(tmp_path, "Prisma/generator/.tmp/cache/run.json")
 
@@ -34,5 +46,8 @@ def test_source_allowlist_excludes_generator_runtime_scratch(tmp_path: Path) -> 
     assert public_test in selected
     assert public_test_harness in selected
     assert public_profile in selected
+    assert public_tutorial_image in selected
+    assert private_generator_photo not in selected
+    assert misplaced_data_photo not in selected
     assert private_data not in selected
     assert not any(".tmp" in path.parts for path in selected)

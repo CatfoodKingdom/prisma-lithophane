@@ -112,12 +112,25 @@ def _reserve_port(host: str, preferred_port: int, *, attempts: int = PORT_SEARCH
     raise LauncherError(f"No available local port was found from {preferred_port} through {last_port}.")
 
 
-def _open_browser_when_ready(url: str, *, timeout_seconds: float = 30.0) -> None:
+def _guided_setup_test_url(url: str, *, force_guided_setup: bool) -> str:
+    if not force_guided_setup:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}force-guided-setup=1"
+
+
+def _open_browser_when_ready(
+    server_url: str,
+    *,
+    browser_url: str | None = None,
+    timeout_seconds: float = 30.0,
+) -> None:
+    destination = browser_url or server_url
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        if _probe_prisma_generator(url):
-            if not webbrowser.open(url):
-                print(f"Prisma is ready. Open this address in your browser: {url}", flush=True)
+        if _probe_prisma_generator(server_url):
+            if not webbrowser.open(destination):
+                print(f"Prisma is ready. Open this address in your browser: {destination}", flush=True)
             return
         time.sleep(0.1)
     print(f"Prisma did not become ready in {timeout_seconds:.0f} seconds. Check this window for errors.", flush=True)
@@ -152,10 +165,22 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="Start Prisma without opening the browser.")
+    parser.add_argument(
+        "--force-guided-setup",
+        action="store_true",
+        help="Developer option: show Guided Setup without changing saved first-launch state.",
+    )
     return parser
 
 
-def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browser: bool) -> int:
+def run_generator(
+    *,
+    app_root: Path,
+    host: str,
+    preferred_port: int,
+    open_browser: bool,
+    force_guided_setup: bool = False,
+) -> int:
     if host not in {"127.0.0.1", "localhost"}:
         raise LauncherError("The desktop launcher only permits the local host (127.0.0.1).")
     if not 1 <= preferred_port <= 65535:
@@ -164,8 +189,14 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
     preferred_url = _server_url(host, preferred_port)
     if _probe_prisma_generator(preferred_url):
         print(f"Prisma is already running at {preferred_url}", flush=True)
+        browser_url = _guided_setup_test_url(
+            preferred_url,
+            force_guided_setup=force_guided_setup,
+        )
         if open_browser:
-            webbrowser.open(preferred_url)
+            webbrowser.open(browser_url)
+        elif force_guided_setup:
+            print(f"Guided Setup test address: {browser_url}", flush=True)
         return 0
 
     try:
@@ -184,8 +215,14 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
         except WorkspaceLockError as exc:
             if exc.owner_url and _probe_prisma_generator(exc.owner_url):
                 print(f"Prisma is already running at {exc.owner_url}", flush=True)
+                browser_url = _guided_setup_test_url(
+                    exc.owner_url,
+                    force_guided_setup=force_guided_setup,
+                )
                 if open_browser:
-                    webbrowser.open(exc.owner_url)
+                    webbrowser.open(browser_url)
+                elif force_guided_setup:
+                    print(f"Guided Setup test address: {browser_url}", flush=True)
                 return 0
             raise LauncherError(str(exc)) from exc
 
@@ -240,6 +277,10 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
 
         port, listener = _reserve_port(host, preferred_port)
         url = _server_url(host, port)
+        browser_url = _guided_setup_test_url(
+            url,
+            force_guided_setup=force_guided_setup,
+        )
         workspace_lock.update_metadata(url=url)
         try:
             generator_server = _load_generator_server()
@@ -254,6 +295,8 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
             if not report.get("model_library_available"):
                 print(f"Library Recovery Mode: {report.get('model_library_error')}", flush=True)
             print(f"Address: {url}", flush=True)
+            if force_guided_setup:
+                print(f"Guided Setup test address: {browser_url}", flush=True)
             print(f"Images: {layout.generator_images_root}", flush=True)
             print(f"Exports: {layout.generator_exports_root}", flush=True)
             print("Keep this window open while using Prisma. Press Ctrl+C or close it to stop.", flush=True)
@@ -264,6 +307,7 @@ def run_generator(*, app_root: Path, host: str, preferred_port: int, open_browse
                 threading.Thread(
                     target=_open_browser_when_ready,
                     args=(url,),
+                    kwargs={"browser_url": browser_url},
                     name="prisma-browser-opener",
                     daemon=True,
                 ).start()
@@ -304,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             host=str(args.host),
             preferred_port=int(args.port),
             open_browser=not args.no_browser,
+            force_guided_setup=bool(args.force_guided_setup),
         )
         if result == RESTART_EXIT_CODE:
             _spawn_restarted_process()

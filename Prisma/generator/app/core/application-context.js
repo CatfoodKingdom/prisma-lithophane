@@ -1,5 +1,6 @@
 import { createLifecycle } from "./lifecycle.js";
 import { createDomRegistry } from "./dom.js";
+import { createEventBus } from "./events.js";
 import { createPersistence } from "./persistence.js";
 import { createStore } from "./store.js";
 
@@ -9,11 +10,12 @@ import { createStore } from "./store.js";
  */
 export function createApplicationContext({ api, data, services, root = document, storage = localStorage }) {
   const store = createStore({
-    session: {}, image: {}, palette: {}, settings: {}, solve: {}, export: {}, ui: {},
+    session: {}, image: {}, palette: {}, settings: {}, solve: {}, export: {}, guides: {}, ui: {},
   });
   return {
     api, data, services, commands: {},
     dom: createDomRegistry(root),
+    events: createEventBus(),
     lifecycle: createLifecycle(),
     persistence: createPersistence(storage),
     store,
@@ -26,6 +28,21 @@ export function initializeApplicationState(app) {
   app.state.ui.currentTab = "image";
   app.state.ui.themePreference = "system";
   app.state.ui.themeResolved = "light";
+  app.state.guides.runtimeState = "idle";
+  app.state.guides.onboardingState = {
+    schema_version: 2,
+    revision: 0,
+    welcome_status: "not_offered",
+  };
+  app.state.guides.onboardingPersistenceAvailable = false;
+  app.state.guides.forceGuidedSetup = false;
+  app.state.guides.currentGuide = null;
+  app.state.guides.currentStep = null;
+  app.state.guides.completedStepIds = new Set();
+  app.state.guides.reviewingCompletedStep = false;
+  app.state.guides.runtimeContext = null;
+  app.state.guides.presentationSnapshot = null;
+  app.state.guides.dockIndex = null;
   app.state.settings.settingsDrawerOpen = false;
   app.state.settings.SETTINGS_ADVANCED_VISIBLE_STORAGE_KEY = "prisma_settings_advanced_visible";
   app.state.settings.COLOR_CAP_MODE_STORAGE_KEY = "prisma_color_cap_mode";
@@ -325,6 +342,7 @@ export function initializeApplicationState(app) {
   enforce_printability: true,
   color_region_target_from_printability: true,
   color_region_target_width_multiplier: 2.0,
+  neutral_field_protection_mode: "off",
   stage2_fine_override_enabled: true,
   stage2_final_printability_gate_fine_override: true,
   stage2_printability_gate_fine_override: true,
@@ -433,6 +451,7 @@ export function initializeApplicationState(app) {
   "color_region_target_mm",
   "cell_mode",
   "stage1_coarsening_factor",
+  "neutral_field_protection_mode",
   "stage2_fine_override_enabled",
   "stage2_boundary_mutation_enabled",
   "stage2_boundary_mutation_min_gain",
@@ -471,6 +490,7 @@ export function initializeApplicationState(app) {
   luminance_mode: "Luminance Mode",
   cell_mode: "Region Method",
   stage1_coarsening_factor: "Region Planning Scale",
+  neutral_field_protection_mode: "Neutral-field Protection",
   color_region_target_mm: "Color Region Target",
   smooth_radius_mm: "Cliff Smooth Radius",
   hybrid_split_ratio: "Hybrid Split Ratio",
@@ -530,6 +550,7 @@ export function initializeApplicationState(app) {
       { key: "chroma_weight", label: "Chroma Weight", advanced: true, group: "Recipe Search" },
       { key: "cell_mode", label: "Region Method", format: "region-method", advanced: true, group: "Region Construction" },
       { key: "stage1_coarsening_factor", label: "Region Planning Scale", format: "region-scale", advanced: true, group: "Region Construction" },
+      { key: "neutral_field_protection_mode", label: "Neutral-field Protection", format: "title", advanced: true, group: "Region Construction" },
       { key: "stage2_fine_override_enabled", label: "Local Recipe Corrections", advanced: true, group: "Region Construction" },
       { key: "stage2_boundary_mutation_enabled", label: "Boundary Mutation", advanced: true, group: "Region Construction" },
       { key: "stage2_boundary_mutation_max_passes", label: "Mutation Passes", advanced: true, group: "Region Construction" },

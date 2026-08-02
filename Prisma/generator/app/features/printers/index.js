@@ -53,6 +53,7 @@ export function installFeaturesPrintersIndex(app) {
     if (page) page.classList.remove("is-hidden");
     app.state.session.printerConfigEditingId = app.state.session.printersData?.active_printer_id || app.state.session.printersData?.printers?.[0]?.id || null;
     app.commands.renderPrinterConfigPage();
+    app.events.emit("printer-config.opened", { source: "printer-configuration" });
   }
 
   async function hidePrinterConfigPage(navigateTo) {
@@ -93,6 +94,11 @@ export function installFeaturesPrintersIndex(app) {
     app.state.session.printerConfigOriginTab = null;
     app.state.session.printerConfigEditingId = null;
     app.commands.switchTab(target);
+    app.events.emit("printer.active-changed", {
+      printerId: saved.active_printer_id || null,
+      source: "printer-configuration",
+    });
+    app.events.emit("printer-config.closed", { source: "printer-configuration" });
     return true;
   }
 
@@ -388,6 +394,7 @@ export function installFeaturesPrintersIndex(app) {
     // Lock canvas interaction in Image mode
     const canvas = app.state.ui.$("#frameCanvas");
     if (canvas) canvas.classList.toggle("interaction-locked", tab === "image");
+    app.events.emit("image.adjustment-tab.changed", { tab });
   }
 
   function setLibraryPaneState(state) {

@@ -1,0 +1,308 @@
+/* ── Help & Guides catalog ───────────────────────────────────────────────── */
+
+.guides-catalog-window {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 92vw);
+  max-width: min(920px, 92vw);
+  max-height: 90vh;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.guides-catalog-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+}
+
+.guides-catalog-body > .small-copy {
+  margin: 0 0 8px;
+}
+
+.guide-catalog-group + .guide-catalog-group {
+  margin-top: 10px;
+}
+
+.guide-catalog-group-title {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.guide-preview-label {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* ── Guide overlay ───────────────────────────────────────────────────────── */
+
+.guide-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-guide-overlay);
+  pointer-events: none;
+}
+
+.guide-overlay-root.is-hidden,
+.guide-overlay-root.is-suspended {
+  display: none;
+}
+
+/* Menus opened by a framed top-bar control must remain operable above the card. */
+.guide-overlay-root:not(.is-hidden):not(.is-suspended) ~ .topbar-menu {
+  z-index: var(--z-guide-popover);
+}
+
+.guide-overlay-shade,
+.guide-target-frame,
+.guide-step-card {
+  position: fixed;
+  box-sizing: border-box;
+}
+
+.guide-overlay-shade {
+  background: var(--scrim);
+  pointer-events: none;
+}
+
+.guide-target-frame {
+  border: 2px solid var(--accent-fill);
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--panel) 80%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-fill) 24%, transparent);
+  pointer-events: none;
+}
+
+.guide-overlay-shade.is-hidden,
+.guide-target-frame.is-hidden {
+  display: none;
+}
+
+.guide-step-card {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(430px, calc(100vh - 16px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  pointer-events: auto;
+}
+
+.guide-step-header {
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+
+.guide-step-title-slot {
+  min-width: 0;
+  height: auto;
+  min-height: var(--window-header-control-height);
+  padding-block: 4px;
+  gap: 8px;
+}
+
+.guide-step-title-slot .surface-title {
+  min-width: 0;
+  height: auto;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.guide-step-move {
+  padding-inline: 10px;
+  color: var(--muted);
+}
+
+.guide-step-content {
+  min-height: 0;
+  padding: 12px 14px 8px;
+  overflow-y: auto;
+  background: var(--panel);
+}
+
+.guide-step-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+.guide-step-status {
+  min-height: 16px;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.guide-step-followup {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-inset);
+}
+
+.guide-step-detour {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-inset);
+}
+
+.guide-step-detour-copy {
+  min-width: 0;
+}
+
+.guide-step-detour-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.guide-step-detour p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.guide-step-detour > button {
+  white-space: nowrap;
+}
+
+.guide-step-followup[hidden],
+.guide-step-detour[hidden],
+.guide-step-actions[hidden] {
+  display: none;
+}
+
+.guide-progress {
+  flex: 0 0 auto;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.guide-progress__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.guide-progress__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.guide-progress__count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.guide-progress__track {
+  display: flex;
+  gap: 3px;
+  height: 4px;
+}
+
+.guide-progress__segment {
+  position: relative;
+  flex: 1 1 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.guide-progress__segment::after {
+  position: absolute;
+  inset: 0;
+  width: var(--guide-progress-width, 0%);
+  border-radius: inherit;
+  background: var(--accent-fill);
+  content: "";
+}
+
+.guide-progress[data-mode="detour"] .guide-progress__segment::after {
+  background: var(--accent);
+}
+
+.guide-step-followup p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.guide-step-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+.guide-step-action-spacer {
+  min-width: 4px;
+  flex: 1 1 auto;
+}
+
+@media (max-width: 700px), (max-height: 560px) {
+  .guide-step-card {
+    width: min(330px, calc(100vw - 12px));
+    max-height: min(330px, calc(100vh - 12px));
+  }
+  .guide-step-content {
+    padding: 10px 12px 7px;
+  }
+  .guide-step-actions {
+    gap: 4px;
+  }
+  .guide-step-actions .small {
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+}

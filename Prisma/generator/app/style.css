@@ -1,8 +1,8 @@
 /* Prisma Generator stylesheet manifest. Import order preserves the legacy cascade. */
-@import url("./styles/tokens.css");
+@import url("./styles/tokens.css?v=2026-07-30-guides-foundation-v3");
 @import url("./styles/base.css");
-@import url("./styles/shell.css?v=2026-07-27-deck-batch");
-@import url("./styles/components.css");
+@import url("./styles/shell.css?v=2026-07-30-guides-foundation-v3");
+@import url("./styles/components.css?v=2026-08-01-guide-catalog-v1");
 @import url("./styles/image.css");
 @import url("./styles/palette.css?v=2026-07-28-base-cap-contrast");
 @import url("./styles/settings.css?v=2026-07-30-cap-summary-removal-v1");
@@ -10,7 +10,8 @@
 @import url("./styles/solve.css?v=2026-07-30-settings-flow-v3");
 @import url("./styles/export.css");
 @import url("./styles/surfaces.css?v=2026-07-27-deck-batch");
-@import url("./styles/utilities.css?v=2026-07-27-deck-batch");
+@import url("./styles/utilities.css?v=2026-07-30-guides-foundation-v3");
+@import url("./styles/guides.css?v=2026-08-01-guide-catalog-v1");
 @import url("./styles/profiles.css");
 @import url("./styles/printers-and-modules.css?v=2026-07-30-settings-flow-v3");
 @import url("./styles/diagnostics.css");

@@ -327,6 +327,7 @@ function closeModelLibrariesModal() {
     if (!modal) return;
     modal.classList.add("is-hidden");
     modal.setAttribute("aria-hidden", "true");
+    app.events.emit("model-libraries.closed", { source: "model-library-manager" });
   }
 
 async function loadModelLibraries({ openOnRecovery = false, silent = false } = {}) {

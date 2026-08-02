@@ -178,6 +178,7 @@ function mintPaletteToDeck() {
       app.state.palette.manualSlots = [];
       app.commands.syncConfigToServer();
       app.commands.showToast(`Added "${card.name}" to the deck`, "success");
+      app.events.emit("palette.deck.updated", { action: "added", card });
     } else {
       app.state.palette.stagingDeck.push(card);
       app.state.palette.composerPalette = [];
@@ -478,6 +479,7 @@ function activateDeckCard(cardId, { sync = true } = {}) {
     app.commands.renderDeckCards();
     app.commands.updateRail();
     if (sync) app.commands.syncConfigToServer();
+    app.events.emit("palette.deck.activated", { cardId });
   }
 
 function setActiveDeckCard(cardId) {
@@ -492,6 +494,7 @@ async function removeDeckCard(cardId) {
       app.commands.showToast("This palette is locked while its batch is running.", "warn");
       return false;
     }
+    const removedCard = app.state.palette.deck.find(d => d.id === cardId) || null;
     app.state.palette.deck = app.state.palette.deck.filter(d => d.id !== cardId);
     app.commands.removeBatchDeckSelection(cardId);
     if (app.state.palette.activeDeckId === cardId) {
@@ -500,6 +503,11 @@ async function removeDeckCard(cardId) {
     app.commands.renderDeckCards();
     app.commands.updateRail();
     app.commands.syncConfigToServer();
+    app.events.emit("palette.deck.updated", {
+      action: "removed",
+      cardId,
+      card: removedCard,
+    });
     return true;
   }
 
@@ -515,6 +523,7 @@ function promoteStagedCard(cardId) {
     app.commands.updateRail();
     app.commands.syncConfigToServer();
     app.commands.showToast(`Promoted "${card.name}" to the deck`, "success");
+    app.events.emit("palette.deck.updated", { action: "added", card });
   }
 
 function removeStagingCard(cardId) {

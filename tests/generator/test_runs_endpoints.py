@@ -495,11 +495,46 @@ def test_normalized_archive_provenance_uses_original_digest_and_legacy_falls_bac
     ) == hashlib.sha256(parsed.image_bytes).hexdigest()
 
 
+def test_hdr_gain_map_jpeg_archive_accepts_consistent_normalized_provenance():
+    parsed = SimpleNamespace(
+        image_name="portrait.prisma-source.png",
+        image_bytes=b"normalized PNG bytes",
+    )
+    run_json = {
+        "source_image_name": "portrait.jpg",
+        "source_asset": {
+            "original_source_name": "portrait.jpg",
+            "original_source_format": "JPEG",
+            "source_variant": "hdr_gain_map",
+            "source_digest": "b" * 64,
+            "normalized": True,
+        },
+    }
+
+    assert server._loaded_archive_was_normalized(parsed, run_json, "portrait.jpg") is True
+    assert server._loaded_archive_source_digest(
+        parsed,
+        run_json,
+        normalized=True,
+        trust_normalized_provenance=False,
+    ) is None
+
+
 @pytest.mark.parametrize(
     ("source_asset", "display_name", "member_name", "message"),
     [
         ({"normalized": False}, "portrait.heic", "portrait.prisma-source.png", "native-source"),
         ({"normalized": True}, "portrait.jpg", "portrait.png", "normalized-source"),
+        (
+            {
+                "normalized": True,
+                "original_source_format": "JPEG",
+                "source_variant": "hdr_gain_map",
+            },
+            "portrait.jpg",
+            "portrait.jpg",
+            "normalized-source",
+        ),
         ({"normalized": "false"}, "portrait.jpg", "portrait.jpg", "must be boolean"),
     ],
 )

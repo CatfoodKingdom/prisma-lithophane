@@ -69,6 +69,19 @@ def test_solve_owned_key_change_invalidates(_patched_modules):
     assert fp1 != fp2
 
 
+def test_neutral_field_protection_mode_change_invalidates(_patched_modules):
+    """Neutral-field protection changes the Stage 2 recipe assignment."""
+    import server
+
+    off = {**_base_config(), "neutral_field_protection_mode": "off"}
+    standard = {**off, "neutral_field_protection_mode": "standard"}
+
+    assert "neutral_field_protection_mode" in server._SOLVE_OWNED_KEYS
+    assert server._solve_owned_fingerprint(off) != server._solve_owned_fingerprint(
+        standard
+    )
+
+
 def test_stage4_detail_layer_limit_change_invalidates(_patched_modules):
     """Changing detail layer limit produces a fresh solve."""
     from server import _solve_owned_fingerprint

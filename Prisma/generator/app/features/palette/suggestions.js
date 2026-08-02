@@ -473,6 +473,7 @@ async function handleSuggestBaseShadingLimit() {
 
 function _processSuggestResults(suggestions) {
     let addedCount = 0;
+    const addedCardIds = [];
     const seenSets = new Set();
     const perLoadCapped = suggestions?.per_load_capped;
     app.state.palette.suggestCapacityNote = perLoadCapped?.capacity
@@ -502,6 +503,7 @@ function _processSuggestResults(suggestions) {
         ...extra,
       };
       app.state.palette.stagingDeck.push(card);
+      addedCardIds.push(card.id);
       addedCount++;
       return true;
     };
@@ -542,6 +544,10 @@ function _processSuggestResults(suggestions) {
       app.commands.showToast(app.state.palette.suggestCapacityNote, "warn");
     }
     app.commands.showToast(`Staged ${addedCount} suggested palettes`, "success");
+    app.events.emit("palette.suggestions.completed", {
+      cardIds: addedCardIds,
+      count: addedCount,
+    });
   }
 
   Object.assign(app.commands, {

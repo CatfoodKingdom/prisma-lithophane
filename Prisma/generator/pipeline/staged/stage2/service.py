@@ -1,10 +1,13 @@
 """Stage 2 visible-recipe planning service."""
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 import time
 
 import numpy as np
+
+from config.solve_settings import NEUTRAL_FIELD_PROTECTION_CUTOFFS
 
 from ...staged_solver_helpers import (
     _precompute_cap_oklabs,
@@ -51,9 +54,11 @@ from .contracts import _Stage2PrintabilityFailureSnapshot
 from .metrics import record_stage2_diagnostics
 from .objective import (
     _STAGE2_RETAINING_WALL_WEIGHT,
+    _mean_boundary_step_mm,
     _stage2_continuity_weight,
     _zone_local_cost_weights,
 )
+from .neutral_field_protection import _apply_neutral_field_protection
 from .optimization import (
     _STAGE2_BEAM_WIDTH,
     _seed_zone_recipe_labels_with_beam,
@@ -164,6 +169,10 @@ def build_visible_plan(
     fine_override_enabled = bool(
         cfg.stage2_fine_override_enabled
     )
+    neutral_field_mode = str(cfg.neutral_field_protection_mode)
+    neutral_field_chroma_cutoff = NEUTRAL_FIELD_PROTECTION_CUTOFFS[
+        neutral_field_mode
+    ]
     offset_y_px, offset_x_px = _stage1_lattice_offset_px(cfg)
     if zone_plan.coarse_to_fine_scale <= 1:
         offset_y_px = 0
@@ -557,6 +566,39 @@ def build_visible_plan(
         initial_selected_stack_ids=beam_seed.selected_stack_ids,
         continuity_weight=continuity_weight,
     )
+    neutral_field_result = None
+    neutral_field_elapsed_s = 0.0
+    if neutral_field_chroma_cutoff is not None:
+        neutral_field_start = time.perf_counter()
+        neutral_field_result = _apply_neutral_field_protection(
+            selected_stack_ids=optimization.selected_stack_ids,
+            candidate_sets=candidate_sets,
+            zone_flat_indices=evaluation_zone_flat_indices,
+            targets=targets,
+            all_oklabs=all_oklabs,
+            adjacency_edges=evaluation_adjacency_edges,
+            adjacency_edge_lengths_px=evaluation_adjacency_lengths,
+            neutral_chroma_cutoff=neutral_field_chroma_cutoff,
+            local_cost_weights=zone_local_cost_weights,
+            continuity_weight=continuity_weight,
+        )
+        neutral_field_elapsed_s = time.perf_counter() - neutral_field_start
+        optimization = replace(
+            optimization,
+            selected_stack_ids=neutral_field_result.selected_stack_ids,
+            boundary_step_mean_after_mm=_mean_boundary_step_mm(
+                neutral_field_result.selected_stack_ids,
+                candidate_sets,
+                evaluation_adjacency_edges,
+                evaluation_adjacency_lengths,
+            ),
+            changed_zone_count=int(
+                np.count_nonzero(
+                    neutral_field_result.selected_stack_ids
+                    != optimization.initial_selected_stack_ids
+                )
+            ),
+        )
     if performance_profile is not None:
         _record_timing(
             performance_profile,
@@ -572,6 +614,11 @@ def build_visible_plan(
             performance_profile,
             "stage2_pair_repair_s",
             optimization.pair_repair_elapsed_s,
+        )
+        _record_timing(
+            performance_profile,
+            "stage2_neutral_field_protection_s",
+            neutral_field_elapsed_s,
         )
         _set_counter(
             performance_profile,
@@ -603,6 +650,57 @@ def build_visible_plan(
             "stage2_pair_repair_zone_changes",
             int(optimization.pair_repair_zone_changes),
         )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_protection_mode",
+            neutral_field_mode,
+        )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_protection_enabled",
+            neutral_field_chroma_cutoff is not None,
+        )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_chroma_cutoff",
+            float(neutral_field_chroma_cutoff or 0.0),
+        )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_eligible_edges",
+            int(neutral_field_result.eligible_edge_count)
+            if neutral_field_result is not None
+            else 0,
+        )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_changed_zones",
+            int(neutral_field_result.changed_zone_count)
+            if neutral_field_result is not None
+            else 0,
+        )
+        _set_counter(
+            performance_profile,
+            "stage2_neutral_field_candidate_evaluations",
+            int(neutral_field_result.candidate_evaluation_count)
+            if neutral_field_result is not None
+            else 0,
+        )
+        for metric_name in (
+            "mean_output_edge_de_before",
+            "mean_output_edge_de_after",
+            "mean_excess_edge_de_before",
+            "mean_excess_edge_de_after",
+            "mean_chroma_overshoot_before",
+            "mean_chroma_overshoot_after",
+        ):
+            _set_counter(
+                performance_profile,
+                f"stage2_neutral_field_{metric_name}",
+                float(getattr(neutral_field_result, metric_name))
+                if neutral_field_result is not None
+                else 0.0,
+            )
 
     step_start = time.perf_counter()
     objective_summary = _build_stage2_objective_summary(

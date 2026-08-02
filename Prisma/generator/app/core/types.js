@@ -9,6 +9,7 @@
  * @property {Record<string, unknown>} settings
  * @property {Record<string, unknown>} solve
  * @property {Record<string, unknown>} export
+ * @property {Record<string, unknown>} guides
  * @property {Record<string, unknown>} ui
  *
  * @typedef {Object} ApplicationLifecycle
@@ -24,6 +25,7 @@
  * @property {{pollJobUntilTerminal: Function}} services
  * @property {Record<string, Function>} commands
  * @property {ReturnType<import("./dom.js").createDomRegistry>} dom
+ * @property {ReturnType<import("./events.js").createEventBus>} events
  * @property {ApplicationLifecycle} lifecycle
  * @property {ReturnType<import("./persistence.js").createPersistence>} persistence
  * @property {ReturnType<import("./store.js").createStore>} store

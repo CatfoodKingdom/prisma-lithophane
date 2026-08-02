@@ -2,6 +2,11 @@
 
 The GPLv3 license in `LICENSE` covers Prisma's project-authored source code.
 
+The project-authored photograph
+`Prisma/data/generator/tutorial_images/bubba_blanket.jpg` is bundled solely for
+the Prisma Generator Basics guide and is distributed under GPLv3 with
+Prisma.
+
 The Prisma Standard Model Library is made available under the
 [CC0 1.0 Universal public-domain dedication](https://creativecommons.org/publicdomain/zero/1.0/).
 To the extent Catfood Kingdom holds copyright, database, or similar rights in

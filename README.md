@@ -30,14 +30,14 @@ the archive.
 
 On Windows:
 
-- Generator package: double-click `Prisma.exe`.
+- Generator package: double-click `Prisma Generator.exe`.
 - Suite package: double-click `Prisma Generator.exe` or
   `Prisma Calibration.exe`.
 
 On Linux:
 
-- Generator package: run `./Prisma` from the extracted `Prisma` folder.
-- Suite package: run `./Prisma Generator` or `./Prisma Calibration` from the
+- Generator package: run `./"Prisma Generator"` from the extracted `Prisma` folder.
+- Suite package: run `./"Prisma Generator"` or `./"Prisma Calibration"` from the
   extracted `Prisma Suite` folder.
 
 Keep the console window open while using Prisma. The application opens its

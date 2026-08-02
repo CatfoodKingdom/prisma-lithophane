@@ -25,6 +25,10 @@ const defaultFeatures = [
   "features/solve/recipe-viewer.js",
   "features/settings/modules.js",
   "features/settings/layout.js",
+  "features/guides/definitions.js",
+  "features/guides/targets.js",
+  "features/guides/overlay.js",
+  "features/guides/controller.js",
 ];
 
 function moduleUrl(relativePath) {
@@ -66,6 +70,7 @@ function fakeElement() {
     value: "",
     addEventListener() {},
     appendChild(child) { this.children.push(child); return child; },
+    focus() {},
     getAttribute(name) { return this[name] ?? null; },
     querySelector() { return null; },
     querySelectorAll() { return []; },

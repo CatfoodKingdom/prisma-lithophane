@@ -13,6 +13,31 @@ from typing import List, Optional
 import data_paths
 
 
+NEUTRAL_FIELD_PROTECTION_CUTOFFS: dict[str, float | None] = {
+    "off": None,
+    "narrow": 0.010,
+    "standard": 0.020,
+    "broad": 0.035,
+}
+
+
+def normalize_neutral_field_protection_mode(value: object) -> str:
+    """Return the canonical neutral-field protection mode."""
+    if not isinstance(value, str):
+        raise ValueError(
+            "neutral_field_protection_mode must be a string, "
+            f"got {type(value).__name__}"
+        )
+    canonical = value.strip().lower()
+    if canonical not in NEUTRAL_FIELD_PROTECTION_CUTOFFS:
+        valid = ", ".join(repr(mode) for mode in NEUTRAL_FIELD_PROTECTION_CUTOFFS)
+        raise ValueError(
+            f"Unsupported neutral_field_protection_mode: {value!r} "
+            f"(valid: {valid})"
+        )
+    return canonical
+
+
 @dataclass
 class SolveSettings:
     """Settings that describe a solve independently of its execution context."""
@@ -35,6 +60,7 @@ class SolveSettings:
     color_region_target_from_printability: bool = False
     color_region_target_width_multiplier: float = 2.0
     stage2_continuity_weight: float | None = None
+    neutral_field_protection_mode: str = "off"
     stage2_area_weighted_zone_choice: bool = False
     stage2_pressure_frontier_rescue: bool = False
     stage2_source_edge_subzones: bool = False
@@ -103,6 +129,9 @@ class SolveSettings:
         from config.resolution_schema import _apply_resolution_backstop
         from filament_order import canonical_palette_order, load_filament_order_registry
 
+        self.neutral_field_protection_mode = normalize_neutral_field_protection_mode(
+            self.neutral_field_protection_mode
+        )
         self.palette = canonical_palette_order(
             self.palette,
             load_filament_order_registry(),
@@ -151,4 +180,9 @@ def shared_solve_settings_values(settings: SolveSettings) -> dict[str, object]:
     }
 
 
-__all__ = ["SolveSettings", "shared_solve_settings_values"]
+__all__ = [
+    "NEUTRAL_FIELD_PROTECTION_CUTOFFS",
+    "SolveSettings",
+    "normalize_neutral_field_protection_mode",
+    "shared_solve_settings_values",
+]
