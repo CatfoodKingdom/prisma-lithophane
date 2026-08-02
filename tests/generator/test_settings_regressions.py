@@ -33,6 +33,144 @@ def test_reviewed_solve_quality_defaults_are_consistent():
         assert config["boundary_cap_de_budget"] == 0.004
         assert config["gamut_white_rescale"] is False
         assert config["stage2_boundary_mutation_enabled"] is True
+        assert config["neutral_field_protection_mode"] == "off"
+
+
+def test_neutral_field_protection_modes_are_canonical_and_profile_owned():
+    import server
+    from config.solve_settings import NEUTRAL_FIELD_PROTECTION_CUTOFFS
+    from facade import SolveConfig
+    from pipeline.state import PipelineConfig
+    from pydantic import ValidationError
+
+    assert NEUTRAL_FIELD_PROTECTION_CUTOFFS == {
+        "off": None,
+        "narrow": 0.010,
+        "standard": 0.020,
+        "broad": 0.035,
+    }
+    payload = server.ConfigPayload(neutral_field_protection_mode=" STANDARD ")
+    assert payload.neutral_field_protection_mode == "standard"
+    assert SolveConfig(
+        palette=[],
+        white_base="bambu-tough-white",
+        neutral_field_protection_mode=" BROAD ",
+    ).neutral_field_protection_mode == "broad"
+    assert PipelineConfig(
+        palette=[],
+        white_base="bambu-tough-white",
+        neutral_field_protection_mode="narrow",
+    ).neutral_field_protection_mode == "narrow"
+    assert "neutral_field_protection_mode" in server._SETTINGS_PROFILE_KEYS
+    assert "neutral_field_protection_mode" in server._SOLVE_OWNED_KEYS
+
+    with pytest.raises(ValidationError, match="neutral_field_protection_mode"):
+        server.ConfigPayload(neutral_field_protection_mode="maximum")
+    with pytest.raises(ValueError, match="neutral_field_protection_mode"):
+        SolveConfig(
+            palette=[],
+            white_base="bambu-tough-white",
+            neutral_field_protection_mode="maximum",
+        )
+
+
+def test_legacy_settings_profile_defaults_neutral_field_protection_off():
+    import server
+    from pydantic import ValidationError
+
+    normalized = server._normalize_settings_profile_settings({})
+    assert normalized["neutral_field_protection_mode"] == "off"
+
+    normalized = server._normalize_settings_profile_settings(
+        {"neutral_field_protection_mode": " BROAD "}
+    )
+    assert normalized["neutral_field_protection_mode"] == "broad"
+
+    with pytest.raises(ValueError, match="neutral_field_protection_mode"):
+        server._normalize_settings_profile_settings(
+            {"neutral_field_protection_mode": "maximum"}
+        )
+
+    payload = server.SettingsProfilePayload(
+        name="Neutral",
+        settings={"neutral_field_protection_mode": " STANDARD "},
+    )
+    assert payload.settings["neutral_field_protection_mode"] == "standard"
+    with pytest.raises(ValidationError, match="neutral_field_protection_mode"):
+        server.SettingsProfilePayload(
+            name="Invalid",
+            settings={"neutral_field_protection_mode": "maximum"},
+        )
+
+
+def test_saved_run_config_validates_neutral_field_protection_compatibility():
+    import server
+
+    legacy = server._validate_loaded_archive_config({"layer_height": 0.08})
+    assert "neutral_field_protection_mode" not in legacy
+
+    canonical = server._validate_loaded_archive_config(
+        {"neutral_field_protection_mode": " BROAD "}
+    )
+    assert canonical["neutral_field_protection_mode"] == "broad"
+
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._validate_loaded_archive_config(
+            {"neutral_field_protection_mode": "maximum"}
+        )
+    assert exc_info.value.status_code == 422
+    assert "neutral_field_protection_mode" in str(exc_info.value.detail)
+
+
+def test_build_solve_config_propagates_neutral_field_protection(monkeypatch):
+    import server
+
+    monkeypatch.setattr(
+        server,
+        "get_active_printer",
+        lambda: {
+            "printer": {"id": "test-printer"},
+            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
+        },
+    )
+    cfg = deepcopy(server._DEFAULT_CONFIG)
+    cfg.update(
+        {
+            "palette": ["bambu-basic-cyan"],
+            "appearance_model_provider": "historical_spline",
+            "neutral_field_protection_mode": "standard",
+        }
+    )
+
+    solve_config = server._build_solve_config(cfg)
+
+    assert solve_config.neutral_field_protection_mode == "standard"
+    monkeypatch.setattr(server, "_module_descriptors_by_name", lambda: {})
+    monkeypatch.setattr(
+        server,
+        "_resolve_active_runtime_modules",
+        lambda _state: {"preprocessing": []},
+    )
+    diagnostics = server._build_solve_start_diagnostics(cfg, module_state={})
+    assert (
+        diagnostics["resolved_settings"]["neutral_field_protection_mode"]
+        == "standard"
+    )
+    batch_recipe = server._authoritative_batch_recipe(
+        {},
+        cfg=cfg,
+        module_state={},
+        palette=cfg["palette"],
+        profile_ref={},
+        profile_name="Neutral Fields",
+    )
+    assert batch_recipe["config"]["neutral_field_protection_mode"] == "standard"
+    assert (
+        batch_recipe["profile_snapshot"]["settings"][
+            "neutral_field_protection_mode"
+        ]
+        == "standard"
+    )
 
 
 def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
@@ -49,6 +187,22 @@ def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
     assert 'id="cfgDWcMin" class="unit-input" value="2"' in index_html
     assert 'id="cfgSmoothKernel" class="unit-input" value="1"' in index_html
     assert 'id="cfgBoundaryCapDeBudget" class="unit-input" value="0.004"' in index_html
+    assert 'neutral_field_protection_mode: "off",' in application_context
+    assert 'id="cfgNeutralFieldProtection"' in index_html
+    for mode in ("off", "narrow", "standard", "broad"):
+        assert f'<option value="{mode}">' in index_html
+    assert index_html.index('id="cfgColorRegionTarget"') < index_html.index(
+        'id="cfgNeutralFieldProtection"'
+    ) < index_html.index('id="cfgStage2FineOverride"')
+
+    bundled_profiles = (
+        generator_root.parents[0] / "data" / "generator" / "settings_profiles"
+    ).rglob("*.json")
+    for profile_path in bundled_profiles:
+        payload = json.loads(profile_path.read_text(encoding="utf-8"))
+        assert (
+            payload["settings"]["neutral_field_protection_mode"] == "off"
+        ), profile_path
 
 
 def test_basic_white_point_and_subsection_flow_contracts_are_present():
@@ -431,6 +585,35 @@ def test_settings_profile_round_trips_hue_preserving_mode(tmp_path, monkeypatch)
         kind_hint="named",
     )
     assert record.settings["gamut_mode"] == "hue_preserving"
+
+
+def test_settings_profile_round_trips_neutral_field_protection(tmp_path, monkeypatch):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+
+    created = server.create_settings_profile(
+        server.SettingsProfilePayload(
+            name="Neutral Fields",
+            settings={"neutral_field_protection_mode": " BROAD "},
+            modules={},
+        )
+    )
+    profile = next(
+        p for p in created["profiles"] if p["name"] == "Neutral Fields"
+    )
+
+    assert profile["settings"]["neutral_field_protection_mode"] == "broad"
+    persisted = json.loads(
+        server._settings_profile_path(profile["id"]).read_text(encoding="utf-8")
+    )
+    assert persisted["settings"]["neutral_field_protection_mode"] == "broad"
+    record = server._load_settings_profile_record(
+        server._settings_profile_path(profile["id"]),
+        kind_hint="named",
+    )
+    assert record.settings["neutral_field_protection_mode"] == "broad"
 
 
 def test_settings_profile_normalizes_legacy_chroma_mode(tmp_path, monkeypatch):
@@ -888,6 +1071,40 @@ def test_system_settings_profile_is_regenerated_when_drifted(tmp_path, monkeypat
     assert persisted.name == server._SYSTEM_SETTINGS_PROFILE_NAME
     assert persisted.settings == server._normalize_settings_profile_settings({})
     assert persisted.modules == server._normalize_module_state({})
+    persisted_json = json.loads(system_path.read_text(encoding="utf-8"))
+    assert persisted_json["settings"]["neutral_field_protection_mode"] == "off"
+
+
+def test_profile_store_physically_migrates_legacy_named_profile(tmp_path, monkeypatch):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = settings_dir / "legacy-neutral.json"
+    profile_path.write_text(
+        json.dumps(
+            {
+                "id": "legacy-neutral",
+                "kind": "named",
+                "name": "Legacy Neutral",
+                "settings": {"layer_height": 0.12},
+                "modules": {},
+                "created_at": server._utc_now_iso(),
+                "updated_at": server._utc_now_iso(),
+                "schema_version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    profiles = server._load_all_settings_profiles()
+
+    record = next(profile for profile in profiles if profile.id == "legacy-neutral")
+    assert record.settings["neutral_field_protection_mode"] == "off"
+    persisted = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert persisted["settings"]["neutral_field_protection_mode"] == "off"
+    assert persisted["settings"]["layer_height"] == 0.12
 
 
 def test_settings_profile_normalizer_drops_retired_module_and_setting_keys(tmp_path, monkeypatch):
@@ -1441,6 +1658,22 @@ def test_default_printer_profiles_use_nozzle_multiplier_schema():
             assert nozzle["min_line_length_multiplier"] == 2
             assert "min_line_width" not in nozzle
             assert "min_line_length" not in nozzle
+
+
+def test_tutorial_printer_matches_x1c_except_for_identity():
+    import server
+
+    x1c = deepcopy(server._BAMBU_X1C_PRINTER_PROFILE)
+    tutorial = deepcopy(server._TUTORIAL_PRINTER_PROFILE)
+    x1c.pop("id")
+    x1c.pop("name")
+    tutorial.pop("id")
+    tutorial.pop("name")
+
+    assert tutorial == x1c
+    assert server._TUTORIAL_PRINTER_PROFILE["id"] == "tutorial-printer"
+    assert server._TUTORIAL_PRINTER_PROFILE["name"] == "Tutorial Printer"
+    assert server._DEFAULT_PRINTERS["active_printer_id"] == "bambu-x1c"
 
 
 @pytest.mark.parametrize(

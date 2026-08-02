@@ -34,6 +34,39 @@ export function installFeaturesImageIndex(app) {
     }
   }
 
+  function upsertImageLibraryEntry(image) {
+    if (!image?.filename) {
+      throw new Error("Image Library entries require a filename");
+    }
+    const incoming = { ...image };
+    const previousImages = app.state.image.availableImages || [];
+    const existingIndex = previousImages.findIndex(
+      candidate => candidate.filename === incoming.filename,
+    );
+    const nextImages = existingIndex >= 0
+      ? previousImages.map((candidate, index) => (
+        index === existingIndex ? { ...candidate, ...incoming } : candidate
+      ))
+      : [...previousImages, incoming];
+    nextImages.sort((left, right) => (
+      String(left.filename).toLocaleLowerCase()
+        .localeCompare(String(right.filename).toLocaleLowerCase())
+    ));
+    app.state.image.availableImages = nextImages;
+
+    const selected = app.state.image.selectedImage;
+    if (!selected?.source_ref && selected?.filename === incoming.filename) {
+      app.state.image.selectedImage = nextImages.find(
+        candidate => candidate.filename === incoming.filename,
+      ) || selected;
+    }
+    app.commands.renderImageTab();
+    app.commands.updateRail();
+    return app.state.image.availableImages.find(
+      candidate => candidate.filename === incoming.filename,
+    ) || null;
+  }
+
   function renderImageGrid() {
     const grid = app.state.ui.$("#imageGrid");
 
@@ -83,6 +116,10 @@ export function installFeaturesImageIndex(app) {
         app.commands.renderImageTab();
         app.commands.updateRail();
         void app.commands.syncConfigToServer({ showErrorToast: true });
+        app.events.emit("image.selected", {
+          filename: newImage?.filename || null,
+          sourceRef: newImage?.source_ref || null,
+        });
       });
       card.addEventListener("dragstart", (e) => {
         e.dataTransfer.setData("application/json", JSON.stringify({
@@ -1340,6 +1377,7 @@ export function installFeaturesImageIndex(app) {
 
   Object.assign(app.commands, {
     refreshImageLibrary,
+    upsertImageLibraryEntry,
     renderImageGrid,
     bindImageLibraryWheelScroll,
     clamp,

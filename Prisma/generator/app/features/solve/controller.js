@@ -334,6 +334,9 @@ export function installFeaturesSolveController(app) {
       else app.state.solve.selectedRunIds.add(runId);
       app.commands.renderSolveRunSidebar();
       app.commands.renderSolveComparisonGrid();
+      app.events.emit("solve.selection-changed", {
+        runIds: [...app.state.solve.selectedRunIds],
+      });
     };
     container.querySelectorAll(".solve-run-card").forEach(el => {
       el.addEventListener("click", (e) => {

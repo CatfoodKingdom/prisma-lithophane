@@ -40,6 +40,15 @@ def test_health_probe_accepts_only_the_prisma_generator(monkeypatch: pytest.Monk
     assert launcher._probe_prisma_generator("http://127.0.0.1:8010") is False
 
 
+def test_guided_setup_test_url_is_explicit_and_opt_in() -> None:
+    base = "http://127.0.0.1:8010"
+
+    assert launcher._guided_setup_test_url(base, force_guided_setup=False) == base
+    assert launcher._guided_setup_test_url(base, force_guided_setup=True) == (
+        f"{base}?force-guided-setup=1"
+    )
+
+
 def test_port_reservation_skips_an_occupied_port() -> None:
     occupied = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     occupied.bind(("127.0.0.1", 0))
@@ -90,6 +99,24 @@ def test_existing_prisma_instance_is_reopened_without_new_preflight(
 
     assert result == 0
     assert opened == ["http://127.0.0.1:8010"]
+
+
+def test_force_guided_setup_reopens_an_existing_instance_with_test_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(launcher, "_probe_prisma_generator", lambda _url: True)
+    monkeypatch.setattr(launcher.webbrowser, "open", lambda url: opened.append(url) or True)
+
+    assert launcher.run_generator(
+        app_root=tmp_path,
+        host="127.0.0.1",
+        preferred_port=8010,
+        open_browser=True,
+        force_guided_setup=True,
+    ) == 0
+    assert opened == ["http://127.0.0.1:8010?force-guided-setup=1"]
 
 
 def test_workspace_lock_reopens_instance_that_selected_an_alternate_port(

@@ -45,6 +45,52 @@
   color: var(--idle-ink);
 }
 
+/* Compact summaries with a single trailing action, reusable in modal catalogs. */
+.summary-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 8px;
+}
+
+.summary-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-inset);
+}
+
+.summary-action-copy {
+  min-width: 0;
+}
+
+.summary-action-title,
+.summary-action-description,
+.summary-action-note {
+  margin: 0;
+}
+
+.summary-action-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.summary-action-description,
+.summary-action-note {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.summary-action-note {
+  font-style: italic;
+}
+
 /* ── Buttons — calibration style ──────────────────────────────────────────── */
 
 .ghost-button,

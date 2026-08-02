@@ -18,9 +18,11 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
+from xml.etree import ElementTree
 
 import numpy as np
 from PIL import Image, ImageCms, ImageOps
+from PIL.MpoImagePlugin import MpoImageFile
 
 try:
     from pi_heif import register_heif_opener
@@ -47,6 +49,21 @@ KNOWN_UNSUPPORTED_IMAGE_EXTENSIONS = frozenset({
 NORMALIZATION_VERSION = 1
 DEFAULT_CACHE_LIMIT_BYTES = 2 * 1024 * 1024 * 1024
 MAX_JOB_HISTORY = 64
+SOURCE_VARIANT_SINGLE_FRAME = "single_frame"
+SOURCE_VARIANT_HDR_GAIN_MAP = "hdr_gain_map"
+
+_JPEG_EXTENSIONS = frozenset({".jpg", ".jpeg", ".jfif", ".jpe"})
+_MAX_XMP_BYTES = 1024 * 1024
+_APPLE_AUXILIARY_TYPE_TAG = (
+    "{http://ns.apple.com/pixeldatainfo/1.0/}AuxiliaryImageType"
+)
+_APPLE_HDR_GAIN_MAP_VERSION_TAG = (
+    "{http://ns.apple.com/HDRGainMap/1.0/}HDRGainMapVersion"
+)
+_APPLE_HDR_GAIN_MAP_TYPE = "urn:com:apple:photo:2020:aux:hdrgainmap"
+_ANDROID_HDR_GAIN_MAP_VERSION_TAG = (
+    "{http://ns.adobe.com/hdr-gain-map/1.0/}Version"
+)
 
 _HDR_TRANSFERS = {16, 18}  # H.273 PQ / HLG
 _SRGB_TRANSFER = 13
@@ -94,6 +111,17 @@ class SourceImageError(ValueError):
 
 
 @dataclass(frozen=True)
+class SourceInspection:
+    container_format: str
+    source_format: str
+    variant: str
+    width: int
+    height: int
+    frame_count: int
+    requires_normalization: bool
+
+
+@dataclass(frozen=True)
 class ResolvedSource:
     original_path: Path
     working_path: Path
@@ -103,9 +131,10 @@ class ResolvedSource:
     normalized: bool
     width: int
     height: int
+    source_variant: str = SOURCE_VARIANT_SINGLE_FRAME
 
     def provenance(self) -> dict:
-        return {
+        provenance = {
             "original_source_name": self.display_name,
             "original_source_format": self.source_format,
             "normalized_source_name": self.working_path.name if self.normalized else self.display_name,
@@ -113,6 +142,9 @@ class ResolvedSource:
             "normalization_version": NORMALIZATION_VERSION if self.normalized else None,
             "normalized": self.normalized,
         }
+        if self.source_variant != SOURCE_VARIANT_SINGLE_FRAME:
+            provenance["source_variant"] = self.source_variant
+        return provenance
 
 
 def _sha256_file(path: Path) -> str:
@@ -129,6 +161,149 @@ def _validate_signature(source_format: str, suffix: str) -> None:
         raise SourceImageError(
             f"The file contents do not match the {suffix.upper() or 'image'} filename extension."
         )
+
+
+def _parse_xmp(payload: bytes | str | None) -> ElementTree.Element | None:
+    if not payload:
+        return None
+    encoded = payload.encode("utf-8") if isinstance(payload, str) else bytes(payload)
+    if len(encoded) > _MAX_XMP_BYTES:
+        return None
+    lowered = encoded.lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        return None
+    try:
+        return ElementTree.fromstring(encoded)
+    except (ElementTree.ParseError, ValueError, RecursionError):
+        return None
+
+
+def _xmp_values(root: ElementTree.Element | None, expanded_name: str) -> list[str]:
+    if root is None:
+        return []
+    values: list[str] = []
+    for element in root.iter():
+        if element.tag == expanded_name and element.text is not None:
+            values.append(element.text.strip())
+        attribute = element.attrib.get(expanded_name)
+        if attribute is not None:
+            values.append(attribute.strip())
+    return values
+
+
+def _is_apple_hdr_gain_map_xmp(payload: bytes | str | None) -> bool:
+    root = _parse_xmp(payload)
+    auxiliary_types = _xmp_values(root, _APPLE_AUXILIARY_TYPE_TAG)
+    versions = _xmp_values(root, _APPLE_HDR_GAIN_MAP_VERSION_TAG)
+    return (
+        auxiliary_types == [_APPLE_HDR_GAIN_MAP_TYPE]
+        and len(versions) == 1
+        and versions[0].isdigit()
+        and int(versions[0]) > 0
+    )
+
+
+def _is_android_hdr_gain_map_xmp(payload: bytes | str | None) -> bool:
+    versions = _xmp_values(_parse_xmp(payload), _ANDROID_HDR_GAIN_MAP_VERSION_TAG)
+    return versions == ["1.0"]
+
+
+def _multi_picture_error() -> SourceImageError:
+    return SourceImageError(
+        "This JPEG contains multiple pictures. Prisma can use an auxiliary HDR gain "
+        "map, but not stereo, panorama, or other multi-picture JPEGs."
+    )
+
+
+def _ambiguous_auxiliary_error() -> SourceImageError:
+    return SourceImageError(
+        "Prisma can read the main JPEG but cannot safely identify its additional "
+        "image as a supported HDR gain map."
+    )
+
+
+@dataclass(frozen=True)
+class _MpfFrame:
+    index: int
+    offset: int
+    length: int
+    mode: str
+    xmp: bytes | str | None
+
+
+def _mpf_frames(path: Path) -> list[_MpfFrame]:
+    """Read bounded MPF frame headers through Pillow's structured MPO view."""
+
+    file_size = path.stat().st_size
+    try:
+        with MpoImageFile(path) as image:
+            entries = image.mpinfo.get(0xB002)
+            # Pillow exposes the parsed MP entries publicly but currently keeps
+            # their resolved absolute offsets private. Keep this dependency in
+            # one guarded function so a Pillow upgrade fails closed.
+            offsets = getattr(image, "_MpoImageFile__mpoffsets", None)
+            if not isinstance(entries, list) or not isinstance(offsets, list):
+                raise _ambiguous_auxiliary_error()
+            if image.n_frames != len(entries) or image.n_frames != len(offsets):
+                raise _ambiguous_auxiliary_error()
+            frames: list[_MpfFrame] = []
+            for index, (entry, offset) in enumerate(zip(entries, offsets)):
+                if not isinstance(entry, dict):
+                    raise _ambiguous_auxiliary_error()
+                length = int(entry.get("Size", 0))
+                offset = int(offset)
+                if length <= 0 or offset < 0 or offset + length > file_size:
+                    raise _ambiguous_auxiliary_error()
+                image.seek(index)
+                frames.append(
+                    _MpfFrame(
+                        index=index,
+                        offset=offset,
+                        length=length,
+                        mode=str(image.mode),
+                        xmp=image.info.get("xmp"),
+                    )
+                )
+            return frames
+    except SourceImageError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError, IndexError, EOFError, SyntaxError) as exc:
+        raise _ambiguous_auxiliary_error() from exc
+
+
+def _classify_mpf(path: Path, primary_xmp: bytes | str | None) -> tuple[str, int]:
+    frames = _mpf_frames(path)
+    if len(frames) <= 1:
+        return SOURCE_VARIANT_SINGLE_FRAME, len(frames)
+    if len(frames) != 2:
+        raise _multi_picture_error()
+    apple_gain_map = _is_apple_hdr_gain_map_xmp(frames[1].xmp)
+    android_gain_map = _is_android_hdr_gain_map_xmp(primary_xmp)
+    if apple_gain_map or android_gain_map:
+        return SOURCE_VARIANT_HDR_GAIN_MAP, len(frames)
+    if frames[1].xmp:
+        raise _ambiguous_auxiliary_error()
+    raise _multi_picture_error()
+
+
+def _multi_frame_error(source_format: str) -> SourceImageError:
+    if source_format == "TIFF":
+        return SourceImageError(
+            "Multi-page TIFF images are not supported. Export the page you want as a "
+            "single JPEG, PNG, or TIFF."
+        )
+    if source_format == "WEBP":
+        return SourceImageError(
+            "Animated WebP images are not supported. Export one still frame as JPEG or PNG."
+        )
+    if source_format == "PNG":
+        return SourceImageError(
+            "Animated PNG images are not supported. Export one still frame as JPEG or PNG."
+        )
+    return SourceImageError(
+        f"Multi-frame {source_format or 'image'} files are not supported. "
+        "Export one still frame as JPEG or PNG."
+    )
 
 
 def _enum_int(value, default: int = 2) -> int:
@@ -285,6 +460,10 @@ class SourceImageService:
             entry.get("normalization_version") != NORMALIZATION_VERSION
             or entry.get("size") != stat.st_size
             or entry.get("mtime_ns") != stat.st_mtime_ns
+            or (
+                entry.get("ctime_ns") is not None
+                and entry.get("ctime_ns") != stat.st_ctime_ns
+            )
             or not cached.is_file()
         ):
             return None
@@ -325,8 +504,10 @@ class SourceImageService:
         width: int,
         height: int,
         source_format: str,
+        source_variant: str = SOURCE_VARIANT_SINGLE_FRAME,
     ) -> None:
         size, mtime_ns, ctime_ns = self._stat_identity(path)
+        self._manifest["entries"].pop(path.name, None)
         self._manifest["native_entries"][path.name] = {
             "digest": digest,
             "source_format": source_format,
@@ -335,8 +516,83 @@ class SourceImageService:
             "ctime_ns": ctime_ns,
             "width": int(width),
             "height": int(height),
+            "source_variant": source_variant,
             "last_used_ns": time.time_ns(),
         }
+
+    def _record_normalized_entry(
+        self,
+        path: Path,
+        *,
+        cache_name: str,
+        digest: str,
+        width: int,
+        height: int,
+        source_format: str,
+        source_variant: str,
+    ) -> None:
+        size, mtime_ns, ctime_ns = self._stat_identity(path)
+        self._manifest["native_entries"].pop(path.name, None)
+        self._manifest["entries"][path.name] = {
+            "cache_name": cache_name,
+            "digest": digest,
+            "source_format": source_format,
+            "source_variant": source_variant,
+            "size": size,
+            "mtime_ns": mtime_ns,
+            "ctime_ns": ctime_ns,
+            "width": int(width),
+            "height": int(height),
+            "normalization_version": NORMALIZATION_VERSION,
+            "last_used_ns": time.time_ns(),
+        }
+
+    def _store_normalized_image(
+        self,
+        image: Image.Image,
+        *,
+        digest: str,
+    ) -> tuple[Path, int, int]:
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_name = f"{digest}-v{NORMALIZATION_VERSION}.png"
+        cached = self.cache_dir / cache_name
+        temporary = self.cache_dir / f".{cache_name}-{uuid.uuid4().hex}.tmp"
+        try:
+            image.save(temporary, format="PNG", compress_level=6)
+            os.replace(temporary, cached)
+        finally:
+            image.close()
+            temporary.unlink(missing_ok=True)
+        with Image.open(cached) as prepared:
+            width, height = prepared.size
+        return cached, width, height
+
+    @staticmethod
+    def _resolved_native(path: Path, entry: dict) -> ResolvedSource:
+        return ResolvedSource(
+            path,
+            path,
+            path.name,
+            str(entry["source_format"]),
+            str(entry["digest"]),
+            False,
+            int(entry["width"]),
+            int(entry["height"]),
+            str(entry.get("source_variant") or SOURCE_VARIANT_SINGLE_FRAME),
+        )
+
+    def _resolved_normalized(self, path: Path, entry: dict) -> ResolvedSource:
+        return ResolvedSource(
+            path,
+            self.cache_dir / str(entry["cache_name"]),
+            path.name,
+            str(entry["source_format"]),
+            str(entry["digest"]),
+            True,
+            int(entry["width"]),
+            int(entry["height"]),
+            str(entry.get("source_variant") or SOURCE_VARIANT_SINGLE_FRAME),
+        )
 
     def paths_with_digest(self, digest: str) -> list[Path]:
         """Return ready source paths whose cached source-byte digest matches."""
@@ -362,18 +618,26 @@ class SourceImageService:
         return [ready_by_name[name] for name in matches if name in ready_by_name]
 
     def is_ready(self, path: Path) -> bool:
+        if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            return False
+        with self._lock:
+            if self._entry_for(path) is not None:
+                return True
+            if self._native_entry_for(path) is not None:
+                return True
         if path.suffix.lower() in NATIVE_EXTENSIONS:
-            if not path.is_file():
+            try:
+                inspection = self._inspect_native(path)
+            except SourceImageError:
+                return False
+            if inspection.requires_normalization:
                 return False
             try:
                 self.prepare(path)
             except SourceImageError:
                 return False
             return True
-        if path.suffix.lower() not in NORMALIZED_EXTENSIONS:
-            return False
-        with self._lock:
-            return self._entry_for(path) is not None
+        return False
 
     def describe(self, path: Path) -> dict:
         resolved = self.resolve(path.name, prepare=False)
@@ -392,13 +656,32 @@ class SourceImageService:
         path: Path,
         *,
         expected_suffix: str | None = None,
-    ) -> tuple[int, int, str]:
+    ) -> SourceInspection:
+        suffix = (expected_suffix or path.suffix).lower()
         try:
             with Image.open(path) as raw:
-                source_format = str(raw.format or "").upper()
-                _validate_signature(source_format, expected_suffix or path.suffix)
+                container_format = str(raw.format or "").upper()
+                if suffix in _JPEG_EXTENSIONS:
+                    if container_format not in {"JPEG", "MPO"}:
+                        _validate_signature(container_format, suffix)
+                    variant = SOURCE_VARIANT_SINGLE_FRAME
+                    frame_count = int(getattr(raw, "n_frames", 1))
+                    if container_format == "MPO" or raw.info.get("mp"):
+                        variant, frame_count = _classify_mpf(path, raw.info.get("xmp"))
+                    requires_normalization = variant == SOURCE_VARIANT_HDR_GAIN_MAP
+                    source_format = "JPEG"
+                else:
+                    _validate_signature(container_format, suffix)
+                    source_format = container_format
+                    variant = SOURCE_VARIANT_SINGLE_FRAME
+                    frame_count = int(getattr(raw, "n_frames", 1))
+                    requires_normalization = False
+                    if frame_count > 1:
+                        raise _multi_frame_error(source_format)
                 raw.verify()
             with Image.open(path) as raw:
+                if hasattr(raw, "seek"):
+                    raw.seek(0)
                 oriented = ImageOps.exif_transpose(raw)
                 width, height = oriented.size
         except SourceImageError:
@@ -407,7 +690,15 @@ class SourceImageService:
             raise SourceImageError(
                 "Prisma could not read this image. Export a fresh JPEG or PNG and try again."
             ) from exc
-        return width, height, source_format
+        return SourceInspection(
+            container_format=container_format,
+            source_format=source_format,
+            variant=variant,
+            width=width,
+            height=height,
+            frame_count=frame_count,
+            requires_normalization=requires_normalization,
+        )
 
     def _decode_normalized(
         self,
@@ -423,9 +714,7 @@ class SourceImageService:
                 source_format = str(raw.format or "").upper()
                 _validate_signature(source_format, suffix)
                 if int(getattr(raw, "n_frames", 1)) > 1:
-                    raise SourceImageError(
-                        f"Animated {suffix.lstrip('.').upper()} images are not supported."
-                    )
+                    raise _multi_frame_error(source_format)
                 normalized = normalize_to_srgb(raw)
         except SourceImageError:
             raise
@@ -435,6 +724,21 @@ class SourceImageService:
                 f"Cannot decode {format_name} image. Export it as an SDR sRGB JPEG or PNG and try again."
             ) from exc
         return normalized, source_format
+
+    @staticmethod
+    def _decode_gain_map_primary(source: Path) -> Image.Image:
+        try:
+            with Image.open(source) as raw:
+                if hasattr(raw, "seek"):
+                    raw.seek(0)
+                return normalize_to_srgb(raw)
+        except SourceImageError:
+            raise
+        except (OSError, ValueError, Image.DecompressionBombError) as exc:
+            raise SourceImageError(
+                "Prisma could not read the primary JPEG image. Export a fresh JPEG or PNG "
+                "and try again."
+            ) from exc
 
     def publish_staged(self, staged: Path, destination: Path) -> ResolvedSource:
         """Validate private staging, then atomically publish the untouched original."""
@@ -446,86 +750,84 @@ class SourceImageService:
         suffix = destination.suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
             raise SourceImageError(f"Unsupported image format: {suffix or '(none)'}")
-        before = staged.stat()
+        before = self._stat_identity(staged)
         digest = _sha256_file(staged)
         if suffix in NATIVE_EXTENSIONS:
-            width, height, source_format = self._inspect_native(
+            inspection = self._inspect_native(
                 staged,
                 expected_suffix=suffix,
             )
-            after = staged.stat()
-            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            if inspection.requires_normalization:
+                image = self._decode_gain_map_primary(staged)
+                cached = None
+                width = height = 0
+            else:
+                image = None
+                cached = None
+                width, height = inspection.width, inspection.height
+            if before != self._stat_identity(staged):
+                if image is not None:
+                    image.close()
                 raise SourceImageError("The image changed while Prisma was preparing it; retry.")
+            if image is not None:
+                cached, width, height = self._store_normalized_image(image, digest=digest)
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.replace(staged, destination)
             with self._lock:
-                self._record_native_entry(
-                    destination,
-                    digest=digest,
-                    width=width,
-                    height=height,
-                    source_format=source_format,
-                )
+                if cached is not None:
+                    self._record_normalized_entry(
+                        destination,
+                        cache_name=cached.name,
+                        digest=digest,
+                        width=width,
+                        height=height,
+                        source_format=inspection.source_format,
+                        source_variant=inspection.variant,
+                    )
+                    self._prune_locked(protect_cache_name=cached.name)
+                    entry = self._manifest["entries"][destination.name]
+                    resolved = self._resolved_normalized(destination, entry)
+                else:
+                    self._record_native_entry(
+                        destination,
+                        digest=digest,
+                        width=width,
+                        height=height,
+                        source_format=inspection.source_format,
+                        source_variant=inspection.variant,
+                    )
+                    self._prune_locked()
+                    entry = self._manifest["native_entries"][destination.name]
+                    resolved = self._resolved_native(destination, entry)
                 self._write_manifest()
-            return ResolvedSource(
-                destination,
-                destination,
-                destination.name,
-                source_format,
-                digest,
-                False,
-                width,
-                height,
-            )
+            return resolved
 
         image, source_format = self._decode_normalized(
             staged,
             expected_suffix=suffix,
         )
-        after = staged.stat()
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        if before != self._stat_identity(staged):
             image.close()
             raise SourceImageError("The image changed while Prisma was preparing it; retry.")
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_name = f"{digest}-v{NORMALIZATION_VERSION}.png"
-        cached = self.cache_dir / cache_name
-        temporary = self.cache_dir / f".{cache_name}-{uuid.uuid4().hex}.tmp"
-        try:
-            image.save(temporary, format="PNG", compress_level=6)
-            os.replace(temporary, cached)
-        finally:
-            image.close()
-            temporary.unlink(missing_ok=True)
-        with Image.open(cached) as prepared:
-            width, height = prepared.size
-
+        cached, width, height = self._store_normalized_image(image, digest=digest)
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(staged, destination)
-        stat = destination.stat()
         with self._lock:
-            self._manifest["entries"][destination.name] = {
-                "cache_name": cache_name,
-                "digest": digest,
-                "source_format": source_format,
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-                "width": width,
-                "height": height,
-                "normalization_version": NORMALIZATION_VERSION,
-                "last_used_ns": time.time_ns(),
-            }
-            self._prune_locked(protect_cache_name=cache_name)
+            self._record_normalized_entry(
+                destination,
+                cache_name=cached.name,
+                digest=digest,
+                width=width,
+                height=height,
+                source_format=source_format,
+                source_variant=SOURCE_VARIANT_SINGLE_FRAME,
+            )
+            self._prune_locked(protect_cache_name=cached.name)
             self._write_manifest()
-        return ResolvedSource(
-            destination,
-            cached,
-            destination.name,
-            source_format,
-            digest,
-            True,
-            width,
-            height,
-        )
+            return self._resolved_normalized(
+                destination,
+                self._manifest["entries"][destination.name],
+            )
 
     def prepare(self, path_or_name: str | Path) -> ResolvedSource:
         path = (
@@ -540,91 +842,64 @@ class SourceImageService:
         suffix = path.suffix.lower()
         if suffix not in SUPPORTED_EXTENSIONS:
             raise SourceImageError(f"Unsupported image format: {suffix or '(none)'}")
-        if suffix in NATIVE_EXTENSIONS:
-            with self._lock:
-                entry = self._native_entry_for(path)
-                if entry is not None:
-                    entry["last_used_ns"] = time.time_ns()
-                    return ResolvedSource(
-                        path,
-                        path,
-                        path.name,
-                        str(entry["source_format"]),
-                        str(entry["digest"]),
-                        False,
-                        int(entry["width"]),
-                        int(entry["height"]),
-                    )
-                before = self._stat_identity(path)
-                width, height, source_format = self._inspect_native(path)
-                digest = _sha256_file(path)
-                after = self._stat_identity(path)
-                if before != after:
-                    raise SourceImageError("The image changed while Prisma was preparing it; retry.")
-                self._record_native_entry(
-                    path,
-                    digest=digest,
-                    width=width,
-                    height=height,
-                    source_format=source_format,
-                )
-                self._write_manifest()
-                return ResolvedSource(
-                    path, path, path.name, source_format, digest, False, width, height
-                )
-
         with self._lock:
             entry = self._entry_for(path)
             if entry is not None:
-                cached = self.cache_dir / entry["cache_name"]
                 entry["last_used_ns"] = time.time_ns()
                 self._write_manifest()
-                return ResolvedSource(
-                    path,
-                    cached,
-                    path.name,
-                    str(entry["source_format"]),
-                    str(entry["digest"]),
-                    True,
-                    int(entry["width"]),
-                    int(entry["height"]),
-                )
+                return self._resolved_normalized(path, entry)
+            if suffix in NATIVE_EXTENSIONS:
+                entry = self._native_entry_for(path)
+                if entry is not None:
+                    entry["last_used_ns"] = time.time_ns()
+                    return self._resolved_native(path, entry)
 
-            before = path.stat()
+            before = self._stat_identity(path)
+            if suffix in NATIVE_EXTENSIONS:
+                inspection = self._inspect_native(path)
+                image = (
+                    self._decode_gain_map_primary(path)
+                    if inspection.requires_normalization
+                    else None
+                )
+                source_format = inspection.source_format
+                source_variant = inspection.variant
+            else:
+                image, source_format = self._decode_normalized(path)
+                source_variant = SOURCE_VARIANT_SINGLE_FRAME
             digest = _sha256_file(path)
-            image, source_format = self._decode_normalized(path)
-            after = path.stat()
-            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-                image.close()
+            if before != self._stat_identity(path):
+                if image is not None:
+                    image.close()
                 raise SourceImageError("The image changed while Prisma was preparing it; retry.")
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_name = f"{digest}-v{NORMALIZATION_VERSION}.png"
-            cached = self.cache_dir / cache_name
-            temporary = self.cache_dir / f".{cache_name}-{uuid.uuid4().hex}.tmp"
-            try:
-                image.save(temporary, format="PNG", compress_level=6)
-                os.replace(temporary, cached)
-            finally:
-                image.close()
-                temporary.unlink(missing_ok=True)
-            with Image.open(cached) as prepared:
-                width, height = prepared.size
-            self._manifest["entries"][path.name] = {
-                "cache_name": cache_name,
-                "digest": digest,
-                "source_format": source_format,
-                "size": before.st_size,
-                "mtime_ns": before.st_mtime_ns,
-                "width": width,
-                "height": height,
-                "normalization_version": NORMALIZATION_VERSION,
-                "last_used_ns": time.time_ns(),
-            }
-            self._prune_locked(protect_cache_name=cache_name)
-            self._write_manifest()
-            return ResolvedSource(
-                path, cached, path.name, source_format, digest, True, width, height
+            if image is None:
+                self._record_native_entry(
+                    path,
+                    digest=digest,
+                    width=inspection.width,
+                    height=inspection.height,
+                    source_format=source_format,
+                    source_variant=source_variant,
+                )
+                self._prune_locked()
+                self._write_manifest()
+                return self._resolved_native(
+                    path,
+                    self._manifest["native_entries"][path.name],
+                )
+            cached, width, height = self._store_normalized_image(image, digest=digest)
+            self._record_normalized_entry(
+                path,
+                cache_name=cached.name,
+                digest=digest,
+                width=width,
+                height=height,
+                source_format=source_format,
+                source_variant=source_variant,
             )
+            self._prune_locked(protect_cache_name=cached.name)
+            self._write_manifest()
+            return self._resolved_normalized(path, self._manifest["entries"][path.name])
 
     def resolve(self, filename: str, *, prepare: bool = True) -> ResolvedSource:
         path = self._safe_source(filename)
@@ -633,29 +908,33 @@ class SourceImageService:
         if not path.is_file():
             raise SourceImageError(f"Image not found: {filename}")
         suffix = path.suffix.lower()
-        if suffix in NATIVE_EXTENSIONS:
-            width, height, source_format = self._inspect_native(path)
-            stat = path.stat()
-            fingerprint = f"native:{stat.st_size}:{stat.st_mtime_ns}"
-            return ResolvedSource(
-                path, path, path.name, source_format, fingerprint, False, width, height
-            )
-        if suffix not in NORMALIZED_EXTENSIONS:
+        if suffix not in SUPPORTED_EXTENSIONS:
             raise SourceImageError(f"Unsupported image format: {suffix or '(none)'}")
         with self._lock:
             entry = self._entry_for(path)
-            if entry is None:
-                raise SourceImageError("Image is still being prepared")
-            return ResolvedSource(
-                path,
-                self.cache_dir / entry["cache_name"],
-                path.name,
-                str(entry["source_format"]),
-                str(entry["digest"]),
-                True,
-                int(entry["width"]),
-                int(entry["height"]),
-            )
+            if entry is not None:
+                return self._resolved_normalized(path, entry)
+            if suffix in NATIVE_EXTENSIONS:
+                entry = self._native_entry_for(path)
+                if entry is not None:
+                    return self._resolved_native(path, entry)
+                inspection = self._inspect_native(path)
+                if inspection.requires_normalization:
+                    raise SourceImageError("Image is still being prepared")
+                stat = path.stat()
+                fingerprint = f"native:{stat.st_size}:{stat.st_mtime_ns}"
+                return ResolvedSource(
+                    path,
+                    path,
+                    path.name,
+                    inspection.source_format,
+                    fingerprint,
+                    False,
+                    inspection.width,
+                    inspection.height,
+                    inspection.variant,
+                )
+            raise SourceImageError("Image is still being prepared")
 
     def discover(self) -> tuple[list[Path], list[Path]]:
         self.images_dir.mkdir(parents=True, exist_ok=True)
@@ -678,25 +957,30 @@ class SourceImageService:
 
     def prune_orphans(self) -> None:
         with self._lock:
-            existing_normalized = {
+            existing_supported = {
                 path.name
                 for path in self.images_dir.iterdir()
-                if path.is_file() and path.suffix.lower() in NORMALIZED_EXTENSIONS
-            } if self.images_dir.exists() else set()
-            existing_native = {
-                path.name
-                for path in self.images_dir.iterdir()
-                if path.is_file() and path.suffix.lower() in NATIVE_EXTENSIONS
+                if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
             } if self.images_dir.exists() else set()
             changed = False
             for name in list(self._manifest["entries"]):
-                if name not in existing_normalized:
+                if name not in existing_supported:
                     self._manifest["entries"].pop(name, None)
                     changed = True
             for name in list(self._manifest["native_entries"]):
-                if name not in existing_native:
+                if name not in existing_supported:
                     self._manifest["native_entries"].pop(name, None)
                     changed = True
+            for name in set(self._manifest["entries"]) & set(self._manifest["native_entries"]):
+                normalized = self._manifest["entries"].get(name)
+                if (
+                    isinstance(normalized, dict)
+                    and normalized.get("source_variant") == SOURCE_VARIANT_HDR_GAIN_MAP
+                ):
+                    self._manifest["native_entries"].pop(name, None)
+                else:
+                    self._manifest["entries"].pop(name, None)
+                changed = True
             changed = self._prune_locked() or changed
             if changed:
                 self._write_manifest()

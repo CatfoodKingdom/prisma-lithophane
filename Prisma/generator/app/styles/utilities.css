@@ -26,7 +26,7 @@
   min-width: 112px;
   font-weight: 600;
 }
-.theme-menu {
+.topbar-menu {
   position: fixed;
   z-index: var(--z-persistent-overlay);
   width: 206px;
@@ -36,7 +36,31 @@
   background: var(--panel);
   box-shadow: var(--shadow);
 }
-.theme-menu[hidden] { display: none; }
+.topbar-menu[hidden] { display: none; }
+.topbar-menu [role="menuitem"][hidden],
+.topbar-menu [role="menuitemradio"][hidden] { display: none; }
+.topbar-menu [role="menuitem"] {
+  display: grid;
+  grid-template-columns: 1fr;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.topbar-menu [role="menuitem"]:hover,
+.topbar-menu [role="menuitem"]:focus-visible { background: var(--control-hover); }
+.topbar-menu [role="menuitem"] > span,
+.topbar-menu [role="menuitemradio"] > span { font-size: 12px; font-weight: 700; }
+.topbar-menu [role="menuitem"] > small,
+.topbar-menu [role="menuitemradio"] > small {
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 10px;
+}
 .theme-menu [role="menuitemradio"] {
   display: grid;
   grid-template-columns: 1fr;
@@ -61,8 +85,6 @@
   color: var(--accent);
   font-weight: 700;
 }
-.theme-menu [role="menuitemradio"] > span { font-size: 12px; font-weight: 700; }
-.theme-menu [role="menuitemradio"] > small { margin-top: 1px; color: var(--muted); font-size: 10px; }
 .deck-card-menu {
   width: 230px;
 }
@@ -171,12 +193,19 @@
 }
 .settings-gear-btn { gap: 5px; }
 .settings-gear-label { font-size: 13px; }
+.help-guides-button {
+  gap: 4px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.help-guides-menu { width: 250px; }
 .top-temp-clear-btn {
   padding: 4px 10px;
   line-height: 1;
 }
 
 @media (max-width: 1100px) {
+  .help-guides-label-suffix { display: none; }
   .theme-button-prefix { display: none; }
   .theme-menu-button { min-width: 64px; }
 }

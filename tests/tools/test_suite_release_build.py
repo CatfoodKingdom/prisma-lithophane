@@ -22,6 +22,7 @@ def test_suite_has_two_independent_entry_points_and_one_collect() -> None:
 def test_suite_collects_both_frontends_schema_and_path_loaded_fitter() -> None:
     assert '(str(GENERATOR / "app"), "Prisma/generator/app")' in SPEC
     assert '"Prisma/data/generator/settings_profiles"' in SPEC
+    assert '"Prisma/data/generator/tutorial_images"' in SPEC
     assert '(str(CALIBRATION / "app"), "Prisma/calibration/app")' in SPEC
     assert '"blank_calibration_schema.sql"' in SPEC
     assert 'prefix="fitting/photo_stack_model/v63_fit_engine"' in SPEC

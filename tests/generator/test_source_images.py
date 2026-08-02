@@ -22,6 +22,42 @@ from Prisma.generator.source_images import (
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "heif"
+HDR_GAIN_MAP_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "hdr_gain_map"
+    / "apple_gain_map_mpo.jpg.b64.txt"
+)
+
+_APPLE_GAIN_MAP_XMP = b"""<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:HDRGainMap="http://ns.apple.com/HDRGainMap/1.0/"
+ xmlns:apdi="http://ns.apple.com/pixeldatainfo/1.0/">
+<HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion>
+<apdi:AuxiliaryImageType>urn:com:apple:photo:2020:aux:hdrgainmap</apdi:AuxiliaryImageType>
+</rdf:Description></rdf:RDF></x:xmpmeta>"""
+
+_ANDROID_PRIMARY_XMP = b"""<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:hdrgm="http://ns.adobe.com/hdr-gain-map/1.0/"
+ hdrgm:Version="1.0" />
+</rdf:RDF></x:xmpmeta>"""
+
+
+def _write_mpo_jpeg(
+    path: Path,
+    *,
+    primary_xmp: bytes | None = None,
+    auxiliary_xmp: bytes | None = None,
+    auxiliary_mode: str = "L",
+) -> None:
+    primary = Image.new("RGB", (8, 6), (210, 30, 20))
+    auxiliary = Image.new(auxiliary_mode, (4, 3), 128 if auxiliary_mode == "L" else "blue")
+    if primary_xmp is not None:
+        primary.encoderinfo = {"xmp": primary_xmp}
+    if auxiliary_xmp is not None:
+        auxiliary.encoderinfo = {"xmp": auxiliary_xmp}
+    primary.save(path, format="MPO", save_all=True, append_images=[auxiliary])
 
 
 def _write_heif(path: Path) -> None:
@@ -102,6 +138,140 @@ def test_native_jpeg_alias_preserves_direct_working_path(tmp_path: Path) -> None
     assert resolved.normalized is False
     assert resolved.working_path == source
     assert (resolved.width, resolved.height) == (7, 5)
+
+
+def test_apple_hdr_gain_map_jpeg_is_normalized_from_primary_frame(tmp_path: Path) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "phone.jpg"
+    source.write_bytes(base64.b64decode(HDR_GAIN_MAP_FIXTURE.read_text(encoding="ascii")))
+    original = source.read_bytes()
+    with Image.open(source) as image:
+        assert image.format == "MPO"
+        assert image.n_frames == 2
+    service = SourceImageService(images, tmp_path / "cache")
+
+    ready, pending = service.discover()
+    resolved = service.prepare(source.name)
+
+    assert ready == []
+    assert pending == [source]
+    assert resolved.normalized is True
+    assert resolved.source_format == "JPEG"
+    assert resolved.source_variant == "hdr_gain_map"
+    assert resolved.working_path.suffix == ".png"
+    assert resolved.working_path != source
+    assert source.read_bytes() == original
+    with Image.open(resolved.working_path) as prepared:
+        prepared.load()
+        assert prepared.format == "PNG"
+        assert prepared.mode == "RGB"
+        assert prepared.size == (8, 6)
+        assert prepared.getpixel((0, 0))[0] > prepared.getpixel((0, 0))[2]
+    assert service.discover()[0] == [source]
+    assert resolved.provenance()["source_variant"] == "hdr_gain_map"
+
+
+def test_android_ultra_hdr_jpeg_is_normalized_even_when_pillow_calls_it_jpeg(
+    tmp_path: Path,
+) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "android.jpg"
+    _write_mpo_jpeg(source, primary_xmp=_ANDROID_PRIMARY_XMP)
+    with Image.open(source) as image:
+        assert image.format == "JPEG"
+        assert getattr(image, "n_frames", 1) == 1
+    service = SourceImageService(images, tmp_path / "cache")
+
+    resolved = service.prepare(source.name)
+
+    assert resolved.normalized is True
+    assert resolved.source_format == "JPEG"
+    assert resolved.source_variant == "hdr_gain_map"
+    assert resolved.working_path.suffix == ".png"
+
+
+def test_general_mpo_renamed_jpeg_is_rejected_as_multi_picture(tmp_path: Path) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "stereo.jpg"
+    _write_mpo_jpeg(source, auxiliary_mode="RGB")
+    service = SourceImageService(images, tmp_path / "cache")
+
+    with pytest.raises(SourceImageError, match="multiple pictures"):
+        service.prepare(source.name)
+
+
+def test_incidental_hdr_gain_map_text_does_not_authorize_mpo(tmp_path: Path) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "untrusted.jpg"
+    incidental_xmp = b"""<x:xmpmeta xmlns:x="adobe:ns:meta/">
+    <note>urn:com:apple:photo:2020:aux:hdrgainmap</note>
+    </x:xmpmeta>"""
+    _write_mpo_jpeg(source, auxiliary_xmp=incidental_xmp, auxiliary_mode="RGB")
+    service = SourceImageService(images, tmp_path / "cache")
+
+    with pytest.raises(SourceImageError, match="cannot safely identify"):
+        service.prepare(source.name)
+
+
+def test_jpeg_switches_between_native_and_gain_map_cache_entries(tmp_path: Path) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / "changing.jpg"
+    cache = tmp_path / "cache"
+    Image.new("RGB", (7, 5), "green").save(source, format="JPEG")
+    service = SourceImageService(images, cache)
+
+    native = service.prepare(source.name)
+    assert native.normalized is False
+    assert source.name in service._manifest["native_entries"]
+
+    time.sleep(0.001)
+    _write_mpo_jpeg(source, auxiliary_xmp=_APPLE_GAIN_MAP_XMP)
+    gain_map = service.prepare(source.name)
+    assert gain_map.normalized is True
+    assert source.name in service._manifest["entries"]
+    assert source.name not in service._manifest["native_entries"]
+
+    time.sleep(0.001)
+    Image.new("RGB", (9, 4), "blue").save(source, format="JPEG")
+    restored_native = service.prepare(source.name)
+    assert restored_native.normalized is False
+    assert source.name not in service._manifest["entries"]
+    assert source.name in service._manifest["native_entries"]
+    assert not list(cache.glob("*.png"))
+
+
+@pytest.mark.parametrize(
+    ("format_name", "filename", "error"),
+    [
+        ("PNG", "animated.png", "Animated PNG"),
+        ("WEBP", "animated.webp", "Animated WebP"),
+        ("TIFF", "pages.tiff", "Multi-page TIFF"),
+    ],
+)
+def test_native_multi_frame_sources_are_rejected(
+    tmp_path: Path,
+    format_name: str,
+    filename: str,
+    error: str,
+) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    source = images / filename
+    Image.new("RGB", (8, 6), "red").save(
+        source,
+        format=format_name,
+        save_all=True,
+        append_images=[Image.new("RGB", (8, 6), "blue")],
+    )
+    service = SourceImageService(images, tmp_path / "cache")
+
+    with pytest.raises(SourceImageError, match=error):
+        service.prepare(source.name)
 
 
 def test_native_digest_is_indexed_and_reused_without_rehashing(
@@ -288,6 +458,34 @@ def test_upload_original_is_not_published_until_preparation_succeeds(
     assert result["status"] == "failed"
     assert not (images / "bad.heic").exists()
     assert not invalid.exists()
+
+
+def test_changed_gain_map_upload_is_not_published_or_cached(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    images = tmp_path / "Images"
+    images.mkdir()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    staged = staging / ".upload-phone.jpg"
+    destination = images / "phone.jpg"
+    _write_mpo_jpeg(staged, auxiliary_xmp=_APPLE_GAIN_MAP_XMP)
+    service = SourceImageService(images, tmp_path / "cache")
+    original_decode = service._decode_gain_map_primary
+
+    def mutate_after_decode(path: Path):
+        decoded = original_decode(path)
+        path.write_bytes(path.read_bytes() + b"changed")
+        return decoded
+
+    monkeypatch.setattr(service, "_decode_gain_map_primary", mutate_after_decode)
+
+    with pytest.raises(SourceImageError, match="changed while"):
+        service.publish_staged(staged, destination)
+
+    assert not destination.exists()
+    assert not list((tmp_path / "cache").glob("*.png"))
 
 
 def test_import_manager_coalesces_active_scans(tmp_path: Path) -> None:

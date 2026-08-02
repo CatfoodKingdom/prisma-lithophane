@@ -45,6 +45,7 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.ok(keys.includes("luminance_mode"));
   assert.ok(keys.includes("detail_cap_max_layers"));
   assert.ok(keys.includes("color_region_target_mm"));
+  assert.ok(keys.includes("neutral_field_protection_mode"));
   assert.ok(!keys.includes("enforce_printability"));
   assert.ok(!keys.includes("cap_continuity_cleanup"));
   assert.ok(!keys.includes("printability_minimum_extrusion_width_mm"));
@@ -52,6 +53,92 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.ok(!keys.includes("min_line_length_multiplier"));
   assert.equal(app.state.settings.config.enforce_printability, true);
   assert.equal(app.state.settings.config.cap_continuity_cleanup, true);
+});
+
+test("neutral-field protection defaults off and round-trips through the settings UI", async () => {
+  const neutralFieldSelect = fakeElement();
+  neutralFieldSelect.value = "broad";
+  const { app } = await harness({
+    elements: { "#cfgNeutralFieldProtection": neutralFieldSelect },
+  });
+  assert.equal(app.state.settings.SETTINGS_PROFILE_DEFAULTS.neutral_field_protection_mode, "off");
+
+  global.document = {
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+  try {
+    app.commands.readConfigFromUI();
+    assert.equal(app.state.settings.config.neutral_field_protection_mode, "broad");
+
+    app.commands._applySettingsProfileToConfig({
+      neutral_field_protection_mode: "standard",
+    });
+    assert.equal(app.state.settings.config.neutral_field_protection_mode, "standard");
+    neutralFieldSelect.value = "standard";
+    app.commands._setLoadedSettingsProfile(
+      { id: "neutral", kind: "named", name: "Neutral" },
+      {
+        settings: app.commands._currentSettingsSnapshot(),
+        modules: app.commands._currentSettingsProfileModulesSnapshot(),
+      },
+    );
+    assert.equal(app.commands.isSettingsProfileModified(), false);
+    neutralFieldSelect.value = "broad";
+    assert.equal(app.commands.isSettingsProfileModified(), true);
+    neutralFieldSelect.value = "standard";
+    app.state.settings.config.neutral_field_protection_mode = "standard";
+    const solverSection = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.find(
+      (section) => section.key === "solver",
+    );
+    const rows = app.commands.buildReadOnlyRunSectionRows(
+      solverSection,
+      { settings: { neutral_field_protection_mode: "standard" } },
+    );
+    assert.equal(
+      rows.find((row) => row.label === "Neutral-field Protection").value,
+      "Standard",
+    );
+
+    const legacyRun = { label: "Legacy", config: {} };
+    const explicitOffRun = {
+      label: "Explicit Off",
+      config: { neutral_field_protection_mode: "off" },
+    };
+    assert.equal(
+      app.commands.getSolveRunSettingsSnapshot(legacyRun).neutral_field_protection_mode,
+      "off",
+    );
+    assert.equal(
+      app.commands.getSolveRunSettingsSnapshot({
+        config: { neutral_field_protection_mode: "standard" },
+        recipe_snapshot: { profile_snapshot: { settings: {} } },
+      }).neutral_field_protection_mode,
+      "standard",
+    );
+    assert.equal(
+      app.commands.getFrozenSolveRunSnapshot(legacyRun).settings.neutral_field_protection_mode,
+      "off",
+    );
+    assert.equal(
+      app.commands.collectSolveRunSettingDiffs(legacyRun, explicitOffRun)
+        .some((diff) => diff.label === "Neutral-field Protection"),
+      false,
+    );
+    const modeDiff = app.commands.collectSolveRunSettingDiffs(
+      explicitOffRun,
+      { label: "Standard", config: { neutral_field_protection_mode: "standard" } },
+    ).find((diff) => diff.label === "Neutral-field Protection");
+    assert.deepEqual(
+      { before: modeDiff.before, after: modeDiff.after, category: modeDiff.category },
+      { before: "Off", after: "Standard", category: "solver" },
+    );
+
+    app.commands._applySettingsProfileToConfig({});
+    assert.equal(app.state.settings.config.neutral_field_protection_mode, "off");
+  } finally {
+    delete global.document;
+  }
 });
 
 test("module snapshots use descriptor defaults and compare nested values", async () => {
@@ -447,6 +534,67 @@ test("live config uses server-authoritative active printer thresholds", async ()
   }
 });
 
+test("opening printer configuration emits its semantic event after rendering", async () => {
+  const printerPage = fakeElement();
+  printerPage.classList.add("is-hidden");
+  const { app } = await harness({
+    elements: { "#printerConfigPage": printerPage },
+  });
+  app.state.session.printersData = {
+    printers: [],
+    active_printer_id: null,
+  };
+  app.commands.renderPrinterConfigPage = () => {};
+  const events = [];
+  const dispose = app.events.subscribe("printer-config.opened", detail => events.push(detail));
+
+  try {
+    app.commands.showPrinterConfigPage();
+  } finally {
+    dispose();
+  }
+
+  assert.equal(printerPage.classList.contains("is-hidden"), false);
+  assert.deepEqual(events, [{ source: "printer-configuration" }]);
+});
+
+test("switching adjustment tabs emits its semantic event after state and controls update", async () => {
+  const sizeControls = fakeElement();
+  const imageControls = fakeElement();
+  const canvas = fakeElement();
+  const { app } = await harness({
+    elements: {
+      "#frameControlsSize": sizeControls,
+      "#frameControlsImage": imageControls,
+      "#frameCanvas": canvas,
+    },
+  });
+  const events = [];
+  const dispose = app.events.subscribe(
+    "image.adjustment-tab.changed",
+    detail => events.push({
+      ...detail,
+      state: app.state.image.frameEditorTab,
+      imageVisible: !imageControls.classList.contains("is-hidden"),
+    }),
+  );
+
+  try {
+    app.commands.switchFrameEditorTab("image");
+  } finally {
+    dispose();
+  }
+
+  assert.equal(sizeControls.classList.contains("is-hidden"), true);
+  assert.equal(imageControls.classList.contains("is-hidden"), false);
+  assert.equal(canvas.classList.contains("interaction-locked"), true);
+  assert.deepEqual(events, [{
+    tab: "image",
+    state: "image",
+    imageVisible: true,
+  }]);
+});
+
 test("printer editor stays open with its draft after a failed save", async () => {
   const printerPage = fakeElement();
   const draft = {
@@ -469,11 +617,18 @@ test("printer editor stays open with its draft after a failed save", async () =>
   app.commands._readPrinterFromConfigPage = () => draft.printers[0];
   app.commands.showToast = () => {};
   app.commands.switchTab = () => { throw new Error("must not navigate"); };
+  const closeEvents = [];
+  const dispose = app.events.subscribe("printer-config.closed", detail => closeEvents.push(detail));
 
-  assert.equal(await app.commands.hidePrinterConfigPage("image"), false);
+  try {
+    assert.equal(await app.commands.hidePrinterConfigPage("image"), false);
+  } finally {
+    dispose();
+  }
   assert.equal(printerPage.classList.contains("is-hidden"), false);
   assert.equal(app.state.session.printersData.printers[0].name, "Unsaved draft");
   assert.equal(app.state.session.printersData.printers[0].nozzle_profiles[0].min_line_length_multiplier, 3);
+  assert.deepEqual(closeEvents, []);
 });
 
 test("successful printer saves reconcile active printability from the server", async () => {
@@ -516,12 +671,26 @@ test("successful printer saves reconcile active printability from the server", a
   app.commands.renderPrinterRail = () => {};
   app.commands.updateDerivedParams = () => {};
   app.commands.switchTab = () => {};
+  const closeEvents = [];
+  const activeEvents = [];
+  const dispose = app.events.subscribe("printer-config.closed", detail => closeEvents.push(detail));
+  const disposeActive = app.events.subscribe("printer.active-changed", detail => activeEvents.push(detail));
 
-  assert.equal(await app.commands.hidePrinterConfigPage("image"), true);
+  try {
+    assert.equal(await app.commands.hidePrinterConfigPage("image"), true);
+  } finally {
+    dispose();
+    disposeActive();
+  }
   assert.equal(printerPage.classList.contains("is-hidden"), true);
   assert.equal(app.state.session.printersData.printers[0].name, "Canonical name");
   assert.equal(app.state.session.activePrintability.minimum_line_length_mm, 0.6);
   assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.6);
+  assert.deepEqual(activeEvents, [{
+    printerId: "printer-a",
+    source: "printer-configuration",
+  }]);
+  assert.deepEqual(closeEvents, [{ source: "printer-configuration" }]);
 });
 
 test("a post-save render failure never rolls back authoritative printer state", async () => {

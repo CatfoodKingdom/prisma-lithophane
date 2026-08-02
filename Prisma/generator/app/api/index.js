@@ -1,5 +1,6 @@
 export { API_BASE, apiFetch, apiPost, createApiClient } from "./client.js";
 export { clearAllTempFiles } from "./cache.js";
+export { fetchGuideState, prepareBasicsGuide, putGuideState } from "./guides.js?v=2026-08-01-guide-journeys-v1";
 export {
   fetchImages, getImageImportStatus, imagePreviewUrl, importImages,
   openImagesFolder, refreshImages, uploadImage,

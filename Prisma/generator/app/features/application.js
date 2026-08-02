@@ -31,6 +31,7 @@ export function installFeaturesApplication(app) {
     app.commands.initializeThemeController();
     app.commands.initializeSolveModeController();
     app.commands.initializeDeckCardMenuController();
+    app.commands.initializeGuidesController();
     app.commands.initAllEnhancedSliders();
     app.commands.bindEvents();
     app.commands.updateRail();
@@ -103,6 +104,8 @@ export function installFeaturesApplication(app) {
         app.state.image.importPollingError = error?.message || "Image preparation could not start";
         app.commands.renderImageImportNotice();
       });
+      await app.commands.loadGuideState();
+      await app.commands.maybeOfferGuidedSetup();
     }
 
     app.commands.showToast(app.state.session.apiConnected ? "Connected to Prisma server" : "Offline mode \u2014 start server to enable full features", app.state.session.apiConnected ? "success" : "");

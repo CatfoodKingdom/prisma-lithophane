@@ -119,6 +119,56 @@ def test_pressure_diagnostics_are_flag_gated():
     ] == 0
 
 
+def test_neutral_field_protection_off_preserves_output_and_modes_emit_telemetry():
+    image = np.full((8, 8, 3), 190, dtype=np.uint8)
+    base_kwargs = dict(
+        palette=["bambu-basic-cyan", "bambu-basic-magenta"],
+        white_base="panchroma-matte-cotton-white",
+        profiles_dir=_PROFILES_DIR,
+        stage1_coarsening_factor=2,
+    )
+
+    default_result = solve_preview(image, _offline_solve_config(**base_kwargs))
+    explicit_off = solve_preview(
+        image,
+        _offline_solve_config(
+            **base_kwargs,
+            neutral_field_protection_mode="off",
+        ),
+    )
+    standard = solve_preview(
+        image,
+        _offline_solve_config(
+            **base_kwargs,
+            neutral_field_protection_mode="standard",
+        ),
+    )
+
+    assert set(default_result.thickness_maps) == set(explicit_off.thickness_maps)
+    for key in default_result.thickness_maps:
+        np.testing.assert_array_equal(
+            default_result.thickness_maps[key],
+            explicit_off.thickness_maps[key],
+        )
+    off_perf = explicit_off.staged_result.performance_profile
+    assert off_perf.counters["stage2_neutral_field_protection_mode"] == "off"
+    assert off_perf.counters["stage2_neutral_field_protection_enabled"] is False
+    assert off_perf.counters["stage2_neutral_field_candidate_evaluations"] == 0
+    assert off_perf.timings_s["stage2_neutral_field_protection_s"] == 0.0
+
+    standard_perf = standard.staged_result.performance_profile
+    assert (
+        standard_perf.counters["stage2_neutral_field_protection_mode"]
+        == "standard"
+    )
+    assert (
+        standard_perf.counters["stage2_neutral_field_protection_enabled"]
+        is True
+    )
+    assert standard_perf.counters["stage2_neutral_field_chroma_cutoff"] == 0.020
+    assert standard_perf.timings_s["stage2_neutral_field_protection_s"] >= 0.0
+
+
 def test_geometry_attribution_is_flag_gated():
     image = np.zeros((8, 8, 3), dtype=np.uint8)
     image[:, :4] = np.array([0, 255, 255], dtype=np.uint8)

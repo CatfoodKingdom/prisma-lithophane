@@ -168,6 +168,7 @@ function openSettingsDrawer() {
     drawer.setAttribute("aria-hidden", "false");
     app.state.settings.settingsDrawerOpen = true;
     app.commands.scheduleSettingsDrawerDistribution();
+    app.events.emit("settings.opened", { source: "settings-drawer" });
   }
 
   Object.assign(app.commands, {

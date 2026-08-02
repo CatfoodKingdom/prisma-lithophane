@@ -245,17 +245,23 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
   assert.match(paletteCss, /\.ams-slot\.is-white \.ams-slot-label\s*{\s*color:\s*var\(--white-filament-label\);\s*}/);
 });
 
-test("changed solve-pitch modules carry the bootstrap cache version", () => {
+test("changed frontend modules carry their current bootstrap cache versions", () => {
   const bootstrap = fs.readFileSync(path.join(appDir, "bootstrap.js"), "utf8");
-  for (const relativePath of [
-    "features/shell/index.js",
-    "features/settings/profiles.js",
-    "features/solve/batch.js",
-    "features/solve/recipe-viewer.js",
-  ]) {
+  for (const [relativePath, version] of Object.entries({
+    "features/shell/index.js": "2026-07-30-generator-basics-v3",
+    "features/printers/index.js": "2026-07-31-guide-image-tab-v1",
+    "features/image/index.js": "2026-07-31-guide-step10-v1",
+    "features/guides/definitions.js": "2026-08-01-guide-palette-copy-v1",
+    "features/guides/targets.js": "2026-08-01-guide-image-exit-gates-v1",
+    "features/guides/overlay.js": "2026-08-01-guide-image-polish-v1",
+    "features/guides/controller.js": "2026-08-01-guide-palette-auto-advance-v1",
+    "features/settings/profiles.js": "2026-07-31-guide-audit-v1",
+    "features/solve/batch.js": "2026-07-28-solve-pitch-remediation-v5",
+    "features/solve/recipe-viewer.js": "2026-07-30-generator-basics-v2",
+  })) {
     assert.match(
       bootstrap,
-      new RegExp(`${relativePath.replaceAll("/", "\\/").replace(".", "\\.")}\\?v=2026-07-28-solve-pitch-remediation-v5`),
+      new RegExp(`${relativePath.replaceAll("/", "\\/").replace(".", "\\.")}\\?v=${version}`),
     );
   }
 });

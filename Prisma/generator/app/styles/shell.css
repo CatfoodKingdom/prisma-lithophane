@@ -668,6 +668,12 @@ section.mode-panel {
 }
 .mode-switch::-webkit-scrollbar { display: none; }
 
+.workflow-tab-strip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
 .mode-button {
   display: inline-flex;
   align-items: center;

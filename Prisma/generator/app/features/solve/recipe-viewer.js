@@ -786,6 +786,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
           run.results = status.result;
           run.solve_elapsed_s = Number.isFinite(Number(status.elapsed_s)) ? Math.max(0, Number(status.elapsed_s)) : null;
           if (app.state.solve.activeSolveRunId === run.id) app.state.solve.activeSolveRunId = null;
+          app.events.emit("solve.completed", {
+            runId: run.id,
+            deckCardId: run.deck_card_id || null,
+          });
         } else if (status.status === "cancelled") {
           app.commands.removePendingSolveRun(run.id);
           if (app.state.solve.activeSolveRunId === run.id) app.state.solve.activeSolveRunId = null;
@@ -1154,6 +1158,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         if (!runId || runId === app.state.export.exportSelectedRunId) return;
         app.state.export.exportSelectedRunId = runId;
         app.commands.renderExportTab();
+        app.events.emit("export.run-selected", { runId });
       };
       container.querySelectorAll(".solve-run-card[data-export-run-id]").forEach((el) => {
         el.addEventListener("click", (e) => {
@@ -1466,7 +1471,16 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         if (!status) return;
         if (status.status === "complete" && status.result) {
           const originatingRun = app.state.solve.solveRuns.find((run) => run.id === originatingRunId) || null;
-          app.commands.appendExportRecordToRun(originatingRun, status.result, Date.now(), status.elapsed_s);
+          const exportRecord = app.commands.appendExportRecordToRun(
+            originatingRun,
+            status.result,
+            Date.now(),
+            status.elapsed_s,
+          );
+          app.events.emit("export.completed", {
+            runId: originatingRunId,
+            exportId: exportRecord?.id || null,
+          });
         } else if (status.status === "cancelled") {
           const cancelled = new Error("Export cancelled");
           cancelled.name = "AbortError";

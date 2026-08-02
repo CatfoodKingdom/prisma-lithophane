@@ -77,6 +77,10 @@ function formatSolveSettingValue(key, value) {
     if (typeof value === "string" && (key === "cap_mode" || key === "luminance_mode")) {
       return value.replace(/_/g, " ");
     }
+    if (typeof value === "string" && key === "neutral_field_protection_mode") {
+      const normalized = value.replace(/_/g, " ");
+      return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+    }
     if (typeof value === "string" && key === "cell_mode") {
       return app.commands.formatRegionMethod(value);
     }
@@ -84,7 +88,16 @@ function formatSolveSettingValue(key, value) {
   }
 
 function getSolveRunSettingsSnapshot(run) {
-    return app.commands._cloneValue(run?.recipe_snapshot?.profile_snapshot?.settings || run?.config || {});
+    const settings = app.commands._cloneValue(
+      run?.recipe_snapshot?.profile_snapshot?.settings || run?.config || {},
+    );
+    // A recipe snapshot is normally complete, but API-authored or older snapshots
+    // may omit this field while the authoritative run config records it.
+    // Truly pre-feature runs behaved exactly as Off.
+    if (!Object.prototype.hasOwnProperty.call(settings, "neutral_field_protection_mode")) {
+      settings.neutral_field_protection_mode = run?.config?.neutral_field_protection_mode || "off";
+    }
+    return settings;
   }
 
 function getSolveRunModulesSnapshot(run) {
@@ -103,6 +116,7 @@ function categorizeSolveSettingDiff(key, kind = "setting") {
     if ([
       "image_sample_pitch_mm", "solver_fine_pitch_mm",
       "color_region_target_mm", "chroma_weight", "luminance_mode", "cell_mode",
+      "neutral_field_protection_mode",
       "luminance_handler_enabled",
       "luminance_handler_mode",
       "luminance_handler_strength",
@@ -281,6 +295,10 @@ function getFrozenSolveRunSnapshot(run) {
       ...profileSettings,
       ...resolvedSettings,
     };
+    // Missing is authoritative for pre-feature runs: the solver path was Off.
+    if (!Object.prototype.hasOwnProperty.call(settings, "neutral_field_protection_mode")) {
+      settings.neutral_field_protection_mode = "off";
+    }
 
     const profileModules = profile.modules && typeof profile.modules === "object"
       ? profile.modules

@@ -64,6 +64,11 @@ if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
 import data_paths  # noqa: E402
+from guide_state import (  # noqa: E402
+    GuideStateError,
+    GuideStateRevisionConflict,
+    GuideStateStore,
+)
 from progress import ProgressCancelled, ProgressReporter  # noqa: E402
 
 from image_ingress import (  # noqa: E402
@@ -90,6 +95,9 @@ from facade import (  # noqa: E402
     SolveConfig,
     SolveStats,
     solve_full,
+)
+from config.solve_settings import (  # noqa: E402
+    normalize_neutral_field_protection_mode,
 )
 from filament_order import canonical_palette_order, load_filament_order_registry  # noqa: E402
 from grouping.banded_export import (  # noqa: E402
@@ -183,6 +191,7 @@ _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 _PRINTERS_PATH = data_paths.CONFIG_DIR / "printers.json"
 # Single source of truth for module toggle state in this worktree.
 _MODULES_PATH = data_paths.CONFIG_DIR / "modules.json"
+_GUIDE_STATE_STORE = GuideStateStore(data_paths.CONFIG_DIR / "guide_state.json")
 
 _SETTINGS_PROFILE_SCHEMA_VERSION = 1
 _SYSTEM_SETTINGS_PROFILE_ID = "system-default"
@@ -204,36 +213,50 @@ _OBSOLETE_NOZZLE_PRINTABILITY_FIELDS = frozenset(
     {"min_line_width", "min_line_length"}
 )
 
+_BUILT_IN_PRINTER_PROFILES_REVISION = 1
+_BUILT_IN_PRINTER_PROFILES_REVISION_KEY = "built_in_profiles_revision"
+_BAMBU_X1C_PRINTER_PROFILE = {
+    "id": "bambu-x1c",
+    "name": "Bambu X1C",
+    "max_print_area": {"x": 256, "y": 256},
+    "ams_units": 1,
+    "slots_per_ams": 4,
+    "nozzle_profiles": [
+        {
+            "size": 0.2,
+            "min_layer_height": 0.05,
+            "max_layer_height": 0.15,
+            "line_width": 0.22,
+            "max_line_width": 0.25,
+            "min_line_length_multiplier": 2,
+        },
+        {
+            "size": 0.4,
+            "min_layer_height": 0.08,
+            "max_layer_height": 0.32,
+            "line_width": 0.42,
+            "max_line_width": 0.5,
+            "min_line_length_multiplier": 2,
+        },
+    ],
+}
+_TUTORIAL_PRINTER_PROFILE = {
+    **deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
+    "id": "tutorial-printer",
+    "name": "Tutorial Printer",
+}
+_BASICS_TUTORIAL_IMAGE_SOURCE = (
+    _PRISMA_DIR / "data" / "generator" / "tutorial_images" / "bubba_blanket.jpg"
+)
+_BASICS_TUTORIAL_IMAGE_NAME = "Prisma Tutorial - Bubba Blanket.jpg"
 _DEFAULT_PRINTERS = {
     "printers": [
-        {
-            "id": "bambu-x1c",
-            "name": "Bambu X1C",
-            "max_print_area": {"x": 256, "y": 256},
-            "ams_units": 1,
-            "slots_per_ams": 4,
-            "nozzle_profiles": [
-                {
-                    "size": 0.2,
-                    "min_layer_height": 0.05,
-                    "max_layer_height": 0.15,
-                    "line_width": 0.22,
-                    "max_line_width": 0.25,
-                    "min_line_length_multiplier": 2,
-                },
-                {
-                    "size": 0.4,
-                    "min_layer_height": 0.08,
-                    "max_layer_height": 0.32,
-                    "line_width": 0.42,
-                    "max_line_width": 0.5,
-                    "min_line_length_multiplier": 2,
-                },
-            ],
-        }
+        deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
+        deepcopy(_TUTORIAL_PRINTER_PROFILE),
     ],
     "active_printer_id": "bambu-x1c",
     "active_nozzle_size": 0.2,
+    _BUILT_IN_PRINTER_PROFILES_REVISION_KEY: _BUILT_IN_PRINTER_PROFILES_REVISION,
 }
 
 
@@ -454,6 +477,33 @@ def _normalize_printers_data(data: dict, *, retired_policy: str = "warn_drop") -
     return normalized
 
 
+def _migrate_built_in_printer_profiles(data: dict) -> tuple[dict, bool]:
+    """Add newly bundled profiles once without reviving later user deletions."""
+    raw_revision = data.get(_BUILT_IN_PRINTER_PROFILES_REVISION_KEY, 0)
+    revision = (
+        raw_revision
+        if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
+        else 0
+    )
+    if revision >= _BUILT_IN_PRINTER_PROFILES_REVISION:
+        return data, False
+
+    migrated = deepcopy(data)
+    existing_ids = {
+        str(printer.get("id"))
+        for printer in migrated.get("printers", [])
+        if isinstance(printer, Mapping)
+    }
+    if _TUTORIAL_PRINTER_PROFILE["id"] not in existing_ids:
+        migrated.setdefault("printers", []).append(
+            deepcopy(_TUTORIAL_PRINTER_PROFILE)
+        )
+    migrated[
+        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
+    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
+    return migrated, True
+
+
 # Force-import live preprocessing modules so they register themselves.
 _ensure_registry_populated()
 
@@ -462,14 +512,22 @@ def _load_printers() -> dict:
     """Load printers.json, creating with defaults if missing."""
     if _PRINTERS_PATH.exists():
         with open(_PRINTERS_PATH, encoding="utf-8") as f:
-            return _normalize_printers_data(json.load(f))
+            normalized = _normalize_printers_data(json.load(f))
+        migrated, changed = _migrate_built_in_printer_profiles(normalized)
+        if changed:
+            _save_printers(migrated)
+        return _normalize_printers_data(migrated)
     _save_printers(_DEFAULT_PRINTERS)
     return _normalize_printers_data(_DEFAULT_PRINTERS)
 
 
 def _save_printers(data: dict) -> None:
     """Write printers.json atomically."""
-    data = _normalize_printers_data(data)
+    versioned = deepcopy(data)
+    versioned[
+        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
+    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
+    data = _normalize_printers_data(versioned)
     _PRINTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = _PRINTERS_PATH.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -639,6 +697,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "enforce_printability": True,
     "color_region_target_from_printability": True,
     "color_region_target_width_multiplier": 2.0,
+    "neutral_field_protection_mode": "off",
     "stage2_fine_override_enabled": True,
     "stage2_final_printability_gate_fine_override": True,
     "stage2_printability_gate_fine_override": True,
@@ -846,6 +905,9 @@ class ConfigPayload(BaseModel):
     enforce_printability: bool = True
     color_region_target_from_printability: bool = True
     color_region_target_width_multiplier: float = 2.0
+    neutral_field_protection_mode: Literal[
+        "off", "narrow", "standard", "broad"
+    ] = "off"
     stage2_fine_override_enabled: bool = True
     stage2_final_printability_gate_fine_override: bool = True
     stage2_printability_gate_fine_override: bool = True
@@ -917,6 +979,11 @@ class ConfigPayload(BaseModel):
                 f"(valid: 'lanczos', 'area')"
             )
         return canonical
+
+    @field_validator("neutral_field_protection_mode", mode="before")
+    @classmethod
+    def _normalize_neutral_field_protection_mode(cls, value: Any) -> str:
+        return normalize_neutral_field_protection_mode(value)
 
     @field_validator("gamut_mode", mode="before")
     @classmethod
@@ -1448,6 +1515,9 @@ def _build_solve_config(
         color_region_target_from_printability=_enforce,
         color_region_target_width_multiplier=cfg.get(
             "color_region_target_width_multiplier", 2.0
+        ),
+        neutral_field_protection_mode=cfg.get(
+            "neutral_field_protection_mode", "off"
         ),
         stage2_fine_override_enabled=cfg.get(
             "stage2_fine_override_enabled", True
@@ -2409,6 +2479,7 @@ _SOLVE_OWNED_KEYS = (
     "stage1_coarsening_factor",
     "color_region_target_from_printability",
     "color_region_target_width_multiplier",
+    "neutral_field_protection_mode",
     "stage2_fine_override_enabled",
     "stage2_final_printability_gate_fine_override",
     "stage2_printability_gate_fine_override",
@@ -2656,6 +2727,9 @@ def _build_solve_start_diagnostics(
         "image_sample_pitch_mm": cfg.get("image_sample_pitch_mm"),
         "solver_fine_pitch_mm": cfg.get("solver_fine_pitch_mm"),
         "color_region_target_mm": cfg.get("color_region_target_mm"),
+        "neutral_field_protection_mode": cfg.get(
+            "neutral_field_protection_mode", "off"
+        ),
         "luminance_mode": cfg.get("luminance_mode"),
         "detail_cap_max_layers": cfg.get("detail_cap_max_layers"),
         "de_threshold": cfg.get("de_threshold"),
@@ -3374,6 +3448,178 @@ def set_config(payload: ConfigPayload) -> dict:
     return {"ok": True, "config": _with_canonical_pitch_egress(session["config"])}
 
 
+# ── Guides / Onboarding ──────────────────────────────────────────────────
+
+class GuideStatePutPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(strict=True, ge=0)
+    state: Dict[str, Any]
+
+
+class BasicsGuidePreparePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    restore_tutorial_printer: bool = False
+    include_tutorial_printer: bool = True
+    include_tutorial_image: bool = True
+
+
+def _files_have_same_sha256(left: Path, right: Path) -> bool:
+    if not left.is_file() or not right.is_file():
+        return False
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    def digest(path: Path) -> str:
+        checksum = hashlib.sha256()
+        with path.open("rb") as handle:
+            while block := handle.read(1024 * 1024):
+                checksum.update(block)
+        return checksum.hexdigest()
+
+    return digest(left) == digest(right)
+
+
+def _materialize_basics_tutorial_image() -> ResolvedSource:
+    if not _BASICS_TUTORIAL_IMAGE_SOURCE.is_file():
+        raise GuideStateError(
+            f"Bundled tutorial image is missing: {_BASICS_TUTORIAL_IMAGE_SOURCE}"
+        )
+
+    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+    destination = _IMAGES_DIR / _BASICS_TUTORIAL_IMAGE_NAME
+    if destination.exists() and not _files_have_same_sha256(
+        destination,
+        _BASICS_TUTORIAL_IMAGE_SOURCE,
+    ):
+        stem = destination.stem
+        suffix = destination.suffix
+        counter = 2
+        while True:
+            candidate = _IMAGES_DIR / f"{stem} {counter}{suffix}"
+            if not candidate.exists() or _files_have_same_sha256(
+                candidate,
+                _BASICS_TUTORIAL_IMAGE_SOURCE,
+            ):
+                destination = candidate
+                break
+            counter += 1
+
+    if not destination.exists():
+        temporary = destination.with_name(
+            f".{destination.name}.{uuid.uuid4().hex}.tmp"
+        )
+        try:
+            shutil.copyfile(_BASICS_TUTORIAL_IMAGE_SOURCE, temporary)
+            os.replace(temporary, destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    return _SOURCE_IMAGES.prepare(destination)
+
+
+def _tutorial_printer_status(
+    printers_data: Mapping[str, Any],
+) -> Literal["ready", "missing", "modified"]:
+    profile = next(
+        (
+            item
+            for item in printers_data.get("printers", [])
+            if item.get("id") == _TUTORIAL_PRINTER_PROFILE["id"]
+        ),
+        None,
+    )
+    if profile is None:
+        return "missing"
+    return "ready" if profile == _TUTORIAL_PRINTER_PROFILE else "modified"
+
+
+def _restore_tutorial_printer(printers_data: Mapping[str, Any]) -> dict[str, Any]:
+    restored = deepcopy(dict(printers_data))
+    profiles = [
+        deepcopy(profile)
+        for profile in restored.get("printers", [])
+        if profile.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    profiles.append(deepcopy(_TUTORIAL_PRINTER_PROFILE))
+    restored["printers"] = profiles
+    restored[_BUILT_IN_PRINTER_PROFILES_REVISION_KEY] = (
+        _BUILT_IN_PRINTER_PROFILES_REVISION
+    )
+    _save_printers(restored)
+    return restored
+
+
+@app.get("/api/guides/state")
+def get_guide_state() -> dict:
+    """Return workspace-owned first-launch onboarding state."""
+    try:
+        return _GUIDE_STATE_STORE.read()
+    except GuideStateError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.put("/api/guides/state")
+def put_guide_state(payload: GuideStatePutPayload) -> dict:
+    """Atomically replace first-launch state when the caller owns its revision."""
+    try:
+        return _GUIDE_STATE_STORE.replace(
+            payload.state,
+            expected_revision=payload.expected_revision,
+        )
+    except GuideStateRevisionConflict as exc:
+        raise HTTPException(
+            409,
+            {
+                "message": str(exc),
+                "expected_revision": exc.expected,
+                "current_revision": exc.actual,
+            },
+        ) from exc
+    except GuideStateError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/guides/basics/prepare")
+def prepare_basics_guide(payload: BasicsGuidePreparePayload) -> dict:
+    """Materialize tutorial-owned inputs without overwriting user-owned data."""
+
+    tutorial_printer = None
+    if payload.include_tutorial_printer:
+        printers_data = _load_printers()
+        printer_status = _tutorial_printer_status(printers_data)
+        if payload.restore_tutorial_printer and printer_status != "ready":
+            printers_data = _restore_tutorial_printer(printers_data)
+            printer_status = "ready"
+        tutorial_printer = {
+            "status": printer_status,
+            "profile": deepcopy(_TUTORIAL_PRINTER_PROFILE),
+        }
+
+    tutorial_image_payload = None
+    if payload.include_tutorial_image:
+        try:
+            tutorial_image = _materialize_basics_tutorial_image()
+        except (GuideStateError, OSError, SourceImageError) as exc:
+            raise HTTPException(500, str(exc)) from exc
+        tutorial_image_payload = {
+            "filename": tutorial_image.display_name,
+            "width": tutorial_image.width,
+            "height": tutorial_image.height,
+            "size_kb": round(
+                tutorial_image.original_path.stat().st_size / 1024,
+                1,
+            ),
+            "source_format": tutorial_image.source_format,
+            "normalized": tutorial_image.normalized,
+        }
+
+    return {
+        "tutorial_image": tutorial_image_payload,
+        "tutorial_printer": tutorial_printer,
+    }
+
+
 # ── Printers ──────────────────────────────────────────────────────────────
 
 @app.get("/api/printers")
@@ -3386,6 +3632,9 @@ def get_printers() -> dict:
 def save_printers(payload: dict) -> dict:
     """Save the full printers object (printers list + active selection)."""
     normalized = _normalize_printers_data(payload, retired_policy="reject")
+    normalized[
+        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
+    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
     _save_printers(normalized)
     active = _resolve_active_printer(normalized)
     session["config"] = _with_active_printer_printability(
@@ -3495,6 +3744,7 @@ _SETTINGS_PROFILE_KEYS = (
     "cell_mode",
     # --- canonical staged backend params ---
     "stage1_coarsening_factor",
+    "neutral_field_protection_mode",
     "stage2_fine_override_enabled",
     "stage2_boundary_mutation_enabled",
     "stage2_boundary_mutation_min_gain",
@@ -3541,6 +3791,21 @@ class SettingsProfilePayload(BaseModel):
     name: str
     settings: Dict[str, Any] = Field(default_factory=dict)
     modules: Dict[str, bool] = Field(default_factory=dict)
+
+    @field_validator("settings")
+    @classmethod
+    def _normalize_neutral_field_protection_setting(
+        cls,
+        settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized = dict(settings)
+        if "neutral_field_protection_mode" in normalized:
+            normalized["neutral_field_protection_mode"] = (
+                normalize_neutral_field_protection_mode(
+                    normalized["neutral_field_protection_mode"]
+                )
+            )
+        return normalized
 
 
 def _settings_profile_state_path() -> Path:
@@ -3745,6 +4010,12 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
         incoming["cap_mode"] = _normalize_cap_mode(incoming["cap_mode"])
     if "gamut_mode" in incoming:
         incoming["gamut_mode"] = ConfigPayload._normalize_gamut_mode(incoming["gamut_mode"])  # type: ignore[misc]
+    if "neutral_field_protection_mode" in incoming:
+        incoming["neutral_field_protection_mode"] = (
+            normalize_neutral_field_protection_mode(
+                incoming["neutral_field_protection_mode"]
+            )
+        )
     if "base_filament" not in incoming and incoming.get("white_base"):
         incoming["base_filament"] = incoming["white_base"]
     if "cap_filament" not in incoming and "white_cap" in incoming:
@@ -3817,6 +4088,38 @@ def _save_settings_profile_record(record: SettingsProfileRecord) -> SettingsProf
     return record
 
 
+def _persist_neutral_field_protection_profile_default(
+    path: Path,
+    record: SettingsProfileRecord,
+) -> bool:
+    """Materialize the new setting in a legacy profile instead of only defaulting it."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        raw_settings = payload.get("settings")
+        if not isinstance(raw_settings, dict):
+            return False
+        key = "neutral_field_protection_mode"
+        if key in raw_settings:
+            return False
+        raw_settings[key] = deepcopy(record.settings[key])
+        _write_json_atomic(path, payload)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "Could not persist Neutral-field Protection into profile %s: %s",
+            record.id,
+            exc,
+        )
+        return False
+    logger.info(
+        "Migrated settings profile %s with %s=%s",
+        record.id,
+        key,
+        record.settings[key],
+    )
+    return True
+
+
 def _ensure_system_settings_profile() -> SettingsProfileRecord:
     _SETTINGS_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     path = _settings_profile_path(_SYSTEM_SETTINGS_PROFILE_ID)
@@ -3824,6 +4127,7 @@ def _ensure_system_settings_profile() -> SettingsProfileRecord:
     if path.exists():
         try:
             existing = _load_settings_profile_record(path, kind_hint="system")
+            _persist_neutral_field_protection_profile_default(path, existing)
         except Exception as exc:
             logger.warning("System settings profile invalid; regenerating: %s", exc)
             existing = None
@@ -3953,6 +4257,7 @@ def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
                 _settings_profile_relative_path(existing_source),
             )
             continue
+        _persist_neutral_field_protection_profile_default(path, record)
         named_profile_sources[record.id] = path
         named_profiles_by_id[record.id] = record
     named_profiles = list(named_profiles_by_id.values())
@@ -6413,6 +6718,7 @@ def _pin_palette_batch_source(
         normalized=resolved.normalized,
         width=resolved.width,
         height=resolved.height,
+        source_variant=resolved.source_variant,
     )
     provenance = _source_provenance_for_config(cfg, resolved)
     provenance["prepared_source_digest"] = prepared_digest
@@ -8504,6 +8810,15 @@ def _validate_loaded_archive_config(cfg: dict) -> dict:
             incoming["cap_mode"] = _normalize_cap_mode(incoming["cap_mode"])
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if "neutral_field_protection_mode" in incoming:
+        try:
+            incoming["neutral_field_protection_mode"] = (
+                normalize_neutral_field_protection_mode(
+                    incoming["neutral_field_protection_mode"]
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     return incoming
 
 
@@ -8566,7 +8881,19 @@ def _loaded_archive_was_normalized(
         ) or str(parsed.image_name).lower().endswith(".prisma-source.png")
 
     if normalized:
-        if display_suffix not in NORMALIZED_EXTENSIONS or member_suffix != ".png":
+        normalized_jpeg = (
+            display_suffix in {".jpg", ".jpeg", ".jpe", ".jfif"}
+            and isinstance(source_asset, dict)
+            and str(source_asset.get("original_source_format") or "").upper() == "JPEG"
+            and source_asset.get("source_variant") == "hdr_gain_map"
+        )
+        if (
+            member_suffix != ".png"
+            or (
+                display_suffix not in NORMALIZED_EXTENSIONS
+                and not normalized_jpeg
+            )
+        ):
             raise HTTPException(
                 400,
                 "Saved run normalized-source provenance does not match its image member",
@@ -8605,7 +8932,8 @@ def _loaded_archive_source_digest(
     source_asset = run_json.get("source_asset")
     digest = source_asset.get("source_digest") if isinstance(source_asset, dict) else None
     if normalized:
-        # A normalized PNG member cannot identify the original HEIC/AVIF bytes.
+        # A normalized PNG member cannot identify the original HEIC/AVIF or
+        # HDR-gain-map JPEG bytes.
         # Schema-v1 uploads are untrusted, so only locally managed archives may
         # use Prisma-authored provenance to reuse an original library source.
         if not trust_normalized_provenance:

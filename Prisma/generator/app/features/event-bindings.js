@@ -706,6 +706,9 @@ function bindEvents() {
         app.commands.saveSettingsAdvancedVisible(app.state.settings.settingsAdvancedVisible);
         app.commands.updateAdvancedSettingsVisibility();
         app.commands.distributeSettingsColumns();
+        app.events.emit("settings.advanced-changed", {
+          visible: app.state.settings.settingsAdvancedVisible,
+        });
       });
     }
 

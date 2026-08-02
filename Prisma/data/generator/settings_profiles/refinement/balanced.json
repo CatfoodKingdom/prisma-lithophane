@@ -31,6 +31,7 @@
     "color_region_target_mm": 0.8,
     "cell_mode": "felzenszwalb",
     "stage1_coarsening_factor": 1,
+    "neutral_field_protection_mode": "off",
     "stage2_fine_override_enabled": true,
     "stage2_boundary_mutation_enabled": true,
     "stage2_boundary_mutation_min_gain": null,

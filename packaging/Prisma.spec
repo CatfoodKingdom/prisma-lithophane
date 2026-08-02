@@ -36,6 +36,10 @@ analysis = Analysis(
             str(PRISMA / "data" / "generator" / "settings_profiles"),
             "Prisma/data/generator/settings_profiles",
         ),
+        (
+            str(PRISMA / "data" / "generator" / "tutorial_images"),
+            "Prisma/data/generator/tutorial_images",
+        ),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

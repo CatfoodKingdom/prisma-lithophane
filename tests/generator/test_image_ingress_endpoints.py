@@ -17,6 +17,14 @@ from source_images import ImageImportManager, SourceImageService
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "heif"
 
+_APPLE_GAIN_MAP_XMP = b"""<x:xmpmeta xmlns:x="adobe:ns:meta/">
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:HDRGainMap="http://ns.apple.com/HDRGainMap/1.0/"
+ xmlns:apdi="http://ns.apple.com/pixeldatainfo/1.0/">
+<HDRGainMap:HDRGainMapVersion>131072</HDRGainMap:HDRGainMapVersion>
+<apdi:AuxiliaryImageType>urn:com:apple:photo:2020:aux:hdrgainmap</apdi:AuxiliaryImageType>
+</rdf:Description></rdf:RDF></x:xmpmeta>"""
+
 
 def _heif_bytes() -> bytes:
     return base64.b64decode(
@@ -27,6 +35,15 @@ def _heif_bytes() -> bytes:
 def _png_bytes(size=(6, 4), color="blue") -> bytes:
     output = io.BytesIO()
     Image.new("RGB", size, color).save(output, format="PNG")
+    return output.getvalue()
+
+
+def _gain_map_jpeg_bytes() -> bytes:
+    primary = Image.new("RGB", (8, 6), (210, 30, 20))
+    gain_map = Image.new("L", (4, 3), 128)
+    gain_map.encoderinfo = {"xmp": _APPLE_GAIN_MAP_XMP}
+    output = io.BytesIO()
+    primary.save(output, format="MPO", save_all=True, append_images=[gain_map])
     return output.getvalue()
 
 
@@ -80,6 +97,27 @@ def test_folder_refresh_prepares_heic_and_preserves_original(ingress) -> None:
     assert (after.json()[0]["width"], after.json()[0]["height"]) == (29, 100)
     assert (images / "phone.HEIC").read_bytes() == original
     preview = client.get("/api/images/preview/phone.HEIC")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/jpeg"
+
+
+def test_folder_refresh_prepares_hdr_gain_map_jpeg_and_preserves_original(ingress) -> None:
+    client, images, cache = ingress
+    original = _gain_map_jpeg_bytes()
+    (images / "phone.jpg").write_bytes(original)
+
+    assert client.get("/api/images").json() == []
+    terminal = _wait(client, client.post("/api/images/refresh").json())
+    library = client.get("/api/images").json()
+
+    assert terminal["status"] == "complete"
+    assert library[0]["filename"] == "phone.jpg"
+    assert library[0]["source_format"] == "JPEG"
+    assert library[0]["normalized"] is True
+    assert (library[0]["width"], library[0]["height"]) == (8, 6)
+    assert (images / "phone.jpg").read_bytes() == original
+    assert list((cache / "source-images").glob("*.png"))
+    preview = client.get("/api/images/preview/phone.jpg")
     assert preview.status_code == 200
     assert preview.headers["content-type"] == "image/jpeg"
 

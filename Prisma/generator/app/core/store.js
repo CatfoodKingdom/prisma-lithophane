@@ -1,4 +1,4 @@
-/** @typedef {"session"|"image"|"palette"|"settings"|"solve"|"export"|"ui"} StateSlice */
+/** @typedef {"session"|"image"|"palette"|"settings"|"solve"|"export"|"guides"|"ui"} StateSlice */
 
 /**
  * Small observable store used for cross-feature state only. Feature-private

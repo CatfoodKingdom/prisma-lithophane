@@ -44,6 +44,8 @@
   --z-persistent-overlay: 90;
   --z-modal-overlay: 200;
   --z-lightbox: 1000;
+  --z-guide-overlay: 4000;
+  --z-guide-popover: 4100;
   --z-interrupt-dialog: 5000;
   --z-toast: 9999;
 }

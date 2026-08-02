@@ -363,6 +363,7 @@ export function installFeaturesShellIndex(app) {
       profile_name_at_solve: currentRecipeContext.profile_name_at_solve,
       is_profile_modified_at_solve: !!currentRecipeContext.is_profile_modified_at_solve,
       recipe_snapshot: app.commands._cloneValue(currentRecipeContext.recipe_snapshot),
+      deck_card_id: app.state.palette.activeDeckId || null,
       results: null,
       exportRecords: [],
       selectedExportId: null,
@@ -974,6 +975,7 @@ export function installFeaturesShellIndex(app) {
     if (tab === "solve") app.commands.renderSolveTab();
     if (tab === "export") app.commands.renderExportTab();
     app.commands.updateRail();
+    app.events.emit("tab.changed", { tab });
   }
 
   function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -1165,6 +1167,10 @@ export function installFeaturesShellIndex(app) {
         app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
         try {
           app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
+          app.events.emit("printer.active-changed", {
+            printerId: active.printer?.id || null,
+            source: "sidebar",
+          });
         } catch (error) {
           console.error("[printers] active printer could not be rendered:", error);
           app.commands.showToast(
@@ -1198,6 +1204,10 @@ export function installFeaturesShellIndex(app) {
         app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
         try {
           app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
+          app.events.emit("printer.nozzle-changed", {
+            printerId: active.printer?.id || null,
+            nozzleSize: active.nozzle?.size ?? null,
+          });
         } catch (error) {
           console.error("[printers] active nozzle could not be rendered:", error);
           app.commands.showToast(

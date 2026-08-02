@@ -542,7 +542,9 @@ export function installFeaturesSettingsProfiles(app) {
     if (nameEl) nameEl.textContent = profile?.name || app.state.ui.SYSTEM_SETTINGS_PROFILE_NAME;
     if (sourceEl) {
       sourceEl.textContent = profile?.kind === "temporary"
-        ? `From solved run: ${profile.source?.label || profile.name || "unknown"}`
+        ? profile.source?.kind === "guide"
+          ? `For guide: ${profile.source?.label || profile.name || "unknown"}`
+          : `From solved run: ${profile.source?.label || profile.name || "unknown"}`
         : "";
       sourceEl.classList.toggle("is-hidden", profile?.kind !== "temporary");
     }
@@ -1772,6 +1774,7 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.cell_mode = app.state.ui.$("#cfgCellMode")?.value || app.state.settings.config.cell_mode || "felzenszwalb";
     app.state.settings.config.stage1_coarsening_factor = app.commands.readBoundedNumberInput("cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor || 1, { parse: (value) => parseInt(value, 10), min: 1, max: 4, integer: true });
     app.state.settings.config.color_region_target_mm = app.commands.readBoundedNumberInput("cfgColorRegionTarget", app.state.settings.config.color_region_target_mm, { min: 0.001 });
+    app.state.settings.config.neutral_field_protection_mode = app.state.ui.$("#cfgNeutralFieldProtection")?.value || "off";
     // Blueprint printability diagnostics stay on for normal app solves.
     // Heavier pressure/geometry attribution artifacts are research-only and
     // can still be enabled from scripts or API payloads.

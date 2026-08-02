@@ -71,7 +71,10 @@ EXCLUDED_ASSETS = (
 )
 PUBLIC_DATA_PREFIXES = (
     "Prisma/data/generator/settings_profiles/",
+    "Prisma/data/generator/tutorial_images/",
 )
+PUBLIC_TUTORIAL_IMAGE_PREFIX = "Prisma/data/generator/tutorial_images/"
+PUBLIC_TUTORIAL_IMAGE_SUFFIXES = {".jpg", ".jpeg"}
 
 PERSONAL_PATTERNS = {
     "personal_name": re.compile(b"bran" + b"don", re.IGNORECASE),
@@ -137,7 +140,12 @@ def _collect_allowlist(project_root: Path) -> list[Path]:
         is_public_data = any(rel.startswith(prefix) for prefix in PUBLIC_DATA_PREFIXES)
         if any(rel.startswith(prefix) for prefix in EXCLUDED_ASSETS) and not is_public_data:
             continue
-        if path.suffix.casefold() in PRISMA_SUFFIXES:
+        suffix = path.suffix.casefold()
+        is_tutorial_image = (
+            rel.startswith(PUBLIC_TUTORIAL_IMAGE_PREFIX)
+            and suffix in PUBLIC_TUTORIAL_IMAGE_SUFFIXES
+        )
+        if suffix in PRISMA_SUFFIXES or is_tutorial_image:
             selected[rel] = path
 
     tests_root = project_root / "tests"
