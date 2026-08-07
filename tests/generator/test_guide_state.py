@@ -1,7 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -246,123 +244,19 @@ def test_guide_state_api_rejects_non_integer_revision(
     assert response.status_code == 422
 
 
-def test_basics_tutorial_image_never_overwrites_a_conflicting_user_file(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    source = tmp_path / "bundled.jpg"
-    source.write_bytes(b"bundled-tutorial-photo")
-    images = tmp_path / "Images"
-    images.mkdir()
-    original = images / server._BASICS_TUTORIAL_IMAGE_NAME
-    original.write_bytes(b"user-photo")
-
-    class FakeSourceImages:
-        @staticmethod
-        def prepare(path: Path):
-            return SimpleNamespace(
-                display_name=path.name,
-                width=90,
-                height=120,
-            )
-
-    monkeypatch.setattr(server, "_BASICS_TUTORIAL_IMAGE_SOURCE", source)
-    monkeypatch.setattr(server, "_IMAGES_DIR", images)
-    monkeypatch.setattr(server, "_SOURCE_IMAGES", FakeSourceImages())
-
-    prepared = server._materialize_basics_tutorial_image()
-
-    assert original.read_bytes() == b"user-photo"
-    assert prepared.display_name == "Prisma Tutorial - Bubba Blanket 2.jpg"
-    assert (images / prepared.display_name).read_bytes() == source.read_bytes()
-    assert not list(images.glob(".*.tmp"))
-
-
-def test_basics_prepare_reports_and_restores_tutorial_printer(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    tutorial_path = tmp_path / "Prisma Tutorial - Bubba Blanket.jpg"
-    tutorial_path.write_bytes(b"tutorial-image-bytes")
-    tutorial_image = SimpleNamespace(
-        display_name="Prisma Tutorial - Bubba Blanket.jpg",
-        width=1600,
-        height=1200,
-        original_path=tutorial_path,
-        source_format="jpeg",
-        normalized=False,
-    )
-    printers = {
-        "printers": [server.deepcopy(server._BAMBU_X1C_PRINTER_PROFILE)],
-        "active_printer_id": "bambu-x1c",
-        "active_nozzle_size": 0.2,
-    }
-    restored = []
-    monkeypatch.setattr(server, "_load_printers", lambda: server.deepcopy(printers))
-    monkeypatch.setattr(
-        server,
-        "_restore_tutorial_printer",
-        lambda data: (
-            restored.append(True)
-            or {
-                **server.deepcopy(data),
-                "printers": [
-                    *server.deepcopy(data["printers"]),
-                    server.deepcopy(server._TUTORIAL_PRINTER_PROFILE),
-                ],
-            }
-        ),
-    )
-    monkeypatch.setattr(
-        server,
-        "_materialize_basics_tutorial_image",
-        lambda: tutorial_image,
-    )
-    client = TestClient(server.app)
-
-    missing = client.post(
-        "/api/guides/basics/prepare",
-        json={"restore_tutorial_printer": False},
-    )
-    repaired = client.post(
+def test_old_basics_prepare_endpoint_was_removed() -> None:
+    response = TestClient(server.app).post(
         "/api/guides/basics/prepare",
         json={"restore_tutorial_printer": True},
     )
 
-    assert missing.status_code == 200
-    assert missing.json()["tutorial_printer"]["status"] == "missing"
-    assert repaired.status_code == 200
-    assert repaired.json()["tutorial_printer"]["status"] == "ready"
-    assert repaired.json()["tutorial_image"]["filename"] == tutorial_image.display_name
-    assert repaired.json()["tutorial_image"]["size_kb"] == round(
-        tutorial_path.stat().st_size / 1024,
-        1,
-    )
-    assert repaired.json()["tutorial_image"]["source_format"] == "jpeg"
-    assert repaired.json()["tutorial_image"]["normalized"] is False
-    assert restored == [True]
+    assert response.status_code == 405
 
 
-def test_basics_prepare_skips_unrequested_tutorial_inputs(monkeypatch) -> None:
-    def unexpected(*_args, **_kwargs):
-        raise AssertionError("unrequested tutorial preparation ran")
-
-    monkeypatch.setattr(server, "_load_printers", unexpected)
-    monkeypatch.setattr(server, "_restore_tutorial_printer", unexpected)
-    monkeypatch.setattr(server, "_materialize_basics_tutorial_image", unexpected)
-    client = TestClient(server.app)
-
-    response = client.post(
-        "/api/guides/basics/prepare",
-        json={
-            "restore_tutorial_printer": True,
-            "include_tutorial_printer": False,
-            "include_tutorial_image": False,
-        },
+def test_protected_guide_asset_cannot_mount_without_a_durable_session() -> None:
+    response = TestClient(server.app).post(
+        "/api/guides/runtime/assets/bubba-blanket/mount",
+        json={"session_id": "missing", "page_id": "page-a"},
     )
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "tutorial_image": None,
-        "tutorial_printer": None,
-    }
+    assert response.status_code == 409

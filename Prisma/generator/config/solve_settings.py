@@ -7,6 +7,7 @@ must have one declaration and one set of pure derived-value helpers.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+import math
 from pathlib import Path
 from typing import List, Optional
 
@@ -18,6 +19,7 @@ NEUTRAL_FIELD_PROTECTION_CUTOFFS: dict[str, float | None] = {
     "narrow": 0.010,
     "standard": 0.020,
     "broad": 0.035,
+    "custom": 0.020,
 }
 
 
@@ -61,6 +63,7 @@ class SolveSettings:
     color_region_target_width_multiplier: float = 2.0
     stage2_continuity_weight: float | None = None
     neutral_field_protection_mode: str = "off"
+    neutral_field_protection_cutoff: float = 0.020
     stage2_area_weighted_zone_choice: bool = False
     stage2_pressure_frontier_rescue: bool = False
     stage2_source_edge_subzones: bool = False
@@ -132,6 +135,9 @@ class SolveSettings:
         self.neutral_field_protection_mode = normalize_neutral_field_protection_mode(
             self.neutral_field_protection_mode
         )
+        self.neutral_field_protection_cutoff = float(self.neutral_field_protection_cutoff)
+        if not math.isfinite(self.neutral_field_protection_cutoff) or not 0 <= self.neutral_field_protection_cutoff <= 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
         self.palette = canonical_palette_order(
             self.palette,
             load_filament_order_registry(),

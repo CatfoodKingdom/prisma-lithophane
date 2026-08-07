@@ -3,6 +3,7 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesSettingsProfiles(app) {
+  let activeSettingsProfileBrowserClose = null;
   function _configSettingsProfileSnapshot() {
     app.commands.applyMandatoryProductSettings();
     const snap = {};
@@ -24,6 +25,9 @@ export function installFeaturesSettingsProfiles(app) {
       "protect" + "_confidence_floor",
       `${retiredMask}_provider`,
       `${retiredMask}_override`,
+      "use_corrections",
+      "stage2_boundary_mutation_current_de_percentile",
+      "stage2_boundary_mutation_min_component_mm",
     ].forEach((key) => delete out[key]);
     return out;
   }
@@ -122,6 +126,9 @@ export function installFeaturesSettingsProfiles(app) {
       if (k === "gamut_mode") value = app.commands.normalizeActiveGamutMode(value);
       app.state.settings.config[k] = value;
     }
+    app.state.settings.config.use_corrections = true;
+    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = null;
+    app.state.settings.config.stage2_boundary_mutation_min_component_mm = null;
   }
 
   function _setLoadedSettingsProfile(record, snapshot = null) {
@@ -488,6 +495,7 @@ export function installFeaturesSettingsProfiles(app) {
       modules: app.commands._currentSettingsProfileModulesSnapshot(),
     });
     app.commands.renderSettingsProfileBar();
+    app.events.emit("settings.profile.loaded", { profileId: profile.id, kind: profile.kind, name: profile.name });
     return true;
   }
 
@@ -501,7 +509,7 @@ export function installFeaturesSettingsProfiles(app) {
     return true;
   }
 
-  async function loadSettingsProfiles() {
+  async function loadSettingsProfiles({ applyPreferred = true, syncServer = true } = {}) {
     try {
       const data = await app.api.fetchSettingsProfiles();
       app.commands._refreshSettingsProfilesFromResponse(data);
@@ -509,8 +517,8 @@ export function installFeaturesSettingsProfiles(app) {
         || app.commands.findSettingsProfile(data?.system_profile_id || app.state.ui.SYSTEM_SETTINGS_PROFILE_ID)
         || app.state.settings.settingsProfiles[0]
         || null;
-      if (preferredProfile) {
-        await app.commands._doLoadSettingsProfile(preferredProfile, { syncServer: true });
+      if (preferredProfile && applyPreferred) {
+        await app.commands._doLoadSettingsProfile(preferredProfile, { syncServer });
       }
     } catch (e) {
       console.warn("[settings profiles] load failed:", e.message);
@@ -528,8 +536,8 @@ export function installFeaturesSettingsProfiles(app) {
     app.commands.renderSettingsTab();
   }
 
-  async function loadPresets() {
-    return app.commands.loadSettingsProfiles();
+  async function loadPresets(options = {}) {
+    return app.commands.loadSettingsProfiles(options);
   }
 
   function renderSettingsProfileBar() {
@@ -747,6 +755,10 @@ export function installFeaturesSettingsProfiles(app) {
           input?.select();
           return false;
         }
+        if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.overwrite", {
+          profile_id: state.profile.id,
+          name: state.trimmed,
+        })) return false;
         const response = await app.api.updateSettingsProfile(state.profile.id, {
           name: state.trimmed,
           settings: state.profile.settings,
@@ -760,7 +772,7 @@ export function installFeaturesSettingsProfiles(app) {
         app.commands.renderSettingsTab({ preservePendingUi: true });
         cancelInlineRename();
         app.commands.showToast(`Renamed Settings Profile to "${state.trimmed}"`, "success");
-        render();
+        if (!settled) render();
         return true;
       };
 
@@ -922,21 +934,39 @@ export function installFeaturesSettingsProfiles(app) {
       };
 
       const render = () => {
+        if (settled) return;
         renderList();
         renderSelection();
       };
 
+      let settled = false;
       const close = (result) => {
+        if (settled) return;
+        settled = true;
         overlay.classList.add("is-hidden");
         overlay.setAttribute("aria-hidden", "true");
+        restoreBtn.onclick = null;
+        loadRunBtn.onclick = null;
+        closeBtn.onclick = null;
+        overlay.onclick = null;
+        listEl.querySelectorAll(".settings-profile-modal-item, [data-profile-action], [data-profile-rename-input]")
+          .forEach(element => {
+            element.onclick = null;
+            element.onkeydown = null;
+            element.oninput = null;
+          });
+        selectionEl.querySelectorAll("[data-browser-action]").forEach(element => { element.onclick = null; });
+        if (activeSettingsProfileBrowserClose === close) activeSettingsProfileBrowserClose = null;
         resolve(result);
       };
+      activeSettingsProfileBrowserClose = close;
 
       titleEl.textContent = title || "Settings Profiles";
       render();
 
       overlay.classList.remove("is-hidden");
       overlay.setAttribute("aria-hidden", "false");
+      app.events.emit("settings.profile-browser.opened", { selectedProfileId: selectedId });
 
       restoreBtn.onclick = () => close({ action: "restore", profileId: selectedId });
       loadRunBtn.onclick = () => close({ action: "load_saved_run", profileId: selectedId });
@@ -945,6 +975,10 @@ export function installFeaturesSettingsProfiles(app) {
         if (event.target === overlay) close(null);
       };
     });
+  }
+
+  function closeSettingsProfileBrowserModal() {
+    activeSettingsProfileBrowserClose?.(null);
   }
 
   async function showSettingsProfileSaveAsModal({
@@ -1090,12 +1124,31 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   async function _saveDraftAsSettingsProfileWithName(name) {
-    const beforeIds = new Set(app.state.settings.settingsProfiles.map((profile) => profile.id));
-    const response = await app.api.createSettingsProfile({
+    const settings = app.commands._currentSettingsSnapshot();
+    const modules = app.commands._currentSettingsProfileModulesSnapshot();
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.create", {
       name,
-      settings: app.commands._currentSettingsSnapshot(),
-      modules: app.commands._currentSettingsProfileModulesSnapshot(),
+      source_profile_id: app.state.settings.loadedProfileRef?.id || "",
+      t_max: Number(settings.t_max),
+    })) return null;
+    const beforeIds = new Set(app.state.settings.settingsProfiles.map((profile) => profile.id));
+    const create = () => app.api.createSettingsProfile({
+      name,
+      settings,
+      modules,
     });
+    const response = app.commands.performGuideDurableMutation
+      ? await app.commands.performGuideDurableMutation({
+        direction: "create",
+        operationId: "saving-loading-profile",
+        kind: "settings-profile",
+        name,
+        fingerprint: { settings, modules },
+        resolveId: result => result?.profiles?.find(profile => (
+          !beforeIds.has(profile.id) && profile.name?.toLocaleLowerCase() === name.toLocaleLowerCase()
+        ))?.id,
+      }, create)
+      : await create();
     app.commands._refreshSettingsProfilesFromResponse(response);
     const created = app.state.settings.settingsProfiles.find((profile) => !beforeIds.has(profile.id))
       || app.state.settings.settingsProfiles.find((profile) => (profile.name || "").toLocaleLowerCase() === name.toLocaleLowerCase())
@@ -1108,11 +1161,16 @@ export function installFeaturesSettingsProfiles(app) {
       });
     }
     app.commands.renderSettingsTab({ preservePendingUi: true });
+    if (created) app.events.emit("settings.profile.created", { profileId: created.id, name: created.name });
     return created;
   }
 
   async function _overwriteSettingsProfile(profile, { nameOverride = null } = {}) {
     if (!profile || profile.kind !== "named") return null;
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.overwrite", {
+      profile_id: profile.id,
+      name: nameOverride || profile.name,
+    })) return null;
     const response = await app.api.updateSettingsProfile(profile.id, {
       name: nameOverride || profile.name,
       settings: app.commands._currentSettingsSnapshot(),
@@ -1181,10 +1239,24 @@ export function installFeaturesSettingsProfiles(app) {
       { ok: "Delete", cancel: "Cancel" }
     );
     if (!confirmed) return false;
-    const response = await app.api.deleteSettingsProfile(profile.id);
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.delete", {
+      profile_id: profile.id,
+    })) return false;
+    const remove = () => app.api.deleteSettingsProfile(profile.id);
+    const response = app.commands.performGuideDurableMutation
+      ? await app.commands.performGuideDurableMutation({
+        direction: "delete",
+        operationId: "saving-loading-profile",
+        kind: "settings-profile",
+        id: profile.id,
+        name: profile.name,
+        fingerprint: { settings: profile.settings, modules: profile.modules },
+      }, remove)
+      : await remove();
     app.commands._refreshSettingsProfilesFromResponse(response);
     app.commands.renderSettingsTab({ preservePendingUi: true });
     app.commands.showToast(`Deleted Settings Profile "${profile.name}"`, "success");
+    app.events.emit("settings.profile.deleted", { profileId: profile.id, name: profile.name });
     return true;
   }
 
@@ -1194,6 +1266,9 @@ export function installFeaturesSettingsProfiles(app) {
     if (profile.id === app.state.settings.userDefaultProfileId) {
       return false;
     }
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.set-startup", {
+      profile_id: profile.id,
+    })) return false;
     const response = await app.api.setUserDefaultSettingsProfile(profile.id);
     app.commands._refreshSettingsProfilesFromResponse(response);
     app.commands.renderSettingsTab({ preservePendingUi: true });
@@ -1339,6 +1414,9 @@ export function installFeaturesSettingsProfiles(app) {
         { ok: "Make Default", cancel: "Not Now" }
       );
       if (!makeDefault) return;
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.set-startup", {
+        profile_id: created.id,
+      })) return;
       const response = await app.api.setUserDefaultSettingsProfile(created.id);
       app.commands._refreshSettingsProfilesFromResponse(response);
       app.commands.renderSettingsTab({ preservePendingUi: true });
@@ -1348,6 +1426,7 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   async function handleRestoreSystemSettingsProfile() {
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.restore-system", {})) return;
     const proceed = await app.commands._guardSettingsProfileTransition("restoring the system default");
     if (!proceed) return;
     try {
@@ -1485,7 +1564,21 @@ export function installFeaturesSettingsProfiles(app) {
       const otherIssues = allIssues.filter(issue => issue !== mismatch.message);
       const requiredText = app.commands.formatSolvePitchMm(mismatch.nozzleSize);
       const currentText = app.commands.formatSolvePitchMm(mismatch.pitch);
-      const canSolveImmediately = intent === "single" && otherIssues.length === 0;
+      let dimensionRemediationPending = false;
+      if (app.state.image.selectedImage) {
+        try {
+          dimensionRemediationPending = !app.commands.resolveSolveGrid(
+            app.state.image.frameState.widthMm,
+            app.state.image.frameState.heightMm,
+            mismatch.nozzleSize,
+          ).aligned.all;
+        } catch {
+          dimensionRemediationPending = true;
+        }
+      }
+      const canSolveImmediately = intent === "single"
+        && otherIssues.length === 0
+        && !dimensionRemediationPending;
       const confirmed = await app.commands.appConfirm(
         `The current Solve Pitch is ${currentText} mm. The active ${requiredText} mm nozzle requires a Solve Pitch of at least ${requiredText} mm.\n\n`
           + `Prisma can change Solve Pitch to ${requiredText} mm and continue.`,
@@ -1524,6 +1617,181 @@ export function installFeaturesSettingsProfiles(app) {
       return { proceed: false, corrected };
     }
     return { proceed: true, corrected };
+  }
+
+  function normalizeAuthoritativeSolveGrid(value) {
+    const grid = value && typeof value === "object" ? value : null;
+    const requested = grid?.requested;
+    const cells = grid?.cells;
+    const resolved = grid?.resolved;
+    const delta = grid?.delta;
+    const aligned = grid?.aligned;
+    const pitch = Number(grid?.pitch_mm);
+    const requestedWidth = Number(requested?.width_mm);
+    const requestedHeight = Number(requested?.height_mm);
+    const cellsWidth = Number(cells?.width);
+    const cellsHeight = Number(cells?.height);
+    const resolvedWidth = Number(resolved?.width_mm);
+    const resolvedHeight = Number(resolved?.height_mm);
+    const deltaWidth = Number(delta?.width_mm);
+    const deltaHeight = Number(delta?.height_mm);
+    const finite = [
+      pitch,
+      requestedWidth,
+      requestedHeight,
+      cellsWidth,
+      cellsHeight,
+      resolvedWidth,
+      resolvedHeight,
+      deltaWidth,
+      deltaHeight,
+    ].every(Number.isFinite);
+    if (
+      !finite
+      || grid?.rounding_mode !== "half_up"
+      || !(pitch > 0)
+      || !Number.isInteger(cellsWidth)
+      || !Number.isInteger(cellsHeight)
+      || cellsWidth < 1
+      || cellsHeight < 1
+      || typeof aligned?.width !== "boolean"
+      || typeof aligned?.height !== "boolean"
+      || typeof aligned?.all !== "boolean"
+    ) return null;
+
+    const eps = 1e-6;
+    const close = (left, right) => Math.abs(left - right) <= eps;
+    const expectedWidthAligned = Math.abs(resolvedWidth - requestedWidth) <= eps;
+    const expectedHeightAligned = Math.abs(resolvedHeight - requestedHeight) <= eps;
+    if (
+      !close(resolvedWidth, cellsWidth * pitch)
+      || !close(resolvedHeight, cellsHeight * pitch)
+      || !close(deltaWidth, resolvedWidth - requestedWidth)
+      || !close(deltaHeight, resolvedHeight - requestedHeight)
+      || aligned.width !== expectedWidthAligned
+      || aligned.height !== expectedHeightAligned
+      || aligned.all !== (aligned.width && aligned.height)
+    ) return null;
+
+    return {
+      rounding_mode: "half_up",
+      pitch_mm: pitch,
+      requested: { width_mm: requestedWidth, height_mm: requestedHeight },
+      cells: { width: cellsWidth, height: cellsHeight },
+      resolved: { width_mm: resolvedWidth, height_mm: resolvedHeight },
+      delta: { width_mm: deltaWidth, height_mm: deltaHeight },
+      aligned: { width: aligned.width, height: aligned.height, all: aligned.all },
+    };
+  }
+
+  function buildSolveGridAdjustmentMessage(grid) {
+    const requested = `${app.commands.formatPhysicalMm(grid.requested.width_mm)} × ${app.commands.formatPhysicalMm(grid.requested.height_mm)} mm`;
+    const resolved = `${app.commands.formatPhysicalMm(grid.resolved.width_mm)} × ${app.commands.formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    const adjusted = `${resolved} (${grid.cells.width} × ${grid.cells.height} px)`;
+    const widthIncompatible = grid.aligned.width === false;
+    const heightIncompatible = grid.aligned.height === false;
+    let reason;
+    if (widthIncompatible && heightIncompatible) {
+      reason = "neither the width nor the height resolves to a whole number of solve pixels";
+    } else if (widthIncompatible) {
+      reason = "the width does not resolve to a whole number of solve pixels";
+    } else {
+      reason = "the height does not resolve to a whole number of solve pixels";
+    }
+    const lines = [
+      `The requested lithophane size is incompatible with the selected ${app.commands.formatPhysicalMm(grid.pitch_mm)} mm Solve Pitch because ${reason}.`,
+      `Requested size: ${requested}\nAdjusted size: ${adjusted}`,
+      "Select Accept & Continue to apply the adjusted size. Select Cancel to return to the Image page without changing the dimensions.",
+    ];
+    const borderEnabled = Boolean(app.state.settings.config.border);
+    const borderWidth = Number(app.state.settings.config.border_width_mm);
+    if (borderEnabled && Number.isFinite(borderWidth) && borderWidth > 0) {
+      const footprintWidth = grid.resolved.width_mm + 2 * borderWidth;
+      const footprintHeight = grid.resolved.height_mm + 2 * borderWidth;
+      lines.push(
+        `With the border, the finished footprint will be ${app.commands.formatPhysicalMm(footprintWidth)} × ${app.commands.formatPhysicalMm(footprintHeight)} mm.`,
+      );
+    }
+    return lines.join("\n\n");
+  }
+
+  function buildSolveGridAdjustmentEmphasis(grid) {
+    const requested = `${app.commands.formatPhysicalMm(grid.requested.width_mm)} × ${app.commands.formatPhysicalMm(grid.requested.height_mm)} mm`;
+    const resolved = `${app.commands.formatPhysicalMm(grid.resolved.width_mm)} × ${app.commands.formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    const values = [
+      `${app.commands.formatPhysicalMm(grid.pitch_mm)} mm`,
+      requested,
+      `${resolved} (${grid.cells.width} × ${grid.cells.height} px)`,
+    ];
+    const borderEnabled = Boolean(app.state.settings.config.border);
+    const borderWidth = Number(app.state.settings.config.border_width_mm);
+    if (borderEnabled && Number.isFinite(borderWidth) && borderWidth > 0) {
+      values.push(
+        `${app.commands.formatPhysicalMm(grid.resolved.width_mm + 2 * borderWidth)} × `
+          + `${app.commands.formatPhysicalMm(grid.resolved.height_mm + 2 * borderWidth)} mm`,
+      );
+    }
+    return values;
+  }
+
+  function showSolveGridVerificationError() {
+    app.commands.showToast(
+      "Couldn't verify the resolved image dimensions with the server. The solve was not started.",
+      "error",
+    );
+  }
+
+  async function syncSolveDimensionsWithGridRemediation({ intent = "single" } = {}) {
+    let response;
+    try {
+      response = await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+    } catch {
+      return { proceed: false, corrected: false };
+    }
+
+    const grid = app.commands.normalizeAuthoritativeSolveGrid(response?.resolved_solve_grid);
+    if (!grid) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: false };
+    }
+    if (grid.aligned.all) return { proceed: true, corrected: false, grid };
+
+    const confirmed = await app.commands.appConfirm(
+      app.commands.buildSolveGridAdjustmentMessage(grid),
+      {
+        ok: "Accept & Continue",
+        cancel: "Cancel",
+        title: "Error: Invalid Lithophane Size",
+        restoreFocus: app.state.ui.$("#startSolveBtn"),
+        emphasis: app.commands.buildSolveGridAdjustmentEmphasis(grid),
+      },
+    );
+    if (!confirmed) return { proceed: false, corrected: false, grid };
+
+    if (!app.commands.applyResolvedSolveGrid(grid)) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: false };
+    }
+
+    let verifiedResponse;
+    try {
+      verifiedResponse = await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+    } catch {
+      return { proceed: false, corrected: true };
+    }
+    const verified = app.commands.normalizeAuthoritativeSolveGrid(verifiedResponse?.resolved_solve_grid);
+    const eps = 1e-6;
+    if (
+      !verified?.aligned.all
+      || Math.abs(verified.requested.width_mm - grid.resolved.width_mm) > eps
+      || Math.abs(verified.requested.height_mm - grid.resolved.height_mm) > eps
+      || Math.abs(verified.resolved.width_mm - grid.resolved.width_mm) > eps
+      || Math.abs(verified.resolved.height_mm - grid.resolved.height_mm) > eps
+    ) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: true };
+    }
+    return { proceed: true, corrected: true, grid: verified };
   }
 
   function updateDerivedParams() {
@@ -1611,7 +1879,7 @@ export function installFeaturesSettingsProfiles(app) {
     }
 
     // Clear all field-level warning indicators
-    document.querySelectorAll(".stg-field-warn").forEach(el => el.remove());
+    document.querySelectorAll(".settings-field-warn").forEach(el => el.remove());
 
     // Add ⚠ glyph next to fields that triggered warnings
     const warnFieldIds = new Set();
@@ -1639,9 +1907,9 @@ export function installFeaturesSettingsProfiles(app) {
       const input = app.state.ui.$(`#${id}`);
       if (input) {
         const wrapper = input.closest(".input-with-unit");
-        if (wrapper && !wrapper.querySelector(".stg-field-warn")) {
+        if (wrapper && !wrapper.parentElement?.querySelector(".settings-field-warn")) {
           const mark = document.createElement("span");
-          mark.className = "stg-field-warn";
+          mark.className = "stg-field-warn settings-field-warn";
           mark.textContent = "\u26a0";
           wrapper.parentElement.insertBefore(mark, wrapper);
         }
@@ -1680,7 +1948,9 @@ export function installFeaturesSettingsProfiles(app) {
     const el = app.state.ui.$(`#${id}`);
     if (!el) return fallback;
     const coerced = app.commands.coerceNumberValue(el.value, fallback, options);
-    if (coerced.ok) el.value = coerced.value;
+    if (coerced.ok) {
+      el.value = app.commands.formatSettingsInputNumber?.(coerced.value) ?? coerced.value;
+    }
     return coerced.value;
   }
 
@@ -1691,7 +1961,7 @@ export function installFeaturesSettingsProfiles(app) {
     if (!raw) return null;
     const coerced = app.commands.coerceNumberValue(raw, null, options);
     if (coerced.ok) {
-      el.value = coerced.value;
+      el.value = app.commands.formatSettingsInputNumber?.(coerced.value) ?? coerced.value;
       return coerced.value;
     }
     el.value = "";
@@ -1701,7 +1971,9 @@ export function installFeaturesSettingsProfiles(app) {
   function setOptionalNumberInput(id, value) {
     const el = app.state.ui.$(`#${id}`);
     if (!el) return;
-    el.value = value === null || value === undefined ? "" : value;
+    el.value = value === null || value === undefined
+      ? ""
+      : (app.commands.formatSettingsInputNumber?.(value) ?? value);
   }
 
   function readConfigFromUI() {
@@ -1743,7 +2015,8 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.border = app.state.ui.$("#cfgBorder")?.checked ?? app.state.settings.config.border;
     app.state.settings.config.border_width_mm = app.commands.readBoundedNumberInput("cfgBorderWidth", app.state.settings.config.border_width_mm, { min: 0 });
     app.state.settings.config.border_height_mm = app.commands.readBoundedNumberInput("cfgBorderHeight", app.state.settings.config.border_height_mm, { min: 0 });
-    app.state.settings.config.use_corrections = app.state.ui.$("#cfgUseCorrections")?.checked ?? app.state.settings.config.use_corrections;
+    // Color corrections are mandatory in the Generator-facing contract.
+    app.state.settings.config.use_corrections = true;
     const solvePitch = app.commands.getCurrentSolvePitch();
     app.state.settings.config.image_sample_pitch_mm = solvePitch;
     app.state.settings.config.solver_fine_pitch_mm = solvePitch;
@@ -1775,6 +2048,11 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.stage1_coarsening_factor = app.commands.readBoundedNumberInput("cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor || 1, { parse: (value) => parseInt(value, 10), min: 1, max: 4, integer: true });
     app.state.settings.config.color_region_target_mm = app.commands.readBoundedNumberInput("cfgColorRegionTarget", app.state.settings.config.color_region_target_mm, { min: 0.001 });
     app.state.settings.config.neutral_field_protection_mode = app.state.ui.$("#cfgNeutralFieldProtection")?.value || "off";
+    app.state.settings.config.neutral_field_protection_cutoff = app.commands.readBoundedNumberInput(
+      "cfgNeutralFieldProtectionCutoff",
+      app.state.settings.config.neutral_field_protection_cutoff ?? 0.020,
+      { min: 0, max: 1 },
+    );
     // Blueprint printability diagnostics stay on for normal app solves.
     // Heavier pressure/geometry attribution artifacts are research-only and
     // can still be enabled from scripts or API payloads.
@@ -1790,10 +2068,10 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.color_region_target_from_printability = true;
     app.state.settings.config.stage2_fine_override_enabled = app.state.ui.$("#cfgStage2FineOverride")?.checked ?? app.state.settings.config.stage2_fine_override_enabled;
     app.state.settings.config.stage2_boundary_mutation_enabled = app.state.ui.$("#cfgStage2BoundaryMutation")?.checked ?? app.state.settings.config.stage2_boundary_mutation_enabled;
-    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationPercentile", { min: 0, max: 100 });
+    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = null;
     app.state.settings.config.stage2_boundary_mutation_max_passes = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMaxPasses", { min: 1, max: 16 }) ?? 1;
     app.state.settings.config.stage2_boundary_mutation_min_gain = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMinGain", { min: 0 });
-    app.state.settings.config.stage2_boundary_mutation_min_component_mm = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMinComponent", { min: 0 });
+    app.state.settings.config.stage2_boundary_mutation_min_component_mm = null;
     const baseShadingLimitEl = app.commands.getBaseShadingLimitInput();
     if (baseShadingLimitEl) {
       const fraction = app.commands.setLuminanceBaseShadingLimitFraction(
@@ -1802,8 +2080,6 @@ export function installFeaturesSettingsProfiles(app) {
       app.commands.syncBaseShadingLimitControls(app.commands.formatLuminanceBaseShadingLimitPercent(fraction));
     }
     app.state.settings.config.luminance_mode = app.commands.applyLuminanceMode(selectedLuminanceMode, { resetStandard: true });
-    app.state.settings.config.swap_improvement_threshold = app.commands.readBoundedNumberInput("paletteSwapThreshold", app.state.settings.config.swap_improvement_threshold || 2.0, { min: 0 });
-    app.state.settings.config.force_all_tiers = app.state.ui.$("#paletteForceAllTiers")?.checked || false;
   }
 
   function _formatConfigSyncError(err) {
@@ -1850,7 +2126,9 @@ export function installFeaturesSettingsProfiles(app) {
     const pendingSync = app.state.settings._configSyncChain.catch(() => {}).then(runSync);
     app.state.settings._configSyncChain = pendingSync.catch(() => {});
     try {
-      return await pendingSync;
+      const response = await pendingSync;
+      app.events.emit("config.synced", { config: app.commands._cloneValue(app.state.settings.config) });
+      return response;
     } catch (err) {
       console.warn("[config] sync failed:", err.message);
       if (showErrorToast) {
@@ -1875,7 +2153,14 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   function applySolvePitchDraft(rawValue, mirrorEl = null) {
-    const previousPitch = app.commands.getCurrentSolvePitch();
+    // During an input event the DOM already contains rawValue, so it cannot tell
+    // us the pitch that the current cell-based smoothing kernel was derived from.
+    // Use the draft config's prior pitch to keep the physical radius unchanged.
+    const imagePitch = parseFloat(app.state.settings.config.image_sample_pitch_mm);
+    const solverPitch = parseFloat(app.state.settings.config.solver_fine_pitch_mm);
+    const previousPitch = Number.isFinite(imagePitch) && imagePitch > 0
+      ? imagePitch
+      : (Number.isFinite(solverPitch) && solverPitch > 0 ? solverPitch : 0.20);
     const radiusMm = app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel, previousPitch);
     const v = parseFloat(rawValue);
     if (!(v > 0)) return false;
@@ -1951,6 +2236,7 @@ export function installFeaturesSettingsProfiles(app) {
     _renderSettingsProfileList,
     _settingsProfileSelectionHtml,
     showSettingsProfileBrowserModal,
+    closeSettingsProfileBrowserModal,
     showSettingsProfileSaveAsModal,
     _guardSettingsProfileTransition,
     _saveDraftAsSettingsProfileWithName,
@@ -1976,6 +2262,11 @@ export function installFeaturesSettingsProfiles(app) {
     getSolveSettingsPreflightIssues,
     buildSolveSettingsPreflightMessage,
     syncSolveSettingsWithPitchRemediation,
+    normalizeAuthoritativeSolveGrid,
+    buildSolveGridAdjustmentMessage,
+    buildSolveGridAdjustmentEmphasis,
+    showSolveGridVerificationError,
+    syncSolveDimensionsWithGridRemediation,
     updateDerivedParams,
     applyDraftNumberField,
     bindDraftNumberInput,

@@ -217,18 +217,31 @@ export function installFeaturesSettingsModules(app) {
       const wrapper = document.createElement("div");
       wrapper.className = "input-with-unit stg-iwu";
       const inp = document.createElement("input");
-      inp.type = "number";
+      // All module parameters use text inputs. Integer parameters still get
+      // the custom quantized controls below; keeping them out of native
+      // number inputs prevents a second browser-specific wheel implementation
+      // from competing with the custom one.
+      inp.type = "text";
       inp.className = "unit-input";
       inp.id = inputId;
-      inp.value = currentValue;
+      inp.value = app.commands.formatSettingsInputNumber
+        ? app.commands.formatSettingsInputNumber(currentValue)
+        : currentValue;
       inp.inputMode = param.type === "int" ? "numeric" : "decimal";
       inp.step = param.type === "int" ? "1" : "any";
+      if (param.type === "int") {
+        inp.dataset.settingsQuantized = "1";
+        inp.dataset.settingsInteger = "1";
+        if (param.default != null) inp.dataset.settingsDefaultValue = String(param.default);
+      }
       if (param.min != null) inp.min = param.min;
       if (param.max != null) inp.max = param.max;
       inp.addEventListener("change", () => {
         const fallback = app.commands.getModuleParamValue(app.state.settings.config, moduleId, param);
         const coerced = app.commands.coerceNumericParamValue(param, inp.value, fallback);
-        inp.value = coerced.value;
+        inp.value = app.commands.formatSettingsInputNumber
+          ? app.commands.formatSettingsInputNumber(coerced.value)
+          : coerced.value;
         if (coerced.ok) {
           app.commands.setModuleParamValue(moduleId, param, coerced.value);
           app.commands.syncConfigToServer();
@@ -512,6 +525,7 @@ export function installFeaturesSettingsModules(app) {
 
     // Re-distribute columns since dynamic sections changed
     app.commands.distributeSettingsColumns();
+    app.commands.enhanceSettingsNumericInputs?.();
   }
 
 

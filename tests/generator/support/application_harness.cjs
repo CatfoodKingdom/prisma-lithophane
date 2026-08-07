@@ -25,8 +25,10 @@ const defaultFeatures = [
   "features/solve/recipe-viewer.js",
   "features/settings/modules.js",
   "features/settings/layout.js",
-  "features/guides/definitions.js",
+  "features/guides/actions/registry.js",
+  "features/guides/actions/workspace.js",
   "features/guides/targets.js",
+  "features/guides/registry.js",
   "features/guides/overlay.js",
   "features/guides/controller.js",
 ];
@@ -70,6 +72,7 @@ function fakeElement() {
     value: "",
     addEventListener() {},
     appendChild(child) { this.children.push(child); return child; },
+    closest() { return null; },
     focus() {},
     getAttribute(name) { return this[name] ?? null; },
     querySelector() { return null; },
@@ -96,8 +99,64 @@ async function createFeatureHarness({
   const { createApplicationContext, initializeApplicationState } = await import(
     moduleUrl("core/application-context.js")
   );
+  let guideRuntimeSnapshot = null;
+  const guideApi = {
+    setRequestContext() {},
+    async acquireGuideRuntime() {
+      return { workspace_epoch: 0, lease: { lease_id: "test-lease", owned_by_page: true } };
+    },
+    async releaseGuideRuntime() { return { workspace_epoch: 0, lease: null, session: null }; },
+    async beginGuideRuntime(payload) {
+      guideRuntimeSnapshot = payload.clientSnapshot;
+      return {
+        session_id: "test-guide-session",
+        workspace_epoch: 0,
+        images_folder: "C:\\PrismaRuntime\\Images",
+      };
+    },
+    async resetGuideRuntime() { return { removed: 0, config: {} }; },
+    async mountGuidePrinter() {
+      return {
+        profile: {
+          id: "tutorial-printer", name: "Tutorial Printer", max_print_area: { x: 256, y: 256 },
+          nozzle_profiles: [{ size: 0.2 }, { size: 0.4 }],
+        },
+      };
+    },
+    async mountGuideAsset() {
+      return {
+        asset_id: "bubba-blanket", filename: "Prisma Tutorial - Bubba Blanket.jpg",
+        width: 1200, height: 1600, size_kb: 100, source_format: "jpeg",
+        source_ref: "guide-image:bubba-blanket", virtual: true, deletable: false, renameable: false,
+      };
+    },
+    async heartbeatGuideRuntime() { return {}; },
+    async claimGuideRuntimeRecovery() { return {}; },
+    async abandonGuideRuntime() { guideRuntimeSnapshot = null; return { workspace_epoch: 1 }; },
+    async openGuideRuntimeConfigFolder() { return { opened: true }; },
+    async fetchGuideRuntime() {
+      return {
+        workspace_epoch: 0,
+        session: guideRuntimeSnapshot
+          ? { session_id: "test-guide-session", snapshot: { client: guideRuntimeSnapshot } }
+          : null,
+      };
+    },
+    async restoreGuideRuntimeServer() { return {}; },
+    async finalizeGuideRuntime() { guideRuntimeSnapshot = null; return { workspace_epoch: 1 }; },
+    async getSolveStatus() { return { status: "idle" }; },
+    async getExportStatus() { return { status: "idle" }; },
+    async apiFetch() { return { status: "idle" }; },
+    async apiPost() { return { requested: true }; },
+    async cancelSolve() { return { requested: true }; },
+    async cancelExport() { return { requested: true }; },
+    async updateConfig(config) { return { config }; },
+    imagePreviewUrl(filename) { return `/api/images/preview/${encodeURIComponent(filename)}`; },
+    async setActivePrinter() { return {}; },
+    async registerGuideJob() { return { owned_jobs: {} }; },
+  };
   const app = createApplicationContext({
-    api,
+    api: { ...guideApi, ...api },
     data: { STATIC_FILAMENTS: filaments },
     services: { pollJobUntilTerminal: async () => ({}), ...services },
     root,

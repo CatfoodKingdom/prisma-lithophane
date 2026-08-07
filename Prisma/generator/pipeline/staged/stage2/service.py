@@ -170,9 +170,11 @@ def build_visible_plan(
         cfg.stage2_fine_override_enabled
     )
     neutral_field_mode = str(cfg.neutral_field_protection_mode)
-    neutral_field_chroma_cutoff = NEUTRAL_FIELD_PROTECTION_CUTOFFS[
-        neutral_field_mode
-    ]
+    neutral_field_chroma_cutoff = (
+        max(0.0, min(1.0, float(cfg.neutral_field_protection_cutoff)))
+        if neutral_field_mode == "custom"
+        else NEUTRAL_FIELD_PROTECTION_CUTOFFS[neutral_field_mode]
+    )
     offset_y_px, offset_x_px = _stage1_lattice_offset_px(cfg)
     if zone_plan.coarse_to_fine_scale <= 1:
         offset_y_px = 0
@@ -918,7 +920,10 @@ def build_visible_plan(
     boundary_mutation_candidate_pixels = 0
     boundary_mutation_accepted_pixels = 0
     boundary_mutation_accepted_components = 0
-    boundary_mutation_min_component_pixels = 0
+    # Generator-facing policy: every accepted boundary patch must have one
+    # pixel of donor contact. Lower-level refinement callers may still pass a
+    # different value directly.
+    boundary_mutation_min_component_pixels = 1
     boundary_mutation_rejected_small_pixels = 0
     boundary_mutation_rejected_small_components = 0
     boundary_mutation_rejected_weak_pixels = 0

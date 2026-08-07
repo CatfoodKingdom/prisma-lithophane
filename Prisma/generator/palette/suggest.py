@@ -19,6 +19,8 @@ Algorithm
    vectors; otherwise use multi-start local search to generate candidates.
 5. Walk the scored candidate buffer best-first with a diversity floor, then
    fill from best rejected palettes if necessary so the requested count wins.
+6. Rescore that bounded finalist set with sparse three-filament gamut samples
+   and rerank it before returning the exact-size suggestions.
 
 Usage
 -----
@@ -35,7 +37,7 @@ from __future__ import annotations
 import itertools
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
@@ -145,8 +147,15 @@ class PaletteCandidate:
 
 
 @dataclass
+class PaletteSuggestionResult:
+    """Exact-size palette suggestions and their scoring provenance."""
+    candidates: List[PaletteCandidate]
+    model_metadata: Dict[str, object]
+
+
+@dataclass
 class _PaletteSearchContext:
-    """Prepared inputs shared by exact-size and ladder palette searches."""
+    """Prepared inputs shared by exact-size palette searches."""
     filament_ids: List[str]
     single_gamuts: Dict[str, np.ndarray]
     profiles: Dict[str, dict]
@@ -1673,6 +1682,7 @@ def _prepare_palette_search_context(
     profiles_dir: Optional[Path] = None,
     gamut_backend: Optional[PaletteGamutBackend] = None,
     ranking_mode: Optional[str] = None,
+    required_filaments: Optional[int] = None,
     verbose: bool = True,
 ) -> _PaletteSearchContext:
     if wb_profile is None:
@@ -1692,6 +1702,11 @@ def _prepare_palette_search_context(
         filament_ids = [fid for fid in filament_ids if fid not in exclude_filament_ids]
     if not filament_ids:
         raise ValueError("No supported color filaments are available for palette suggestion")
+    if required_filaments is not None and len(filament_ids) < int(required_filaments):
+        raise ValueError(
+            f"Palette colors requests {int(required_filaments)} filaments, but only "
+            f"{len(filament_ids)} eligible supported color filaments are available"
+        )
 
     gamut_domain = _assert_signature_gamut_domain_match(sig, gamut_backend)
     if ranking_mode is None:
@@ -1762,6 +1777,122 @@ def _prepare_palette_search_context(
     )
 
 
+def suggest_palettes_detailed(
+    sig: ColorSignature,
+    n_filaments: int = 7,
+    top_k: int = 5,
+    *,
+    progress: Optional[Callable[[str, float], None]] = None,
+    cancel: Optional[Callable[[], bool]] = None,
+    filament_ids: Optional[List[str]] = None,
+    exclude_filament_ids: Optional[set] = None,
+    wb_profile: Optional[dict] = None,
+    wc_profile: Optional[dict] = None,
+    d_wb: float = 0.20,
+    d_wc_min: float = 0.08,
+    layer_height: float = 0.08,
+    max_layers: int = 25,
+    include_pairs: bool = True,
+    t_max: Optional[float] = None,
+    de_threshold: float = SUGGESTION_COVERAGE_DE_THRESHOLD,
+    gamut_luminance_weight: float = 1.0,
+    profiles_dir: Optional[Path] = None,
+    gamut_backend: Optional[PaletteGamutBackend] = None,
+    ranking_mode: Optional[str] = None,
+    verbose: bool = True,
+) -> PaletteSuggestionResult:
+    """
+    Suggest exact-size filament palettes and return scoring provenance.
+
+    Parameters
+    ----------
+    sig           : color signature from extract_color_signature()
+    n_filaments   : target palette size (color filaments, not counting white)
+    top_k         : number of candidate palettes to return
+    filament_ids  : available filaments (default: all profiled filaments)
+    include_pairs : include 2-filament gamut sampling in evaluation (slower but
+                    captures mixed colors like green from C+Y)
+    t_max         : total print height budget (mm). When None, auto-derived as
+                    d_wc_max + max_layers * layer_height (matching LUT builder).
+    de_threshold  : OKLab distance below which a pixel is considered "in gamut"
+    verbose       : print progress
+
+    Returns
+    -------
+    PaletteSuggestionResult containing ranked candidates and model metadata.
+    """
+    requested_size = int(n_filaments)
+    requested_count = int(top_k)
+    if requested_size < 1:
+        raise ValueError("n_filaments must be at least 1")
+    if requested_count < 1:
+        raise ValueError("top_k must be at least 1")
+    if filament_ids is not None and len(filament_ids) != len(set(filament_ids)):
+        raise ValueError("filament_ids must not contain duplicates")
+
+    operation_progress = _scoped_progress(progress, 0.0, 1.0)
+    prepare_progress = _scoped_progress(operation_progress, 0.0, 0.60)
+    search_progress = _scoped_progress(operation_progress, 0.60, 0.84)
+    rescore_progress = _scoped_progress(operation_progress, 0.84, 0.99)
+    ctx = _prepare_palette_search_context(
+        sig,
+        progress=prepare_progress,
+        cancel=cancel,
+        filament_ids=filament_ids,
+        exclude_filament_ids=exclude_filament_ids,
+        wb_profile=wb_profile,
+        wc_profile=wc_profile,
+        d_wb=d_wb,
+        d_wc_min=d_wc_min,
+        layer_height=layer_height,
+        max_layers=max_layers,
+        include_pairs=include_pairs,
+        t_max=t_max,
+        gamut_luminance_weight=gamut_luminance_weight,
+        profiles_dir=profiles_dir,
+        gamut_backend=gamut_backend,
+        ranking_mode=ranking_mode,
+        required_filaments=requested_size,
+        verbose=verbose,
+    )
+
+    candidates = _thorough_search(
+        sig, ctx.filament_ids, ctx.single_gamuts, ctx.profiles,
+        ctx.wb_profile, ctx.wc_profile, d_wb, d_wc_min, layer_height, max_layers,
+        ctx.d_wc_max, requested_size,
+        requested_count,
+        include_pairs, ctx.t_max, de_threshold,
+        search_progress, cancel, verbose,
+        dist_single=ctx.dist_single, dist_pair=ctx.dist_pair,
+        ranking_mode=ctx.ranking_mode,
+    )
+    candidates, rescore_metadata = _apply_three_color_rescore_to_candidates(
+        candidates,
+        sig,
+        ctx,
+        de_threshold=de_threshold,
+        progress=rescore_progress,
+        cancel=cancel,
+    )
+    if operation_progress:
+        operation_progress("Palette suggestions complete", 1.0)
+
+    if verbose:
+        print(f"\nPalette candidates ({len(candidates)}):")
+        print(f"  {'#':<3} {'Size':>4} {'Mean dE':>8} {'Max dE':>8} "
+              f"{'dE>JND':>6} {'Filaments'}")
+        print("  " + "-" * 80)
+        for i, c in enumerate(candidates):
+            print(f"  {i+1:<3} {len(c.filament_ids):>4} {c.mean_de:>8.4f} "
+                  f"{c.max_de:>8.4f} {c.pct_above_threshold:>5.1f}% "
+                  f"{', '.join(c.filament_ids)}")
+
+    return PaletteSuggestionResult(
+        candidates=candidates[:requested_count],
+        model_metadata=rescore_metadata,
+    )
+
+
 def suggest_palettes(
     sig: ColorSignature,
     n_filaments: int = 7,
@@ -1786,32 +1917,12 @@ def suggest_palettes(
     ranking_mode: Optional[str] = None,
     verbose: bool = True,
 ) -> List[PaletteCandidate]:
-    """
-    Suggest the best filament palettes for an image.
-
-    Parameters
-    ----------
-    sig           : color signature from extract_color_signature()
-    n_filaments   : target palette size (color filaments, not counting white)
-    top_k         : number of candidate palettes to return
-    filament_ids  : available filaments (default: all profiled filaments)
-    include_pairs : include 2-filament gamut sampling in evaluation (slower but
-                    captures mixed colors like green from C+Y)
-    t_max         : total print height budget (mm). When None, auto-derived as
-                    d_wc_max + max_layers * layer_height (matching LUT builder).
-    de_threshold  : OKLab distance below which a pixel is considered "in gamut"
-    verbose       : print progress
-
-    Returns
-    -------
-    List of PaletteCandidate, sorted by mean_de (best first).
-    """
-    operation_progress = _scoped_progress(progress, 0.0, 1.0)
-    prepare_progress = _scoped_progress(operation_progress, 0.0, 0.65)
-    search_progress = _scoped_progress(operation_progress, 0.65, 0.99)
-    ctx = _prepare_palette_search_context(
+    """Return exact-size palette candidates for CLI and evaluation callers."""
+    return suggest_palettes_detailed(
         sig,
-        progress=prepare_progress,
+        n_filaments=n_filaments,
+        top_k=top_k,
+        progress=progress,
         cancel=cancel,
         filament_ids=filament_ids,
         exclude_filament_ids=exclude_filament_ids,
@@ -1823,37 +1934,13 @@ def suggest_palettes(
         max_layers=max_layers,
         include_pairs=include_pairs,
         t_max=t_max,
+        de_threshold=de_threshold,
         gamut_luminance_weight=gamut_luminance_weight,
         profiles_dir=profiles_dir,
         gamut_backend=gamut_backend,
         ranking_mode=ranking_mode,
         verbose=verbose,
-    )
-
-    candidates = _thorough_search(
-        sig, ctx.filament_ids, ctx.single_gamuts, ctx.profiles,
-        ctx.wb_profile, ctx.wc_profile, d_wb, d_wc_min, layer_height, max_layers,
-        ctx.d_wc_max, n_filaments,
-        top_k,
-        include_pairs, ctx.t_max, de_threshold,
-        search_progress, cancel, verbose,
-        dist_single=ctx.dist_single, dist_pair=ctx.dist_pair,
-        ranking_mode=ctx.ranking_mode,
-    )
-    if operation_progress:
-        operation_progress("Palette suggestions complete", 1.0)
-
-    if verbose:
-        print(f"\nPalette candidates ({len(candidates)}):")
-        print(f"  {'#':<3} {'Size':>4} {'Mean dE':>8} {'Max dE':>8} "
-              f"{'dE>JND':>6} {'Filaments'}")
-        print("  " + "-" * 80)
-        for i, c in enumerate(candidates):
-            print(f"  {i+1:<3} {len(c.filament_ids):>4} {c.mean_de:>8.4f} "
-                  f"{c.max_de:>8.4f} {c.pct_above_threshold:>5.1f}% "
-                  f"{', '.join(c.filament_ids)}")
-
-    return candidates
+    ).candidates
 
 
 def _build_palette_gamut(
@@ -1901,109 +1988,7 @@ def _build_palette_gamut(
     return np.concatenate(parts, axis=0)
 
 
-# ── Swap-tier aware palette suggestion ───────────────────────────────────────
-
-@dataclass
-class SwapTierResult:
-    """Result for one swap tier in the tier sweep."""
-    swap_count: int                     # 0 = single AMS load, 1 = one swap, etc.
-    n_filaments: int                    # max filaments available at this tier
-    candidates: List[PaletteCandidate]  # best palettes for this tier
-    best_mean_de: float                 # best candidate's mean dE
-    best_coverage_pct: float            # best candidate's coverage (100 - pct_above_threshold)
-    improvement_over_prev: Optional[float]  # coverage gain vs previous tier (%)
-
-
-@dataclass
-class PaletteSuggestionSweep:
-    """Tier-ladder result plus recommended-size alternatives."""
-    tiers: List[SwapTierResult]
-    alternatives: List[PaletteCandidate]
-    recommended: Optional[dict]
-    candidates_by_size: Dict[int, List[PaletteCandidate]] = field(default_factory=dict)
-    model_metadata: Dict[str, object] = field(default_factory=dict)
-    per_load_capped: Optional[dict] = None
-
-
-def _palette_coverage_pct(candidate: PaletteCandidate) -> float:
-    return 100.0 - float(candidate.pct_above_threshold)
-
-
-def _tier_palette_sizes(tier: int, per_load: int, available_count: int) -> List[int]:
-    if tier < 0 or per_load <= 0 or available_count <= 0:
-        return []
-    start = per_load if tier == 0 else per_load * tier + 1
-    end = per_load * (tier + 1)
-    if start > available_count:
-        return []
-    return list(range(start, min(end, available_count) + 1))
-
-
-def _recommended_ladder_size(
-    ladder: List[tuple[int, int, PaletteCandidate]],
-    improvement_threshold: float,
-) -> tuple[int, int, PaletteCandidate]:
-    if not ladder:
-        raise ValueError("Cannot recommend from an empty palette ladder")
-    ordered = sorted(ladder, key=lambda item: item[0])
-    threshold = max(0.0, float(improvement_threshold))
-    for idx, (size, tier, candidate) in enumerate(ordered):
-        coverage = _palette_coverage_pct(candidate)
-        if not any(
-            _palette_coverage_pct(later_candidate) - coverage
-            >= threshold * float(later_size - size)
-            for later_size, _later_tier, later_candidate in ordered[idx + 1:]
-        ):
-            return size, tier, candidate
-    return ordered[-1]
-
-
-def _palette_set_key(candidate_or_ids) -> Tuple[str, ...]:
-    ids = getattr(candidate_or_ids, "filament_ids", candidate_or_ids)
-    return tuple(sorted(str(fid) for fid in ids))
-
-
-def _find_candidate_by_set(
-    candidates: List[PaletteCandidate],
-    filament_ids,
-) -> Optional[PaletteCandidate]:
-    key = _palette_set_key(filament_ids)
-    for candidate in candidates:
-        if _palette_set_key(candidate) == key:
-            return candidate
-    return None
-
-
-def _priority_finalists_for_three_color_rescore(
-    sweep: PaletteSuggestionSweep,
-    *,
-    max_finalists: int = 30,
-) -> List[PaletteCandidate]:
-    """Return unique finalists in the P3 mandated rescore priority order."""
-    ordered: List[PaletteCandidate] = []
-    ladder: List[PaletteCandidate] = [
-        candidate
-        for tier in sorted(sweep.tiers, key=lambda item: item.swap_count)
-        for candidate in tier.candidates
-    ]
-    if sweep.recommended:
-        recommended = _find_candidate_by_set(ladder + sweep.alternatives, sweep.recommended.get("filament_ids", []))
-        if recommended is not None:
-            ordered.append(recommended)
-    ordered.extend(ladder)
-    ordered.extend(sweep.alternatives)
-
-    selected: List[PaletteCandidate] = []
-    seen: set[Tuple[str, ...]] = set()
-    for candidate in ordered:
-        key = _palette_set_key(candidate)
-        if key in seen:
-            continue
-        selected.append(candidate)
-        seen.add(key)
-        if len(selected) >= max_finalists:
-            break
-    return selected
+# ── Sparse three-color rescore ───────────────────────────────────────────────
 
 
 def _triple_gamut_for_key(
@@ -2111,20 +2096,25 @@ def _rescore_candidate_with_triples(
     )
 
 
-def _apply_three_color_rescore_to_sweep(
-    sweep: PaletteSuggestionSweep,
+def _apply_three_color_rescore_to_candidates(
+    candidates: List[PaletteCandidate],
     sig: ColorSignature,
     context: _PaletteSearchContext,
     *,
-    improvement_threshold: float,
-    top_k: int,
     de_threshold: float,
     progress: Optional[Callable[[str, float], None]] = None,
     cancel: Optional[Callable[[], bool]] = None,
-) -> PaletteSuggestionSweep:
-    finalists = _priority_finalists_for_three_color_rescore(sweep)
-    if not finalists:
-        return sweep
+) -> tuple[List[PaletteCandidate], Dict[str, object]]:
+    """Rescore the bounded exact-size finalist set with sparse triple gamuts."""
+    finalists = list(candidates)
+    if not finalists or not any(len(candidate.filament_ids) >= 3 for candidate in finalists):
+        if progress:
+            progress("Triple gamut rescore not required", 1.0)
+        return finalists, {
+            "estimated_with_three_color_rescore": False,
+            "three_color_rescore_finalists": 0,
+            "three_color_rescore_elapsed_s": 0.0,
+        }
 
     started = time.perf_counter()
     triple_distances, triple_point_counts = _precompute_triple_centroid_distances(
@@ -2134,8 +2124,15 @@ def _apply_three_color_rescore_to_sweep(
         progress=progress,
         cancel=cancel,
     )
-    rescored_by_key = {
-        _palette_set_key(candidate): _rescore_candidate_with_triples(
+    if cancel and cancel():
+        return finalists, {
+            "estimated_with_three_color_rescore": False,
+            "three_color_rescore_finalists": 0,
+            "three_color_rescore_elapsed_s": round(time.perf_counter() - started, 4),
+        }
+
+    rescored = [
+        _rescore_candidate_with_triples(
             candidate,
             sig,
             context,
@@ -2144,302 +2141,16 @@ def _apply_three_color_rescore_to_sweep(
             de_threshold=de_threshold,
         )
         for candidate in finalists
-    }
+    ]
+    rescored.sort(key=_candidate_sort_key)
     elapsed = time.perf_counter() - started
-
-    def replace(candidate: PaletteCandidate) -> PaletteCandidate:
-        return rescored_by_key.get(_palette_set_key(candidate), candidate)
-
-    rescored_tiers: List[SwapTierResult] = []
-    ladder: List[tuple[int, int, PaletteCandidate]] = []
-    prev_coverage: Optional[float] = None
-    for tier in sweep.tiers:
-        replaced = [replace(candidate) for candidate in tier.candidates]
-        replaced_sorted = sorted(replaced, key=_candidate_sort_key)
-        tier_best = replaced_sorted[0] if replaced_sorted else None
-        if tier_best is None:
-            rescored_tiers.append(tier)
-            continue
-        coverage = _palette_coverage_pct(tier_best)
-        improvement = None if prev_coverage is None else coverage - prev_coverage
-        rescored_tiers.append(SwapTierResult(
-            swap_count=tier.swap_count,
-            n_filaments=tier.n_filaments,
-            candidates=replaced_sorted,
-            best_mean_de=tier_best.mean_de,
-            best_coverage_pct=coverage,
-            improvement_over_prev=improvement,
-        ))
-        prev_coverage = coverage
-        for candidate in replaced:
-            ladder.append((len(candidate.filament_ids), tier.swap_count, candidate))
-
-    candidates_by_size: Dict[int, List[PaletteCandidate]] = {}
-    for size, candidates in sweep.candidates_by_size.items():
-        rescored = [replace(candidate) for candidate in candidates]
-        candidates_by_size[int(size)] = _select_diverse_candidates(
-            sorted(rescored, key=_candidate_sort_key),
-            max(top_k, len(candidates)),
-        )[:len(candidates)]
-
-    recommended = None
-    alternatives: List[PaletteCandidate] = []
-    if ladder:
-        recommended_size, recommended_tier, recommended_candidate = _recommended_ladder_size(
-            ladder,
-            improvement_threshold,
-        )
-        recommended = {
-            "swap_count": int(recommended_tier),
-            "n_filaments": int(recommended_size),
-            "filament_ids": list(recommended_candidate.filament_ids),
-        }
-        alternatives = candidates_by_size.get(recommended_size, [recommended_candidate])
-        if alternatives and _palette_set_key(alternatives[0]) != _palette_set_key(recommended_candidate):
-            alternatives = [recommended_candidate] + [
-                candidate for candidate in alternatives
-                if _palette_set_key(candidate) != _palette_set_key(recommended_candidate)
-            ]
-        alternatives = _select_diverse_candidates(
-            sorted(alternatives, key=_candidate_sort_key),
-            top_k,
-        )
-
-    result = PaletteSuggestionSweep(
-        tiers=rescored_tiers,
-        alternatives=alternatives[:top_k],
-        recommended=recommended,
-        candidates_by_size=candidates_by_size,
-        model_metadata={
-            **sweep.model_metadata,
-            "estimated_with_three_color_rescore": True,
-            "three_color_rescore_finalists": len(finalists),
-            "three_color_rescore_elapsed_s": round(elapsed, 4),
-        },
-        per_load_capped=sweep.per_load_capped,
-    )
     if progress:
         progress("Triple gamut rescore complete", 1.0)
-    return result
-
-
-def suggest_palettes_swap_aware(
-    sig: ColorSignature,
-    *,
-    max_colors_per_load: Optional[int] = None,
-    slots_per_ams: int = 4,
-    n_ams_units: int = 1,
-    reserved_white: int = 1,
-    reserved_filler: int = 0,
-    max_swaps: int = 2,
-    improvement_threshold: float = 2.0,
-    force_all_tiers: bool = False,
-    top_k: int = 3,
-    verbose: bool = True,
-    three_color_rescore: bool = True,
-    **kwargs,
-) -> PaletteSuggestionSweep:
-    """
-    Sweep across swap tiers (0, 1, 2, ...) and suggest palettes for each.
-
-    Each tier allows one additional AMS load, increasing the number of
-    available color filaments. The sweep stops early when adding another
-    swap doesn't improve coverage by at least `improvement_threshold` %.
-
-    Parameters
-    ----------
-    sig                    : color signature from extract_color_signature()
-    max_colors_per_load    : requested max colors per AMS load
-    slots_per_ams          : slots per AMS unit (typically 4)
-    n_ams_units            : number of AMS units connected
-    reserved_white         : slots reserved for white filament(s)
-    reserved_filler        : slots reserved for translucent filler
-    max_swaps              : maximum number of mid-print swaps to consider
-    improvement_threshold  : minimum coverage gain (%) to justify another swap
-    force_all_tiers        : if True, always evaluate all tiers
-    top_k                  : candidates per tier
-    verbose                : print progress
-    **kwargs               : forwarded to suggest_palettes()
-
-    Returns
-    -------
-    PaletteSuggestionSweep with tier ladder entries plus top-level alternatives.
-    """
-    total_slots = slots_per_ams * n_ams_units
-    color_slots_per_load = total_slots - reserved_white - reserved_filler
-
-    if color_slots_per_load <= 0:
-        raise ValueError(f"No color slots: {total_slots} total - "
-                         f"{reserved_white} white - {reserved_filler} filler = "
-                         f"{color_slots_per_load}")
-
-    requested_per_load = int(max_colors_per_load or color_slots_per_load)
-    per_load = max(1, min(requested_per_load, color_slots_per_load))
-    per_load_capped = (
-        {"requested": requested_per_load, "capacity": color_slots_per_load}
-        if requested_per_load > color_slots_per_load
-        else None
-    )
-    max_swaps = max(0, int(max_swaps))
-    threshold = max(0.0, float(improvement_threshold))
-
-    context_kwargs = dict(kwargs)
-    progress = context_kwargs.pop("progress", None)
-    operation_progress = _scoped_progress(progress, 0.0, 1.0)
-    cancel = context_kwargs.pop("cancel", None)
-    include_pairs = context_kwargs.pop("include_pairs", True)
-    de_threshold = context_kwargs.pop("de_threshold", SUGGESTION_COVERAGE_DE_THRESHOLD)
-    prepare_progress = _scoped_progress(operation_progress, 0.0, 0.55)
-    context = _prepare_palette_search_context(
-        sig,
-        progress=prepare_progress,
-        cancel=cancel,
-        include_pairs=include_pairs,
-        verbose=verbose,
-        **context_kwargs,
-    )
-
-    results: List[SwapTierResult] = []
-    ladder: List[tuple[int, int, PaletteCandidate]] = []
-    candidates_by_size: Dict[int, List[PaletteCandidate]] = {}
-    prev_tier_max_coverage: Optional[float] = None
-    planned_search_count = sum(
-        len(_tier_palette_sizes(tier, per_load, len(context.filament_ids)))
-        for tier in range(max_swaps + 1)
-    )
-    search_index = 0
-
-    for tier in range(max_swaps + 1):
-        sizes = _tier_palette_sizes(tier, per_load, len(context.filament_ids))
-        if not sizes:
-            break
-
-        if verbose:
-            print(f"\n{'='*60}")
-            print(f"Swap tier {tier}: evaluating palette sizes "
-                  f"{sizes[0]}-{sizes[-1]} (per-load cap {per_load})")
-            print(f"{'='*60}")
-
-        tier_candidates: List[PaletteCandidate] = []
-        for size in sizes:
-            search_start = 0.55 + 0.27 * search_index / max(1, planned_search_count)
-            search_end = 0.55 + 0.27 * (search_index + 1) / max(1, planned_search_count)
-            search_progress = _scoped_progress(operation_progress, search_start, search_end)
-            candidates = _thorough_search(
-                sig,
-                context.filament_ids,
-                context.single_gamuts,
-                context.profiles,
-                context.wb_profile,
-                context.wc_profile,
-                kwargs.get("d_wb", 0.20),
-                kwargs.get("d_wc_min", 0.08),
-                kwargs.get("layer_height", 0.08),
-                kwargs.get("max_layers", 25),
-                context.d_wc_max,
-                size,
-                top_k,
-                include_pairs,
-                context.t_max,
-                de_threshold,
-                search_progress,
-                cancel,
-                verbose,
-                dist_single=context.dist_single,
-                dist_pair=context.dist_pair,
-                ranking_mode=context.ranking_mode,
-            )
-            search_index += 1
-            candidates_by_size[size] = candidates
-            if candidates:
-                best_for_size = candidates[0]
-                tier_candidates.append(best_for_size)
-                ladder.append((size, tier, best_for_size))
-
-        if not tier_candidates:
-            break
-
-        tier_best = tier_candidates[-1]
-        tier_max_coverage = _palette_coverage_pct(tier_best)
-        improvement = (
-            tier_max_coverage - prev_tier_max_coverage
-            if prev_tier_max_coverage is not None
-            else None
-        )
-
-        results.append(SwapTierResult(
-            swap_count=tier,
-            n_filaments=sizes[-1],
-            candidates=tier_candidates,
-            best_mean_de=tier_best.mean_de,
-            best_coverage_pct=tier_max_coverage,
-            improvement_over_prev=improvement,
-        ))
-
-        if verbose:
-            print(f"\n  Tier {tier} max-size best: mean dE = {tier_best.mean_de:.4f}, "
-                  f"coverage = {tier_max_coverage:.1f}%"
-                  + (f", improvement = +{improvement:.1f}%" if improvement is not None else ""))
-
-        if tier > 0 and not force_all_tiers:
-            if improvement is not None and improvement < threshold * per_load:
-                if verbose:
-                    print(f"  Stopping: improvement {improvement:.1f}% < "
-                          f"threshold {threshold * per_load:.1f}%")
-                break
-
-        prev_tier_max_coverage = tier_max_coverage
-
-    if not ladder:
-        if operation_progress:
-            operation_progress("Palette suggestions complete", 1.0)
-        return PaletteSuggestionSweep(
-            tiers=results,
-            alternatives=[],
-            recommended=None,
-            per_load_capped=per_load_capped,
-        )
-
-    recommended_size, recommended_tier, recommended_candidate = _recommended_ladder_size(
-        ladder,
-        threshold,
-    )
-    alternatives = candidates_by_size.get(recommended_size, [recommended_candidate])
-    if alternatives and frozenset(alternatives[0].filament_ids) != frozenset(
-        recommended_candidate.filament_ids
-    ):
-        alternatives = [recommended_candidate] + [
-            cand for cand in alternatives
-            if frozenset(cand.filament_ids) != frozenset(recommended_candidate.filament_ids)
-        ]
-    sweep = PaletteSuggestionSweep(
-        tiers=results,
-        alternatives=alternatives[:top_k],
-        recommended={
-            "swap_count": int(recommended_tier),
-            "n_filaments": int(recommended_size),
-            "filament_ids": list(recommended_candidate.filament_ids),
-        },
-        candidates_by_size=candidates_by_size,
-        per_load_capped=per_load_capped,
-    )
-    if not three_color_rescore:
-        if operation_progress:
-            operation_progress("Palette suggestions complete", 1.0)
-        return sweep
-    result = _apply_three_color_rescore_to_sweep(
-        sweep,
-        sig,
-        context,
-        improvement_threshold=threshold,
-        top_k=top_k,
-        de_threshold=de_threshold,
-        progress=_scoped_progress(operation_progress, 0.82, 0.99),
-        cancel=cancel,
-    )
-    if operation_progress:
-        operation_progress("Palette suggestions complete", 1.0)
-    return result
+    return rescored, {
+        "estimated_with_three_color_rescore": True,
+        "three_color_rescore_finalists": len(finalists),
+        "three_color_rescore_elapsed_s": round(elapsed, 4),
+    }
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────

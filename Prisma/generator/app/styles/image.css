@@ -857,6 +857,29 @@
 .ctrl-section-grid3 .input-with-unit {
   width: 70px;
 }
+.solve-grid-dimension-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 70px;
+  min-width: 0;
+}
+.solve-grid-dimension-marker {
+  visibility: hidden;
+  flex: 0 0 auto;
+}
+.solve-grid-dimension-marker.is-visible {
+  visibility: visible;
+}
+.image-solve-grid-warning {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+}
+.image-summary-bar .summary-axis-value.is-solve-grid-incompatible {
+  color: var(--warn-ink);
+}
 
 /* Labels */
 .ctrl-lbl {

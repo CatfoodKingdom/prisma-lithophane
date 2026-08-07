@@ -57,6 +57,10 @@
   pointer-events: none;
 }
 
+.guide-overlay-root.is-interrupt-elevated {
+  z-index: var(--z-guide-interrupt);
+}
+
 .guide-overlay-root.is-hidden,
 .guide-overlay-root.is-suspended {
   display: none;
@@ -147,7 +151,54 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
   white-space: pre-line;
+}
+
+.guide-step-note {
+  display: grid;
+  gap: 2px;
+  margin-top: 11px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.guide-step-note[hidden] {
+  display: none;
+}
+
+.guide-step-note__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.guide-step-note__value {
+  color: inherit;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.guide-step-visual {
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-inset);
+}
+
+.guide-step-visual .stack-diagram {
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.guide-step-visual[hidden] {
+  display: none;
 }
 
 .guide-step-status {
@@ -200,6 +251,11 @@
 
 .guide-step-detour > button {
   white-space: nowrap;
+}
+
+#guideStepDetourButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .guide-step-followup[hidden],
@@ -274,6 +330,11 @@
   line-height: 1.4;
 }
 
+.guide-step-followup > button {
+  display: block;
+  margin-inline: auto;
+}
+
 .guide-step-actions {
   display: flex;
   align-items: center;
@@ -285,9 +346,44 @@
   background: var(--surface-raised);
 }
 
+#guideStepEnd:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .guide-step-action-spacer {
   min-width: 4px;
   flex: 1 1 auto;
+}
+
+.workspace-lock-interstitial {
+  position: fixed;
+  z-index: 10020;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: color-mix(in srgb, var(--scrim) 88%, transparent);
+}
+
+.workspace-lock-interstitial.is-hidden {
+  display: none;
+}
+
+.workspace-lock-window {
+  width: min(440px, calc(100vw - 36px));
+}
+
+.workspace-lock-body p {
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
+
+.workspace-lock-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
 }
 
 @media (max-width: 700px), (max-height: 560px) {

@@ -450,6 +450,7 @@ function bindEvents() {
       app.commands.renderFrameCanvas();
       app.commands.updateInfoGrid();
       app.commands.syncConfigToServer();
+      app.events.emit("image.controls-reset", { source: "adjustments-reset" });
     });
 
     // Generic binder for image adjustment sliders
@@ -561,9 +562,12 @@ function bindEvents() {
     const candNone = app.state.ui.$("#candidateSelectNone");
     if (candNone) app.lifecycle.listen(candNone, "click", () => { app.state.palette.candidateSelection.clear(); app.commands.renderCreationTab(); });
 
-    // Max colors input → update AMS preview
-    const maxColorsInput = app.state.ui.$("#targetFilamentCount");
-    if (maxColorsInput) app.lifecycle.listen(maxColorsInput, "change", () => app.commands.renderAmsPreview());
+    // Exact palette-size input → update physical capacity context live.
+    const paletteColorsInput = app.state.ui.$("#targetFilamentCount");
+    if (paletteColorsInput) {
+      app.lifecycle.listen(paletteColorsInput, "input", () => app.commands.renderAmsPreview());
+      app.lifecycle.listen(paletteColorsInput, "change", () => app.commands.renderAmsPreview());
+    }
 
     // Palette — manual builder actions
     const mintBtn = app.state.ui.$("#mintPaletteBtn");
@@ -612,12 +616,7 @@ function bindEvents() {
           railClearDeckBtn.classList.remove("confirm-pending");
           railClearDeckBtn.title = "No palettes to clear";
           railClearDeckBtn.setAttribute("aria-label", "No palettes to clear");
-          app.state.palette.deck = [];
-          app.state.palette.activeDeckId = null;
-          app.state.solve.batchSelectedDeckIds.clear();
-          app.commands.renderDeckCards();
-          app.commands.updateRail();
-          app.commands.syncConfigToServer();
+          void app.commands.clearPaletteDeck();
         }
       });
     }
@@ -643,18 +642,6 @@ function bindEvents() {
     }
     const luminanceGuessBtn = app.state.ui.$("#cfgBaseShadingLimitSuggest");
     if (luminanceGuessBtn) app.lifecycle.listen(luminanceGuessBtn, "click", app.commands.handleSuggestBaseShadingLimit);
-    app.state.ui.DECK_GENERATION_FIELD_MAP.forEach(({ paletteId }) => {
-      const el = app.state.ui.$(`#${paletteId}`);
-      if (!el) return;
-      const eventName = el.type === "checkbox" ? "change" : "input";
-      app.lifecycle.listen(el, eventName, () => app.commands.syncDeckGenerationSettingsUI("palette"));
-      app.lifecycle.listen(el, "change", () => {
-        app.commands.syncDeckGenerationSettingsUI("palette");
-        app.commands.readConfigFromUI();
-        app.commands.syncConfigToServer();
-      });
-    });
-
     // Library filter (modal)
     const railLibBtn = app.state.ui.$("#railLibraryBtn");
     if (railLibBtn) app.lifecycle.listen(railLibBtn, "click", app.commands.openLibraryModal);
@@ -783,6 +770,11 @@ function bindEvents() {
     const savedRunDeleteBtn = app.state.ui.$("#savedRunDeleteBtn");
     if (savedRunDeleteBtn) app.lifecycle.listen(savedRunDeleteBtn, "click", app.commands.deleteSelectedSavedRun);
     const savedRunUpload = app.state.ui.$("#savedRunUpload");
+    if (savedRunUpload) app.lifecycle.listen(savedRunUpload, "click", (event) => {
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("solve.saved-run.upload", {})) {
+        event.preventDefault();
+      }
+    });
     if (savedRunUpload) app.lifecycle.listen(savedRunUpload, "change", async (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;

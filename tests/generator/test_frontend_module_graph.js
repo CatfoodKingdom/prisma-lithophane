@@ -47,7 +47,7 @@ test("Generator loads through one native-module entry point", () => {
   assert.equal(fs.existsSync(path.join(appDir, "app.js")), false);
 });
 
-test("feature modules communicate through injected context instead of importing peers", () => {
+test("feature modules may compose within a domain but do not import across feature domains", () => {
   const featureDir = path.join(appDir, "features");
   const files = fs.readdirSync(featureDir, { recursive: true })
     .filter((name) => name.endsWith(".js"))
@@ -55,10 +55,13 @@ test("feature modules communicate through injected context instead of importing 
 
   for (const file of files) {
     for (const dependency of importsFor(file)) {
+      if (!dependency.startsWith(featureDir)) continue;
+      const sourceDomain = path.relative(featureDir, file).split(path.sep)[0];
+      const dependencyDomain = path.relative(featureDir, dependency).split(path.sep)[0];
       assert.equal(
-        dependency.startsWith(featureDir),
-        false,
-        `${path.relative(appDir, file)} imports peer feature ${path.relative(appDir, dependency)}`,
+        dependencyDomain,
+        sourceDomain,
+        `${path.relative(appDir, file)} imports another feature domain ${path.relative(appDir, dependency)}`,
       );
     }
   }
@@ -221,7 +224,8 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
   const paletteCss = fs.readFileSync(path.join(appDir, "styles", "palette.css"), "utf8");
   const surfacesCss = fs.readFileSync(path.join(appDir, "styles", "surfaces.css"), "utf8");
 
-  assert.match(html, /<label for="paletteSuggestMode">Solve mode<\/label>[\s\S]*?<option value="standard">Color<\/option>[\s\S]*?<option value="luminance_detail">Luminance<\/option>/);
+  assert.match(html, /<label for="targetFilamentCount">Palette Colors<\/label>/);
+  assert.match(html, /<label for="paletteSuggestMode">Solve Mode<\/label>[\s\S]*?<option value="standard">Color<\/option>[\s\S]*?<option value="luminance_detail">Luminance<\/option>/);
   assert.doesNotMatch(html, /aria-labeledby=/);
   assert.doesNotMatch(html, /Source color|Luminance detail/);
   assert.match(suggestions, /modePrefix\s*=\s*paletteMode === "luminance_detail" \? "Luminance" : "Color"/);
@@ -249,19 +253,42 @@ test("changed frontend modules carry their current bootstrap cache versions", ()
   const bootstrap = fs.readFileSync(path.join(appDir, "bootstrap.js"), "utf8");
   for (const [relativePath, version] of Object.entries({
     "features/shell/index.js": "2026-07-30-generator-basics-v3",
-    "features/printers/index.js": "2026-07-31-guide-image-tab-v1",
-    "features/image/index.js": "2026-07-31-guide-step10-v1",
-    "features/guides/definitions.js": "2026-08-01-guide-palette-copy-v1",
-    "features/guides/targets.js": "2026-08-01-guide-image-exit-gates-v1",
-    "features/guides/overlay.js": "2026-08-01-guide-image-polish-v1",
-    "features/guides/controller.js": "2026-08-01-guide-palette-auto-advance-v1",
-    "features/settings/profiles.js": "2026-07-31-guide-audit-v1",
-    "features/solve/batch.js": "2026-07-28-solve-pitch-remediation-v5",
-    "features/solve/recipe-viewer.js": "2026-07-30-generator-basics-v2",
+    "features/shell/theme.js": "2026-08-02-topbar-menu-switch-v1",
+    "features/printers/index.js": "2026-08-04-saving-loading-fixes-v1",
+    "core/application-context.js": "2026-08-04-settings-contract-v2",
+    "features/image/index.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/palette/suggestions.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/palette/deck.js": "2026-08-02-exact-palette-suggestions-v1",
+    "features/settings/controller.js": "2026-08-04-settings-contract-v5",
+    "features/guides/registry.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/guides/targets.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/guides/controller.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/event-bindings.js": "2026-08-02-exact-palette-suggestions-v1",
+    "features/palette/library.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/settings/profiles.js": "2026-08-04-settings-contract-v2",
+    "features/settings/modules.js": "2026-08-04-settings-layout-v3",
+    "features/settings/layout.js": "2026-08-04-settings-layout-v3",
+    "features/solve/run.js": "2026-08-04-settings-review-v3",
+    "features/solve/batch.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/solve/recipe-viewer.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/guides/overlay.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/application.js": "2026-08-04-saving-loading-fixes-v1",
+    "api/index.js": "2026-08-04-saving-loading-fixes-v1",
   })) {
     assert.match(
       bootstrap,
       new RegExp(`${relativePath.replaceAll("/", "\\/").replace(".", "\\.")}\\?v=${version}`),
+    );
+  }
+  const apiIndex = fs.readFileSync(path.join(appDir, "api", "index.js"), "utf8");
+  for (const apiModule of [
+    "cache.js", "client.js", "guides.js", "images.js", "jobs.js",
+    "model-libraries.js", "modules.js", "printers.js", "runs.js",
+    "session.js", "settings.js",
+  ]) {
+    assert.match(
+      apiIndex,
+      new RegExp(`${apiModule.replace(".", "\\.")}\\?v=2026-08-04-saving-loading-fixes-v1`),
     );
   }
 });
@@ -272,6 +299,15 @@ test("extra-extra-small ghost actions share button geometry across element types
   assert.match(
     shellCss,
     /\.ghost-button\.xxs\s*{[^}]*line-height:\s*normal;[^}]*}/,
+  );
+});
+
+test("export folder actions keep their labels on one line", () => {
+  const exportCss = fs.readFileSync(path.join(appDir, "styles", "export.css"), "utf8");
+
+  assert.match(
+    exportCss,
+    /\.export-outdir-row \.open-export-folder-btn\s*{[^}]*white-space:\s*nowrap;[^}]*}/,
   );
 });
 
@@ -339,4 +375,34 @@ test("abandoned suggestion-owned batch surface is absent", () => {
     "Use " + "Palette",
   ];
   for (const relic of abandoned) assert.doesNotMatch(combined, new RegExp(relic));
+});
+
+test("retired swap-tier suggestion controls and styles are absent", () => {
+  const files = [
+    "index.html",
+    "core/application-context.js",
+    "features/event-bindings.js",
+    "features/image/index.js",
+    "features/palette/suggestions.js",
+    "features/settings/controller.js",
+    "features/settings/profiles.js",
+    "features/guides/targets.js",
+    "styles/palette.css",
+  ];
+  const combined = files
+    .map(relative => fs.readFileSync(path.join(appDir, relative), "utf8"))
+    .join("\n");
+  for (const retired of [
+    "targetSwapCount",
+    "paletteSwapThreshold",
+    "paletteForceAllTiers",
+    "swap_improvement_threshold",
+    "force_all_tiers",
+    "creation-settings-shell",
+    "creation-settings-card",
+  ]) {
+    assert.doesNotMatch(combined, new RegExp(retired));
+  }
+  assert.match(combined, /id="targetFilamentCount"[\s\S]*?min="2" max="16"/);
+  assert.match(combined, /id="amsPreview"[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/);
 });

@@ -57,6 +57,7 @@
   max-width: 100%;
   background: var(--drawer-bg);
   border-left: 2px solid var(--line);
+  border-top-left-radius: 8px;
   box-shadow: var(--shadow);
   z-index: 100;
   transform: translateX(100%);
@@ -99,19 +100,24 @@
 }
 .settings-drawer-body {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 8px 12px 16px;
 }
 
 /* ── Settings Grid: drawer overrides ─────────────────────────────────────── */
 
 .settings-grid.in-drawer {
+  min-width: 0;
   flex-direction: row;
   align-items: flex-start;
   gap: 24px;
   height: auto;
   overflow-y: visible;
+  overflow-x: visible;
 }
 .settings-grid.in-drawer .settings-column {
   display: flex;
@@ -232,6 +238,11 @@
   padding-bottom: 14px;
 }
 .app-dialog-msg { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-line; }
+.app-dialog-emphasis {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .app-dialog-input { width: 100%; margin-bottom: 0; box-sizing: border-box; }
 .app-dialog-hint {
   margin: -6px 0 12px;

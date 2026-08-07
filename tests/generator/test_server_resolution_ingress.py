@@ -192,7 +192,7 @@ def test_session_config_uses_active_printer_for_printability_thresholds(client):
     assert cfg["printability_minimum_line_length_mm"] == pytest.approx(0.4)
     assert cfg["stage2_boundary_mutation_enabled"] is True
     assert "stage2_boundary_mutation_edge_run_mode" not in cfg
-    assert cfg["stage2_boundary_mutation_current_de_percentile"] == pytest.approx(80.0)
+    assert cfg["stage2_boundary_mutation_current_de_percentile"] is None
     assert cfg["stage2_boundary_mutation_max_passes"] == 12
 
 

@@ -36,64 +36,14 @@ function restoreSettingsFlowUnits(grid = document.querySelector(".settings-grid"
   }
 
 function extractSettingsSubsectionFlowUnits(grid) {
-    const groups = Array.from(grid?.querySelectorAll(".settings-group.is-expanded") || []);
-    groups.forEach((group) => {
-      const body = Array.from(group.children).find((child) => child.classList.contains("section-collapse-body"));
-      if (!body) return;
-      if (!body.id) {
-        const key = group.dataset.settingsGroup || group.dataset.bucket || "section";
-        body.id = `settingsFlowOwner-${key}`;
-      }
-
-      const parentTitle = group.querySelector(".section-collapse-title")?.textContent?.trim()
-        || group.dataset.settingsGroup
-        || "Settings";
-      const heads = Array.from(body.children).filter((child) => child.classList.contains("settings-subsection-head"));
-      let insertionPoint = group;
-
-      heads.forEach((head, order) => {
-        const wrapper = document.createElement("div");
-        wrapper.className = "settings-subsection-flow-unit";
-        wrapper.dataset.settingsFlowOwner = body.id;
-        wrapper.dataset.settingsFlowOrder = String(order);
-        wrapper.dataset.settingsFlowWrapper = "true";
-        wrapper.dataset.bucket = group.dataset.bucket || group.dataset.settingsGroup || "settings";
-        insertionPoint.after(wrapper);
-        if (order === 0) {
-          wrapper.appendChild(group);
-        } else {
-          head.dataset.settingsParentTitle = parentTitle;
-        }
-
-        let node = head;
-        while (node) {
-          const next = node.nextElementSibling;
-          if (node !== head && node.classList.contains("settings-subsection-head")) break;
-          wrapper.appendChild(node);
-          node = next;
-        }
-
-        insertionPoint = wrapper;
-      });
-    });
-  }
+    // Sections are intentionally static. Keeping subsections in their parent
+    // group preserves the guide anchors and avoids moving live controls during
+    // every resize or zoom recalculation.
+    return grid;
+}
 
 function extractPreprocessingFlowUnits(grid) {
-    const group = grid?.querySelector('[data-settings-group="preprocessing"]');
-    const owner = document.getElementById("preprocessingSettingsContainer");
-    if (!group || !owner || !group.classList.contains("is-expanded")) return;
-
-    let insertionPoint = group;
-    Array.from(owner.children)
-      .filter((unit) => unit.classList.contains("module-settings-section"))
-      .sort((a, b) => Number(a.dataset.settingsFlowOrder) - Number(b.dataset.settingsFlowOrder))
-      .forEach((unit) => {
-      unit.classList.add("preprocessing-flow-unit");
-      unit.dataset.settingsFlowOwner = owner.id;
-      unit.dataset.bucket = "preprocessing";
-      insertionPoint.after(unit);
-      insertionPoint = unit;
-      });
+    return grid;
   }
 
 function partitionSettingsItems(items, heights, maxColumns, availableHeight, gap = 8) {
@@ -179,15 +129,9 @@ function distributeSettingsColumns() {
       col.remove();
     });
 
-    // Enabled preprocessing cards must leave their canonical subsection before
-    // the parent group is wrapped with its first static subsection.
-    app.commands.extractPreprocessingFlowUnits(grid);
-    // Static subsections and enabled preprocessing module cards are independent
-    // layout units. Moving the live nodes lets them flow across columns without
-    // splitting a heading from its controls or losing input state and handlers.
-    app.commands.extractSettingsSubsectionFlowUnits(grid);
-
-    // All items participate in column distribution — no exceptions
+    // Static sections remain intact while the top-level groups flow across
+    // columns. This prevents live controls and guide targets from being
+    // reparented as the viewport changes.
     const items = Array.from(grid.children);
     if (items.length === 0) return;
 
@@ -293,57 +237,9 @@ function distributeSettingsColumns() {
   }
 
 function initCollapsibleSections() {
-    document.querySelectorAll(".settings-grid .settings-group").forEach(group => {
-      const h4 = group.querySelector(".settings-section-head");
-      if (!h4) return;
-
-      // Build header bar
-      const header = document.createElement("div");
-      header.className = "section-collapse-header";
-      header.setAttribute("role", "button");
-      header.setAttribute("tabindex", "0");
-      header.setAttribute("aria-expanded", "true");
-      const arrow = document.createElement("span");
-      arrow.className = "section-collapse-arrow";
-      arrow.setAttribute("aria-hidden", "true");
-      const title = document.createElement("span");
-      title.className = "section-collapse-title";
-      title.textContent = h4.textContent;
-      header.appendChild(arrow);
-      header.appendChild(title);
-
-      // Wrap remaining content in a body div
-      const body = document.createElement("div");
-      body.className = "section-collapse-body";
-      // Move all children except h4 into body
-      while (group.children.length > 0) {
-        const child = group.children[0];
-        if (child === h4) { h4.remove(); continue; }
-        body.appendChild(child);
-      }
-
-      group.appendChild(header);
-      group.appendChild(body);
-      group.classList.add("is-collapsible", "is-expanded");
-
-      const setExpanded = (expanded) => {
-        group.classList.toggle("is-expanded", expanded);
-        header.setAttribute("aria-expanded", expanded ? "true" : "false");
-        body.classList.toggle("is-hidden", !expanded);
-        app.commands.distributeSettingsColumns();
-      };
-
-      header.addEventListener("click", () => {
-        const expanded = group.classList.toggle("is-expanded");
-        setExpanded(expanded);
-      });
-      header.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        setExpanded(!group.classList.contains("is-expanded"));
-      });
-    });
-  }
+    // Retained as a no-op command for startup callers and guide integrations.
+    // Section headers are now informational and never collapse.
+}
 
   Object.assign(app.commands, {
     restoreSettingsFlowUnits,

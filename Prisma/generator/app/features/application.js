@@ -28,6 +28,7 @@ export function installFeaturesApplication(app) {
   }
 
   async function startGeneratorApp() {
+    app.commands.initializeWorkspaceLockInterstitial();
     app.commands.initializeThemeController();
     app.commands.initializeSolveModeController();
     app.commands.initializeDeckCardMenuController();
@@ -37,11 +38,23 @@ export function installFeaturesApplication(app) {
     app.commands.updateRail();
     app.commands.renderSettingsTab();
 
+    // Recovery is a startup barrier. Aside from the connectivity probe above,
+    // do not restore ordinary session work or resume jobs until an interrupted
+    // destructive guide has been unwound.
+    try {
+      await app.api.apiFetch("/system/health");
+      app.state.session.apiConnected = true;
+    } catch {
+      app.state.session.apiConnected = false;
+    }
+    const guideRecoverySnapshot = app.state.session.apiConnected
+      ? await app.commands.prepareStartupGuideRecovery()
+      : null;
     await app.commands.loadFilaments();
     if (app.state.session.apiConnected) await app.commands.loadModelLibraries({ openOnRecovery: true, silent: true });
     await app.commands.loadPrinters();
     await app.commands.loadSavedPalettes();
-    if (app.state.session.apiConnected) {
+    if (app.state.session.apiConnected && !guideRecoverySnapshot) {
       await app.commands.loadImages();
       try {
         const session = await app.api.fetchSession();
@@ -88,7 +101,13 @@ export function installFeaturesApplication(app) {
     // Apply saved Settings Profile after session restore so profile values survive server restart.
     await app.commands.loadModules();
     // Apply the saved Settings Profile after module load so its module state is authoritative.
-    await app.commands.loadPresets();
+    await app.commands.loadPresets(guideRecoverySnapshot
+      ? { applyPreferred: false, syncServer: false }
+      : {});
+    if (guideRecoverySnapshot) {
+      await app.commands.finishStartupGuideRecovery(guideRecoverySnapshot);
+      await app.commands.loadImages();
+    }
     app.commands.renderSettingsTab();
     app.commands.initCollapsibleSections();
 
@@ -99,7 +118,7 @@ export function installFeaturesApplication(app) {
     // its library grid now that availableImages is populated (otherwise it stays empty until the
     // first upload/tab-switch).
     app.commands.renderImageTab();
-    if (app.state.session.apiConnected) {
+    if (app.state.session.apiConnected && !guideRecoverySnapshot) {
       void app.commands.startFolderImageRefresh({ announce: false }).catch((error) => {
         app.state.image.importPollingError = error?.message || "Image preparation could not start";
         app.commands.renderImageImportNotice();

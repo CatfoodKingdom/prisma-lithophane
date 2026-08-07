@@ -10,6 +10,7 @@ Launch:
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -32,7 +33,7 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
 from urllib.parse import quote
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +65,18 @@ if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
 import data_paths  # noqa: E402
+from guide_assets import (  # noqa: E402
+    ExampleImageSeedStateError,
+    ExampleImageSeeder,
+    GuideAssetCatalog,
+    GuideAssetError,
+)
+from guide_runtime import (  # noqa: E402
+    GuideRuntimeConflict,
+    GuideRuntimeCorrupt,
+    GuideRuntimeError,
+    GuideRuntimeStore,
+)
 from guide_state import (  # noqa: E402
     GuideStateError,
     GuideStateRevisionConflict,
@@ -74,6 +87,10 @@ from progress import ProgressCancelled, ProgressReporter  # noqa: E402
 from image_ingress import (  # noqa: E402
     load_image,
     apply_adjustments,
+)
+from solve_grid import (  # noqa: E402
+    SolveGridResolutionError,
+    resolve_solve_grid,
 )
 from source_images import (  # noqa: E402
     ImageImportManager,
@@ -96,9 +113,7 @@ from facade import (  # noqa: E402
     SolveStats,
     solve_full,
 )
-from config.solve_settings import (  # noqa: E402
-    normalize_neutral_field_protection_mode,
-)
+from config.solve_settings import normalize_neutral_field_protection_mode  # noqa: E402
 from filament_order import canonical_palette_order, load_filament_order_registry  # noqa: E402
 from grouping.banded_export import (  # noqa: E402
     band_slot_tables,
@@ -192,15 +207,24 @@ _PRINTERS_PATH = data_paths.CONFIG_DIR / "printers.json"
 # Single source of truth for module toggle state in this worktree.
 _MODULES_PATH = data_paths.CONFIG_DIR / "modules.json"
 _GUIDE_STATE_STORE = GuideStateStore(data_paths.CONFIG_DIR / "guide_state.json")
+_GUIDE_RUNTIME_STORE = GuideRuntimeStore(data_paths.CONFIG_DIR / "guide_runtime.json")
+_GUIDE_ASSET_CATALOG = GuideAssetCatalog(
+    _PRISMA_DIR / "data" / "generator" / "tutorial_images"
+)
+_EXAMPLE_IMAGE_SEEDER = ExampleImageSeeder(
+    _GUIDE_ASSET_CATALOG,
+    _IMAGES_DIR,
+    data_paths.CONFIG_DIR / "example_image_seed_state.json",
+)
 
-_SETTINGS_PROFILE_SCHEMA_VERSION = 1
+_SETTINGS_PROFILE_SCHEMA_VERSION = 2
 _SYSTEM_SETTINGS_PROFILE_ID = "system-default"
 _SYSTEM_SETTINGS_PROFILE_NAME = "Basic"
 _SETTINGS_PROFILE_STATE_NAME = "state.json"
 _BUNDLED_SETTINGS_PROFILES_DIR = (
     _PRISMA_DIR / "data" / "generator" / "settings_profiles"
 )
-_BUNDLED_SETTINGS_PROFILE_REVISION = 2
+_BUNDLED_SETTINGS_PROFILE_REVISION = 3
 _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS = frozenset(
     {"wing-c-minimal", "wing-c-standard"}
 )
@@ -213,7 +237,7 @@ _OBSOLETE_NOZZLE_PRINTABILITY_FIELDS = frozenset(
     {"min_line_width", "min_line_length"}
 )
 
-_BUILT_IN_PRINTER_PROFILES_REVISION = 1
+_BUILT_IN_PRINTER_PROFILES_REVISION = 2
 _BUILT_IN_PRINTER_PROFILES_REVISION_KEY = "built_in_profiles_revision"
 _BAMBU_X1C_PRINTER_PROFILE = {
     "id": "bambu-x1c",
@@ -244,15 +268,15 @@ _TUTORIAL_PRINTER_PROFILE = {
     **deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
     "id": "tutorial-printer",
     "name": "Tutorial Printer",
+    "virtual": True,
+    "guide_only": True,
+    "editable": False,
+    "deletable": False,
+    "renameable": False,
 }
-_BASICS_TUTORIAL_IMAGE_SOURCE = (
-    _PRISMA_DIR / "data" / "generator" / "tutorial_images" / "bubba_blanket.jpg"
-)
-_BASICS_TUTORIAL_IMAGE_NAME = "Prisma Tutorial - Bubba Blanket.jpg"
 _DEFAULT_PRINTERS = {
     "printers": [
         deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
-        deepcopy(_TUTORIAL_PRINTER_PROFILE),
     ],
     "active_printer_id": "bambu-x1c",
     "active_nozzle_size": 0.2,
@@ -478,30 +502,41 @@ def _normalize_printers_data(data: dict, *, retired_policy: str = "warn_drop") -
 
 
 def _migrate_built_in_printer_profiles(data: dict) -> tuple[dict, bool]:
-    """Add newly bundled profiles once without reviving later user deletions."""
+    """Retire the persisted tutorial profile; guides mount a protected ghost."""
     raw_revision = data.get(_BUILT_IN_PRINTER_PROFILES_REVISION_KEY, 0)
     revision = (
         raw_revision
         if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
         else 0
     )
-    if revision >= _BUILT_IN_PRINTER_PROFILES_REVISION:
-        return data, False
-
     migrated = deepcopy(data)
-    existing_ids = {
-        str(printer.get("id"))
+    profiles = [
+        deepcopy(printer)
         for printer in migrated.get("printers", [])
         if isinstance(printer, Mapping)
-    }
-    if _TUTORIAL_PRINTER_PROFILE["id"] not in existing_ids:
-        migrated.setdefault("printers", []).append(
-            deepcopy(_TUTORIAL_PRINTER_PROFILE)
+        and printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    removed_tutorial = len(profiles) != len(migrated.get("printers", []))
+    if removed_tutorial and migrated.get("active_printer_id") == _TUTORIAL_PRINTER_PROFILE["id"]:
+        if not any(profile.get("id") == _BAMBU_X1C_PRINTER_PROFILE["id"] for profile in profiles):
+            profiles.append(deepcopy(_BAMBU_X1C_PRINTER_PROFILE))
+        migrated["active_printer_id"] = _BAMBU_X1C_PRINTER_PROFILE["id"]
+        available_nozzles = _BAMBU_X1C_PRINTER_PROFILE["nozzle_profiles"]
+        requested = migrated.get("active_nozzle_size")
+        migrated["active_nozzle_size"] = next(
+            (
+                nozzle["size"]
+                for nozzle in available_nozzles
+                if math.isclose(float(nozzle["size"]), float(requested or 0), abs_tol=1e-6)
+            ),
+            available_nozzles[0]["size"],
         )
+    migrated["printers"] = profiles
     migrated[
         _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
     ] = _BUILT_IN_PRINTER_PROFILES_REVISION
-    return migrated, True
+    changed = removed_tutorial or revision < _BUILT_IN_PRINTER_PROFILES_REVISION
+    return migrated, changed
 
 
 # Force-import live preprocessing modules so they register themselves.
@@ -524,6 +559,15 @@ def _load_printers() -> dict:
 def _save_printers(data: dict) -> None:
     """Write printers.json atomically."""
     versioned = deepcopy(data)
+    versioned["printers"] = [
+        printer
+        for printer in versioned.get("printers", [])
+        if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    if versioned.get("active_printer_id") == _TUTORIAL_PRINTER_PROFILE["id"]:
+        versioned["active_printer_id"] = (
+            versioned["printers"][0]["id"] if versioned["printers"] else None
+        )
     versioned[
         _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
     ] = _BUILT_IN_PRINTER_PROFILES_REVISION
@@ -556,6 +600,34 @@ def _resolve_active_printer(data: dict) -> dict:
     return {"printer": printer, "nozzle": nozzle, "printability": printability}
 
 
+def _guide_printer_overlay() -> dict[str, Any]:
+    return session.get("guide", {}) if "session" in globals() else {}
+
+
+def _effective_printers_data() -> dict:
+    """Merge the protected tutorial ghost into the active guide's view only."""
+    data = _load_printers()
+    overlay = _guide_printer_overlay()
+    if not overlay.get("ghost_printer_mounted"):
+        return data
+    merged = deepcopy(data)
+    merged["printers"] = [
+        printer
+        for printer in merged.get("printers", [])
+        if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    merged["printers"].append(deepcopy(_TUTORIAL_PRINTER_PROFILE))
+    merged["active_printer_id"] = (
+        overlay.get("active_printer_id") or merged.get("active_printer_id")
+    )
+    merged["active_nozzle_size"] = (
+        overlay.get("active_nozzle_size")
+        if overlay.get("active_nozzle_size") is not None
+        else merged.get("active_nozzle_size")
+    )
+    return _normalize_printers_data(merged)
+
+
 def _with_active_printer_printability(
     cfg: Mapping[str, Any],
     *,
@@ -565,7 +637,7 @@ def _with_active_printer_printability(
     resolved_active = (
         dict(active)
         if active is not None
-        else _resolve_active_printer(_load_printers())
+        else _resolve_active_printer(_effective_printers_data())
     )
     printability = resolved_active.get("printability")
     if not isinstance(printability, Mapping):
@@ -605,6 +677,13 @@ _file_handler = logging.FileHandler(str(_log_file), encoding="utf-8")
 _file_handler.setFormatter(logging.Formatter("%(asctime)s  %(name)s  %(levelname)s  %(message)s"))
 logging.getLogger("prisma").addHandler(_file_handler)
 
+try:
+    _EXAMPLE_IMAGE_SEEDER.seed()
+except (ExampleImageSeedStateError, GuideAssetError, OSError) as exc:
+    # Public examples are a convenience. A corrupt once-only history must fail
+    # closed so deleting a seeded image never causes it to be resurrected.
+    logger.warning("Example images were not seeded: %s", exc)
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -632,6 +711,121 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_GUIDE_IDEMPOTENCY_RESULTS: OrderedDict[tuple[str, ...], tuple[int, dict[str, str], bytes]] = OrderedDict()
+_GUIDE_IDEMPOTENCY_LOCKS: dict[tuple[str, ...], asyncio.Lock] = {}
+_GUIDE_IDEMPOTENCY_LIMIT = 512
+_GUIDE_IDEMPOTENT_START_PATHS = frozenset({
+    "/api/palette/suggest",
+    "/api/solve/start",
+    "/api/solve/palette-batch/start",
+    "/api/export/files/start",
+})
+
+
+def _guide_idempotent_mutation_path(request: Request) -> bool:
+    path = request.url.path
+    if path in _GUIDE_IDEMPOTENT_START_PATHS:
+        return True
+    if path in {"/api/palettes", "/api/settings-profiles", "/api/runs/save"}:
+        return request.method in {"POST", "PUT", "DELETE"}
+    return bool(
+        request.method == "DELETE"
+        and (
+            re.fullmatch(r"/api/settings-profiles/[^/]+", path)
+            or re.fullmatch(r"/api/runs/saved/[^/]+", path)
+        )
+    )
+
+
+def _clear_guide_idempotency(session_id: str | None = None) -> None:
+    """Release request-replay state once its guide session can no longer retry."""
+    if session_id is None:
+        _GUIDE_IDEMPOTENCY_RESULTS.clear()
+        _GUIDE_IDEMPOTENCY_LOCKS.clear()
+        return
+    for cache_key in list(_GUIDE_IDEMPOTENCY_LOCKS):
+        if cache_key[0] == session_id:
+            _GUIDE_IDEMPOTENCY_LOCKS.pop(cache_key, None)
+            _GUIDE_IDEMPOTENCY_RESULTS.pop(cache_key, None)
+
+
+async def _dispatch_idempotent_guide_request(request: Request, call_next):
+    """Replay successful guide mutations after a lost HTTP response."""
+    action_key = request.headers.get("x-prisma-idempotency-key")
+    session_id = request.headers.get("x-prisma-guide-session")
+    if (
+        not action_key
+        or not session_id
+        or not _guide_idempotent_mutation_path(request)
+    ):
+        return await call_next(request)
+    cache_key = (
+        session_id,
+        action_key,
+        request.method,
+        request.url.path,
+        request.url.query,
+        "action-start",
+    )
+    lock = _GUIDE_IDEMPOTENCY_LOCKS.setdefault(cache_key, asyncio.Lock())
+    async with lock:
+        cached = _GUIDE_IDEMPOTENCY_RESULTS.get(cache_key)
+        if cached is not None:
+            status_code, headers, payload = cached
+            _GUIDE_IDEMPOTENCY_RESULTS.move_to_end(cache_key)
+            return Response(content=payload, status_code=status_code, headers=headers)
+        response = await call_next(request)
+        if not 200 <= response.status_code < 300:
+            return response
+        payload = b"".join([chunk async for chunk in response.body_iterator])
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        cached_response = (response.status_code, headers, payload)
+        _GUIDE_IDEMPOTENCY_RESULTS[cache_key] = cached_response
+        _GUIDE_IDEMPOTENCY_RESULTS.move_to_end(cache_key)
+        while len(_GUIDE_IDEMPOTENCY_RESULTS) > _GUIDE_IDEMPOTENCY_LIMIT:
+            evicted, _value = _GUIDE_IDEMPOTENCY_RESULTS.popitem(last=False)
+            _GUIDE_IDEMPOTENCY_LOCKS.pop(evicted, None)
+        return Response(
+            content=payload,
+            status_code=response.status_code,
+            headers=headers,
+            background=response.background,
+        )
+
+
+@app.middleware("http")
+async def _guide_workspace_mutation_guard(request: Request, call_next):
+    """Enforce exclusive guide ownership without changing read-only APIs."""
+    _GUIDE_RUNTIME_STORE.note_page(request.headers.get("x-prisma-page-id"))
+    runtime_path = request.url.path.startswith("/api/guides/runtime")
+    cancellation_path = request.url.path in {
+        "/api/solve/cancel",
+        "/api/export/files/cancel",
+        "/api/palette/suggest/cancel",
+    }
+    mutation_admitted = False
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not runtime_path:
+        raw_epoch = request.headers.get("x-prisma-workspace-epoch")
+        try:
+            epoch = int(raw_epoch) if raw_epoch is not None else None
+        except ValueError:
+            epoch = -1
+        allowed, detail = _GUIDE_RUNTIME_STORE.begin_mutation(
+            page_id=request.headers.get("x-prisma-page-id"),
+            session_id=request.headers.get("x-prisma-guide-session"),
+            workspace_epoch=epoch,
+            allow_recovery=cancellation_path,
+        )
+        if not allowed:
+            return JSONResponse(status_code=423, content={"detail": detail})
+        mutation_admitted = True
+    try:
+        return await _dispatch_idempotent_guide_request(request, call_next)
+    finally:
+        if mutation_admitted:
+            _GUIDE_RUNTIME_STORE.end_mutation()
 
 
 @app.exception_handler(SourceImageError)
@@ -698,6 +892,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "color_region_target_from_printability": True,
     "color_region_target_width_multiplier": 2.0,
     "neutral_field_protection_mode": "off",
+    "neutral_field_protection_cutoff": 0.020,
     "stage2_fine_override_enabled": True,
     "stage2_final_printability_gate_fine_override": True,
     "stage2_printability_gate_fine_override": True,
@@ -727,8 +922,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "ams_slots": 4,
     "n_ams_units": 1,
     "white_slots": 1,
-    "swap_improvement_threshold": 2.0,
-    "force_all_tiers": False,
     "gamut_mode": "hull",
     "gamut_white_rescale": False,
     "model_domain_ingress": True,
@@ -762,6 +955,12 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 
 session: Dict[str, Any] = {
     "config": deepcopy(_DEFAULT_CONFIG),
+    "guide": {
+        "ghost_printer_mounted": False,
+        "active_printer_id": None,
+        "active_nozzle_size": None,
+        "mounted_asset_ids": set(),
+    },
     "solve": {
         "status": "idle",       # idle | running | complete | error | cancelled
         "progress": {},
@@ -906,23 +1105,21 @@ class ConfigPayload(BaseModel):
     color_region_target_from_printability: bool = True
     color_region_target_width_multiplier: float = 2.0
     neutral_field_protection_mode: Literal[
-        "off", "narrow", "standard", "broad"
+        "off", "narrow", "standard", "broad", "custom"
     ] = "off"
+    neutral_field_protection_cutoff: float = 0.020
     stage2_fine_override_enabled: bool = True
     stage2_final_printability_gate_fine_override: bool = True
     stage2_printability_gate_fine_override: bool = True
     stage2_printability_repair_fine_override: bool = True
     stage2_boundary_mutation_enabled: bool = True
     stage2_boundary_mutation_min_gain: Optional[float] = None
-    stage2_boundary_mutation_min_component_mm: Optional[float] = None
-    stage2_boundary_mutation_current_de_percentile: Optional[float] = None
     stage2_boundary_mutation_max_passes: Optional[int] = 1
     stage4_printability_gate_detail: bool = True
     luminance_detail_authoring_printability: str = "off"
     border: bool = False
     border_width_mm: float = 3.0
     border_height_mm: float = 3.0
-    use_corrections: bool = True
     appearance_model_provider: str = "photo_stack_bundle"
     photo_stack_bundle_path: Optional[str] = None
     max_dim_mm: float = 130.0
@@ -931,8 +1128,6 @@ class ConfigPayload(BaseModel):
     ams_slots: int = 4
     n_ams_units: int = 1
     white_slots: int = 1
-    swap_improvement_threshold: float = 2.0
-    force_all_tiers: bool = False
     gamut_mode: str = "hull"
     gamut_white_rescale: bool = False
     model_domain_ingress: bool = True
@@ -985,6 +1180,14 @@ class ConfigPayload(BaseModel):
     def _normalize_neutral_field_protection_mode(cls, value: Any) -> str:
         return normalize_neutral_field_protection_mode(value)
 
+    @field_validator("neutral_field_protection_cutoff")
+    @classmethod
+    def _validate_neutral_field_protection_cutoff(cls, value: float) -> float:
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0 or numeric > 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
+        return numeric
+
     @field_validator("gamut_mode", mode="before")
     @classmethod
     def _normalize_gamut_mode(cls, value: Any) -> str:
@@ -1015,8 +1218,8 @@ class ConfigPayload(BaseModel):
         if value is None or str(value).strip() == "":
             return None
         canonical = str(value).strip()
-        if not re.fullmatch(r"loaded-run:[a-zA-Z0-9_-]+", canonical):
-            raise ValueError("image_source_ref must be a valid loaded-run reference")
+        if not re.fullmatch(r"(?:loaded-run|guide-image):[a-zA-Z0-9_-]+", canonical):
+            raise ValueError("image_source_ref must be a valid private image reference")
         return canonical
 
     @field_validator("detail_cap_enabled")
@@ -1041,6 +1244,8 @@ _PHANTOM_CONFIG_FIELDS = frozenset({
     "v2_enable_cap_topology_cleanup",
     "v2_max_cleanup_rounds",
     "v2_full_cap_quality_report",
+    "swap_improvement_threshold",
+    "force_all_tiers",
 })
 
 
@@ -1139,7 +1344,17 @@ def _source_provenance_for_config(
     resolved_source: ResolvedSource,
 ) -> dict:
     provenance = resolved_source.provenance()
-    loaded_card_id = _loaded_source_card_id(cfg.get("image_source_ref"))
+    source_ref = cfg.get("image_source_ref")
+    guide_asset_id = _guide_source_asset_id(source_ref)
+    if guide_asset_id is not None:
+        asset = _GUIDE_ASSET_CATALOG.get(guide_asset_id)
+        provenance["original_source_name"] = str(
+            asset.get("guide_display_name") or resolved_source.display_name
+        )
+        provenance["guide_asset_id"] = guide_asset_id
+        provenance.pop("snapshot_name", None)
+        return provenance
+    loaded_card_id = _loaded_source_card_id(source_ref)
     if loaded_card_id is None:
         return provenance
     record = _loaded_source_record(loaded_card_id)
@@ -1164,14 +1379,41 @@ def _load_run_source_image(
     """Load the framed, adjusted source raster for solve-adjacent paths."""
 
     resolved = resolved_source or _resolve_run_source_image(image_path)
+    target_w: int | None = None
+    target_h: int | None = None
+    resolved_max_dim_mm = cfg["max_dim_mm"] if max_dim_mm is None else max_dim_mm
+    if max_dim_mm is None:
+        solve_grid = _resolved_solve_grid_for_config(cfg)
+        if solve_grid is not None:
+            target_w = int(solve_grid["cells"]["width"])
+            target_h = int(solve_grid["cells"]["height"])
+            resolved_max_dim_mm = None
     img = load_image(
         resolved.working_path,
         pixel_size_mm=cfg["image_sample_pitch_mm"],
-        max_dim_mm=cfg["max_dim_mm"] if max_dim_mm is None else max_dim_mm,
+        max_dim_mm=resolved_max_dim_mm,
+        target_w=target_w,
+        target_h=target_h,
         frame=cfg.get("frame"),
         source_resample_kernel=cfg.get("source_resample_kernel", "lanczos"),
     )
     return apply_adjustments(img, cfg.get("image_adjust"))
+
+
+def _resolved_solve_grid_for_config(cfg: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return canonical whole-cell geometry when the config owns a frame."""
+
+    frame = cfg.get("frame")
+    if not isinstance(frame, Mapping):
+        return None
+    width = frame.get("width_mm")
+    height = frame.get("height_mm")
+    pitch = cfg.get("solver_fine_pitch_mm")
+    if pitch is None:
+        pitch = cfg.get("image_sample_pitch_mm")
+    if width is None or height is None or pitch is None:
+        return None
+    return resolve_solve_grid(width, height, pitch)
 
 
 def _prepare_export_materialization(
@@ -1187,7 +1429,7 @@ def _prepare_export_materialization(
 
 
 def _drop_phantom_config_fields(cfg: Optional[dict]) -> dict:
-    """Return a deep-copied mapping without the eight quietly retired no-op fields."""
+    """Return a deep-copied mapping without quietly retired configuration fields."""
     resolved = deepcopy(dict(cfg or {}))
     for key in _PHANTOM_CONFIG_FIELDS:
         resolved.pop(key, None)
@@ -1294,6 +1536,19 @@ def _force_mandatory_product_settings(cfg: dict) -> dict:
     resolved["stage2_printability_gate_fine_override"] = True
     resolved["stage2_printability_repair_fine_override"] = True
     resolved["stage4_printability_gate_detail"] = True
+    # These controls are no longer user-configurable in Generator. Keep the
+    # lower-level APIs parameterized, but make every product solve canonical.
+    resolved["use_corrections"] = True
+    resolved["stage2_boundary_mutation_current_de_percentile"] = None
+    resolved["stage2_boundary_mutation_min_component_mm"] = None
+    try:
+        raw_cutoff = resolved.get("neutral_field_protection_cutoff")
+        cutoff = 0.020 if raw_cutoff is None else float(raw_cutoff)
+    except (TypeError, ValueError):
+        cutoff = 0.020
+    if not math.isfinite(cutoff):
+        cutoff = 0.020
+    resolved["neutral_field_protection_cutoff"] = max(0.0, min(1.0, cutoff))
     return resolved
 
 
@@ -1519,6 +1774,9 @@ def _build_solve_config(
         neutral_field_protection_mode=cfg.get(
             "neutral_field_protection_mode", "off"
         ),
+        neutral_field_protection_cutoff=cfg.get(
+            "neutral_field_protection_cutoff", 0.020
+        ),
         stage2_fine_override_enabled=cfg.get(
             "stage2_fine_override_enabled", True
         ),
@@ -1531,12 +1789,11 @@ def _build_solve_config(
         stage2_boundary_mutation_min_gain=cfg.get(
             "stage2_boundary_mutation_min_gain"
         ),
-        stage2_boundary_mutation_min_component_mm=cfg.get(
-            "stage2_boundary_mutation_min_component_mm"
-        ),
-        stage2_boundary_mutation_current_de_percentile=cfg.get(
-            "stage2_boundary_mutation_current_de_percentile"
-        ),
+        # Generator hardcodes the minimum donor contact to one pixel and does
+        # not apply a current-dE percentile filter. The refinement primitives
+        # remain parameterized for non-Generator callers.
+        stage2_boundary_mutation_min_component_mm=None,
+        stage2_boundary_mutation_current_de_percentile=None,
         stage2_boundary_mutation_max_passes=cfg.get(
             "stage2_boundary_mutation_max_passes", 1
         ),
@@ -1565,10 +1822,10 @@ def _build_solve_config(
         smooth_kernel=cfg["smooth_kernel"],
         ams_slots=cfg.get("ams_slots", 4),
         white_slots=cfg.get("white_slots", 1),
-        use_corrections=cfg["use_corrections"],
+        use_corrections=True,
         corrections=(
             _load_corrections()
-            if cfg["use_corrections"] and not photo_stack_provider
+            if not photo_stack_provider
             else None
         ),
         profiles_dir=_runtime_profiles_dir(),
@@ -2344,6 +2601,7 @@ def _validate_card_id(card_id: str) -> str:
 
 
 _LOADED_SOURCE_REF_PREFIX = "loaded-run:"
+_GUIDE_SOURCE_REF_PREFIX = "guide-image:"
 _LOADED_SOURCE_PRIVATE_DIR = "_loaded_source"
 
 
@@ -2351,16 +2609,36 @@ def _loaded_source_ref(card_id: str) -> str:
     return f"{_LOADED_SOURCE_REF_PREFIX}{_validate_card_id(card_id)}"
 
 
-def _loaded_source_card_id(source_ref: object) -> str | None:
+def _parse_image_source_ref(source_ref: object) -> tuple[str | None, str | None]:
+    """Parse every non-physical Image Library source reference in one place."""
     if source_ref is None or str(source_ref).strip() == "":
-        return None
+        return None, None
     value = str(source_ref).strip()
-    if not value.startswith(_LOADED_SOURCE_REF_PREFIX):
-        raise HTTPException(400, "Invalid image_source_ref")
-    card_id = value[len(_LOADED_SOURCE_REF_PREFIX):]
-    if not card_id:
-        raise HTTPException(400, "Invalid image_source_ref")
-    return _validate_card_id(card_id)
+    if value.startswith(_GUIDE_SOURCE_REF_PREFIX):
+        asset_id = value[len(_GUIDE_SOURCE_REF_PREFIX):]
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", asset_id):
+            raise HTTPException(400, "Invalid image_source_ref")
+        try:
+            _GUIDE_ASSET_CATALOG.get(asset_id)
+        except GuideAssetError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return "guide-image", asset_id
+    if value.startswith(_LOADED_SOURCE_REF_PREFIX):
+        card_id = value[len(_LOADED_SOURCE_REF_PREFIX):]
+        if not card_id:
+            raise HTTPException(400, "Invalid image_source_ref")
+        return "loaded-run", _validate_card_id(card_id)
+    raise HTTPException(400, "Invalid image_source_ref")
+
+
+def _loaded_source_card_id(source_ref: object) -> str | None:
+    kind, identifier = _parse_image_source_ref(source_ref)
+    return identifier if kind == "loaded-run" else None
+
+
+def _guide_source_asset_id(source_ref: object) -> str | None:
+    kind, identifier = _parse_image_source_ref(source_ref)
+    return identifier if kind == "guide-image" else None
 
 
 def _loaded_source_record(card_id: str) -> dict:
@@ -2388,6 +2666,16 @@ def _loaded_source_record(card_id: str) -> dict:
 
 
 def _resolve_image_source_path(image_path: object, image_source_ref: object = None) -> Path:
+    guide_asset_id = _guide_source_asset_id(image_source_ref)
+    if guide_asset_id is not None:
+        if guide_asset_id not in session.get("guide", {}).get("mounted_asset_ids", set()):
+            raise HTTPException(404, "Guide image is not mounted")
+        asset = _GUIDE_ASSET_CATALOG.get(guide_asset_id)
+        filename = str(image_path or "")
+        expected = str(asset.get("guide_display_name") or "")
+        if not filename or Path(filename).name != filename or filename != expected:
+            raise HTTPException(400, "image_path does not match the guide image")
+        return Path(asset["path"])
     loaded_card_id = _loaded_source_card_id(image_source_ref)
     if loaded_card_id is not None:
         record = _loaded_source_record(loaded_card_id)
@@ -2480,14 +2768,13 @@ _SOLVE_OWNED_KEYS = (
     "color_region_target_from_printability",
     "color_region_target_width_multiplier",
     "neutral_field_protection_mode",
+    "neutral_field_protection_cutoff",
     "stage2_fine_override_enabled",
     "stage2_final_printability_gate_fine_override",
     "stage2_printability_gate_fine_override",
     "stage2_printability_repair_fine_override",
     "stage2_boundary_mutation_enabled",
     "stage2_boundary_mutation_min_gain",
-    "stage2_boundary_mutation_min_component_mm",
-    "stage2_boundary_mutation_current_de_percentile",
     "stage2_boundary_mutation_max_passes",
     "stage4_printability_gate_detail",
     "luminance_detail_authoring_printability",
@@ -2508,7 +2795,6 @@ _SOLVE_OWNED_KEYS = (
     "luminance_handler_response_gamma",
     "luminance_handler_detail_residual",
     "luminance_handler_include_solver_detail",
-    "use_corrections",
     "appearance_model_provider",
     "photo_stack_bundle_path",
     # Stage 1 zone-label generator params.
@@ -2729,6 +3015,9 @@ def _build_solve_start_diagnostics(
         "color_region_target_mm": cfg.get("color_region_target_mm"),
         "neutral_field_protection_mode": cfg.get(
             "neutral_field_protection_mode", "off"
+        ),
+        "neutral_field_protection_cutoff": cfg.get(
+            "neutral_field_protection_cutoff", 0.020
         ),
         "luminance_mode": cfg.get("luminance_mode"),
         "detail_cap_max_layers": cfg.get("detail_cap_max_layers"),
@@ -3173,19 +3462,30 @@ def get_session() -> dict:
     }
     source_ref = session["config"].get("image_source_ref")
     if source_ref:
-        card_id = _loaded_source_card_id(source_ref)
-        record = _loaded_source_record(card_id)
-        private_path = (
-            data_paths.RUN_CACHE_DIR / card_id / str(record["relative_path"])
-        ).resolve()
-        resolved = _resolve_run_source_image(private_path)
-        response["source_image"] = _loaded_source_response(
-            display_name=Path(str(record.get("display_name") or "")).name or "image",
-            source_ref=source_ref,
-            private_path=private_path,
-            resolved_source=resolved,
-            library_match=None,
-        )
+        guide_asset_id = _guide_source_asset_id(source_ref)
+        if guide_asset_id is not None:
+            response["source_image"] = {
+                **_GUIDE_ASSET_CATALOG.metadata(guide_asset_id),
+                "temporary": True,
+                "thumbnail_url": (
+                    f"/api/images/preview/{quote(session['config']['image_path'])}"
+                    f"?image_source_ref={quote(source_ref)}"
+                ),
+            }
+        else:
+            card_id = _loaded_source_card_id(source_ref)
+            record = _loaded_source_record(card_id)
+            private_path = (
+                data_paths.RUN_CACHE_DIR / card_id / str(record["relative_path"])
+            ).resolve()
+            resolved = _resolve_run_source_image(private_path)
+            response["source_image"] = _loaded_source_response(
+                display_name=Path(str(record.get("display_name") or "")).name or "image",
+                source_ref=source_ref,
+                private_path=private_path,
+                resolved_source=resolved,
+                library_match=None,
+            )
     return response
 
 
@@ -3441,11 +3741,25 @@ def set_config(payload: ConfigPayload) -> dict:
         if not merged.get("image_path"):
             raise HTTPException(400, "image_path is required with image_source_ref")
         _resolve_config_image_source(merged)
+    try:
+        resolved_solve_grid = _resolved_solve_grid_for_config(merged)
+    except SolveGridResolutionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_solve_grid",
+                "message": str(exc),
+            },
+        ) from exc
     changed = [k for k in merged if old.get(k) != merged[k]]
     session["config"] = merged
     if changed:
         logger.info("Config updated: %s", ", ".join(changed))
-    return {"ok": True, "config": _with_canonical_pitch_egress(session["config"])}
+    return {
+        "ok": True,
+        "config": _with_canonical_pitch_egress(session["config"]),
+        "resolved_solve_grid": resolved_solve_grid,
+    }
 
 
 # ── Guides / Onboarding ──────────────────────────────────────────────────
@@ -3457,97 +3771,222 @@ class GuideStatePutPayload(BaseModel):
     state: Dict[str, Any]
 
 
-class BasicsGuidePreparePayload(BaseModel):
+class GuideLeasePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    restore_tutorial_printer: bool = False
-    include_tutorial_printer: bool = True
-    include_tutorial_image: bool = True
+    page_id: str = Field(min_length=1, max_length=128)
 
 
-def _files_have_same_sha256(left: Path, right: Path) -> bool:
-    if not left.is_file() or not right.is_file():
-        return False
-    if left.stat().st_size != right.stat().st_size:
-        return False
-    def digest(path: Path) -> str:
-        checksum = hashlib.sha256()
-        with path.open("rb") as handle:
-            while block := handle.read(1024 * 1024):
-                checksum.update(block)
-        return checksum.hexdigest()
-
-    return digest(left) == digest(right)
+class GuideLeaseReleasePayload(GuideLeasePayload):
+    lease_id: str = Field(min_length=1, max_length=128)
 
 
-def _materialize_basics_tutorial_image() -> ResolvedSource:
-    if not _BASICS_TUTORIAL_IMAGE_SOURCE.is_file():
-        raise GuideStateError(
-            f"Bundled tutorial image is missing: {_BASICS_TUTORIAL_IMAGE_SOURCE}"
-        )
+_CLIENT_GUIDE_SNAPSHOT_KEYS = frozenset({
+    "settings",
+    "enabled_filaments",
+    "palette_candidates",
+    "palette_controls",
+    "solve_mode",
+    "export_policy",
+})
 
-    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    destination = _IMAGES_DIR / _BASICS_TUTORIAL_IMAGE_NAME
-    if destination.exists() and not _files_have_same_sha256(
-        destination,
-        _BASICS_TUTORIAL_IMAGE_SOURCE,
-    ):
-        stem = destination.stem
-        suffix = destination.suffix
-        counter = 2
-        while True:
-            candidate = _IMAGES_DIR / f"{stem} {counter}{suffix}"
-            if not candidate.exists() or _files_have_same_sha256(
-                candidate,
-                _BASICS_TUTORIAL_IMAGE_SOURCE,
+
+class GuideRuntimeBeginPayload(GuideLeaseReleasePayload):
+    guide_id: str = Field(min_length=1, max_length=128)
+    route_id: str = Field(min_length=1, max_length=128)
+    client_snapshot: Dict[str, Any]
+
+    @field_validator("client_snapshot")
+    @classmethod
+    def _validate_client_snapshot(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise ValueError("client_snapshot must be an object")
+        unknown = set(value) - _CLIENT_GUIDE_SNAPSHOT_KEYS
+        if unknown:
+            raise ValueError(f"unsupported client snapshot fields: {', '.join(sorted(unknown))}")
+        snapshot = deepcopy(dict(value))
+
+        def require_mapping(field: str) -> dict[str, Any] | None:
+            current = snapshot.get(field)
+            if current is None:
+                return None
+            if not isinstance(current, Mapping):
+                raise ValueError(f"client_snapshot.{field} must be an object")
+            return dict(current)
+
+        def require_string_list(container: Mapping[str, Any], field: str, label: str) -> None:
+            current = container.get(field)
+            if not isinstance(current, list) or any(
+                not isinstance(item, str) or not item.strip() for item in current
             ):
-                destination = candidate
-                break
-            counter += 1
+                raise ValueError(f"{label}.{field} must be a list of non-empty strings")
 
-    if not destination.exists():
-        temporary = destination.with_name(
-            f".{destination.name}.{uuid.uuid4().hex}.tmp"
+        require_mapping("settings")
+        enabled = require_mapping("enabled_filaments")
+        if enabled is not None:
+            if set(enabled) - {"runtime_library_id", "enabled_ids"}:
+                raise ValueError("client_snapshot.enabled_filaments has unsupported fields")
+            library_id = enabled.get("runtime_library_id")
+            if library_id is not None and not isinstance(library_id, str):
+                raise ValueError("enabled_filaments.runtime_library_id must be a string or null")
+            require_string_list(enabled, "enabled_ids", "enabled_filaments")
+        candidates = require_mapping("palette_candidates")
+        if candidates is not None:
+            if set(candidates) - {"selected_ids", "initialized"}:
+                raise ValueError("client_snapshot.palette_candidates has unsupported fields")
+            require_string_list(candidates, "selected_ids", "palette_candidates")
+            if not isinstance(candidates.get("initialized"), bool):
+                raise ValueError("palette_candidates.initialized must be a boolean")
+        controls = require_mapping("palette_controls")
+        if controls is not None and set(controls) - {
+            "target_filament_count", "target_suggest_count", "suggestion_mode"
+        }:
+            raise ValueError("client_snapshot.palette_controls has unsupported fields")
+        solve_mode = snapshot.get("solve_mode")
+        if solve_mode is not None and solve_mode not in {"single", "batch"}:
+            raise ValueError("client_snapshot.solve_mode must be single or batch")
+        export_policy = require_mapping("export_policy")
+        if export_policy is not None and set(export_policy) - {
+            "output_format", "geometry_source", "field_scale"
+        }:
+            raise ValueError("client_snapshot.export_policy has unsupported fields")
+        serialized = json.dumps(value)
+        if len(serialized.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("client_snapshot is too large")
+        return snapshot
+
+
+class GuideRuntimeSessionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    page_id: str = Field(min_length=1, max_length=128)
+
+
+class GuideRuntimeResetPayload(GuideRuntimeSessionPayload):
+    begin_recovery: bool = False
+
+
+class GuideRuntimeJobPayload(GuideRuntimeSessionPayload):
+    kind: str = Field(min_length=1, max_length=64)
+    job_id: str = Field(min_length=1, max_length=128)
+
+
+class GuideOwnedResourcePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1, max_length=128)
+    kind: str = Field(pattern=r"^(palette|settings-profile|saved-run)$")
+    id: Optional[str] = Field(default=None, max_length=256)
+    name: str = Field(min_length=1, max_length=256)
+    fingerprint: Any
+    status: str = Field(pattern=r"^(pending_create|present|pending_delete|absent)$")
+
+
+class GuideRuntimeResourcePayload(GuideRuntimeSessionPayload):
+    resource: GuideOwnedResourcePayload
+
+
+def _capture_guide_server_snapshot() -> dict[str, Any]:
+    printers = _load_printers()
+    profile_state = _load_settings_profile_state()
+    return {
+        "active_printer_id": printers.get("active_printer_id"),
+        "active_nozzle_size": printers.get("active_nozzle_size"),
+        "modules": load_module_state(_MODULES_PATH),
+        "user_default_profile_id": profile_state.get("user_default_profile_id") or _SYSTEM_SETTINGS_PROFILE_ID,
+        "settings_config": {
+            key: deepcopy(session["config"].get(key, _DEFAULT_CONFIG.get(key)))
+            for key in _SETTINGS_PROFILE_KEYS
+        },
+    }
+
+
+def _reset_guide_backend_workspace() -> dict[str, Any]:
+    """Clear transient project work without touching reusable image/LUT caches."""
+    from cache_admin import safe_clear_dir
+
+    _assert_no_active_job(action="start a guide")
+    removed = sum(
+        safe_clear_dir(path, root=data_paths.CACHE_DIR)
+        for path in (
+            data_paths.RUN_CACHE_DIR,
+            data_paths.AUTO_RUNS_DIR,
+            data_paths.CACHE_DIR / "palette-batches",
         )
-        try:
-            shutil.copyfile(_BASICS_TUTORIAL_IMAGE_SOURCE, temporary)
-            os.replace(temporary, destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    return _SOURCE_IMAGES.prepare(destination)
-
-
-def _tutorial_printer_status(
-    printers_data: Mapping[str, Any],
-) -> Literal["ready", "missing", "modified"]:
-    profile = next(
-        (
-            item
-            for item in printers_data.get("printers", [])
-            if item.get("id") == _TUTORIAL_PRINTER_PROFILE["id"]
-        ),
-        None,
     )
-    if profile is None:
-        return "missing"
-    return "ready" if profile == _TUTORIAL_PRINTER_PROFILE else "modified"
+    session["solve_cache"].clear()
+    session["config"]["image_path"] = None
+    session["config"]["image_source_ref"] = None
+    session["config"]["palette"] = []
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    session["guide"]["active_printer_id"] = None
+    session["guide"]["active_nozzle_size"] = None
+    for key in ("solve", "suggest", "export"):
+        session[key].update({
+            "status": "idle",
+            "progress": {},
+            "elapsed_s": 0.0,
+            "result": None,
+            "cancel_requested": False,
+            "job_id": None,
+        })
+    session["palette_batch"].update({
+        "status": "idle",
+        "job_id": None,
+        "phase": None,
+        "progress": {},
+        "elapsed_s": 0.0,
+        "item_count": 0,
+        "current_position": None,
+        "items": [],
+        "cancel_requested": False,
+    })
+    _clear_palette_backend_cache()
+    return {"removed": removed, "config": _with_canonical_pitch_egress(session["config"])}
 
 
-def _restore_tutorial_printer(printers_data: Mapping[str, Any]) -> dict[str, Any]:
-    restored = deepcopy(dict(printers_data))
-    profiles = [
-        deepcopy(profile)
-        for profile in restored.get("printers", [])
-        if profile.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
-    ]
-    profiles.append(deepcopy(_TUTORIAL_PRINTER_PROFILE))
-    restored["printers"] = profiles
-    restored[_BUILT_IN_PRINTER_PROFILES_REVISION_KEY] = (
-        _BUILT_IN_PRINTER_PROFILES_REVISION
-    )
-    _save_printers(restored)
-    return restored
+def _restore_guide_server_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    user_default_profile_id = str(snapshot.get("user_default_profile_id") or "").strip()
+    if not user_default_profile_id:
+        raise GuideRuntimeConflict("the recorded startup Settings Profile is unavailable")
+    profile_ids = {profile.id for profile in _load_all_settings_profiles()}
+    if user_default_profile_id not in profile_ids:
+        raise GuideRuntimeConflict("the recorded startup Settings Profile no longer exists")
+    profile_state = _load_settings_profile_state()
+    profile_state["user_default_profile_id"] = user_default_profile_id
+    _save_settings_profile_state(profile_state)
+    modules = snapshot.get("modules")
+    if isinstance(modules, Mapping):
+        save_module_state(_MODULES_PATH, dict(modules))
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    session["guide"]["active_printer_id"] = None
+    session["guide"]["active_nozzle_size"] = None
+    printers = _load_printers()
+    requested_printer = snapshot.get("active_printer_id")
+    if any(printer.get("id") == requested_printer for printer in printers.get("printers", [])):
+        printers["active_printer_id"] = requested_printer
+        printers["active_nozzle_size"] = snapshot.get("active_nozzle_size")
+        _save_printers(printers)
+    active = _resolve_active_printer(_load_printers())
+    restored_config = dict(session["config"])
+    settings_config = snapshot.get("settings_config")
+    if isinstance(settings_config, Mapping):
+        for key in _SETTINGS_PROFILE_KEYS:
+            if key in settings_config:
+                restored_config[key] = deepcopy(settings_config[key])
+    restored_config["image_path"] = None
+    restored_config["image_source_ref"] = None
+    restored_config["palette"] = []
+    session["config"] = _with_active_printer_printability(restored_config, active=active)
+    return {
+        "active": active,
+        "modules": load_module_state(_MODULES_PATH),
+        "config": _with_canonical_pitch_egress(session["config"]),
+        "user_default_profile_id": user_default_profile_id,
+    }
 
 
 @app.get("/api/guides/state")
@@ -3580,44 +4019,332 @@ def put_guide_state(payload: GuideStatePutPayload) -> dict:
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/guides/basics/prepare")
-def prepare_basics_guide(payload: BasicsGuidePreparePayload) -> dict:
-    """Materialize tutorial-owned inputs without overwriting user-owned data."""
-
-    tutorial_printer = None
-    if payload.include_tutorial_printer:
-        printers_data = _load_printers()
-        printer_status = _tutorial_printer_status(printers_data)
-        if payload.restore_tutorial_printer and printer_status != "ready":
-            printers_data = _restore_tutorial_printer(printers_data)
-            printer_status = "ready"
-        tutorial_printer = {
-            "status": printer_status,
-            "profile": deepcopy(_TUTORIAL_PRINTER_PROFILE),
+@app.get("/api/guides/runtime")
+def get_guide_runtime(page_id: str | None = None, include_snapshot: bool = False) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.status(
+            page_id=page_id,
+            include_snapshot=include_snapshot,
+        )
+    except GuideRuntimeCorrupt as exc:
+        return {
+            "schema_version": 1,
+            "workspace_epoch": 0,
+            "lease": None,
+            "session": None,
+            "corrupt": True,
+            "error": str(exc),
         }
 
-    tutorial_image_payload = None
-    if payload.include_tutorial_image:
-        try:
-            tutorial_image = _materialize_basics_tutorial_image()
-        except (GuideStateError, OSError, SourceImageError) as exc:
-            raise HTTPException(500, str(exc)) from exc
-        tutorial_image_payload = {
-            "filename": tutorial_image.display_name,
-            "width": tutorial_image.width,
-            "height": tutorial_image.height,
-            "size_kb": round(
-                tutorial_image.original_path.stat().st_size / 1024,
-                1,
-            ),
-            "source_format": tutorial_image.source_format,
-            "normalized": tutorial_image.normalized,
-        }
 
-    return {
-        "tutorial_image": tutorial_image_payload,
-        "tutorial_printer": tutorial_printer,
+@app.post("/api/guides/runtime/acquire")
+def acquire_guide_runtime(payload: GuideLeasePayload) -> dict:
+    _assert_no_active_job(action="start a guide")
+    try:
+        return _GUIDE_RUNTIME_STORE.acquire(payload.page_id)
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except GuideRuntimeCorrupt as exc:
+        raise HTTPException(423, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/release")
+def release_guide_runtime(payload: GuideLeaseReleasePayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.release(payload.lease_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/depart")
+def depart_guide_runtime_page(payload: GuideLeasePayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.depart_page(payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/begin")
+def begin_guide_runtime(payload: GuideRuntimeBeginPayload) -> dict:
+    _assert_no_active_job(action="start a guide")
+    snapshot = {
+        "server": _capture_guide_server_snapshot(),
+        "client": deepcopy(payload.client_snapshot),
     }
+    try:
+        record = _GUIDE_RUNTIME_STORE.begin(
+            lease_id=payload.lease_id,
+            page_id=payload.page_id,
+            guide_id=payload.guide_id,
+            route_id=payload.route_id,
+            snapshot=snapshot,
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "session_id": record["session_id"],
+        "guide_id": record["guide_id"],
+        "route_id": record["route_id"],
+        "phase": record["phase"],
+        "images_folder": str(_IMAGES_DIR),
+        "workspace_epoch": _GUIDE_RUNTIME_STORE.status(page_id=payload.page_id)["workspace_epoch"],
+    }
+
+
+@app.post("/api/guides/runtime/heartbeat")
+def heartbeat_guide_runtime(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.heartbeat(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/claim-recovery")
+def claim_guide_runtime_recovery(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.claim_recovery(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"session_id": record["session_id"], "phase": record["phase"]}
+
+
+@app.post("/api/guides/runtime/reset")
+def reset_guide_runtime(payload: GuideRuntimeResetPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.read()
+        if record is None or record["session_id"] != payload.session_id:
+            raise GuideRuntimeConflict("guide session is no longer active")
+        if record["owner_page_id"] != payload.page_id:
+            raise GuideRuntimeConflict("another Prisma window owns the guide session")
+        if payload.begin_recovery or record.get("phase") == "restoring":
+            _GUIDE_RUNTIME_STORE.mark_restoring(payload.session_id, payload.page_id)
+            _GUIDE_RUNTIME_STORE.wait_for_mutations()
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _reset_guide_backend_workspace()
+
+
+@app.post("/api/guides/runtime/jobs")
+def register_guide_runtime_job(payload: GuideRuntimeJobPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.register_job(
+            payload.session_id,
+            payload.page_id,
+            payload.kind,
+            payload.job_id,
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"owned_jobs": record["owned_jobs"]}
+
+
+@app.post("/api/guides/runtime/resources")
+def transition_guide_runtime_resource(payload: GuideRuntimeResourcePayload) -> dict:
+    try:
+        resource = _GUIDE_RUNTIME_STORE.transition_resource(
+            payload.session_id,
+            payload.page_id,
+            payload.resource.model_dump(),
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"resource": resource}
+
+
+def _guide_resource_candidates(kind: str) -> list[dict[str, Any]]:
+    if kind == "palette":
+        return [
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or ""),
+                "fingerprint": list(item.get("filament_ids") or []),
+            }
+            for item in _load_palettes().get("palettes", [])
+            if isinstance(item, Mapping)
+        ]
+    if kind == "settings-profile":
+        return [
+            {
+                "id": profile.id,
+                "name": profile.name,
+                "fingerprint": {
+                    "settings": _with_canonical_pitch_egress(deepcopy(profile.settings)),
+                    "modules": dict(profile.modules),
+                },
+            }
+            for profile in _load_all_settings_profiles()
+            if profile.kind == "named"
+        ]
+    if kind == "saved-run":
+        return [
+            {
+                "id": str(item.get("save_id") or ""),
+                "name": str(item.get("label") or ""),
+                "fingerprint": {
+                    "source_image_name": str(item.get("source_image_name") or ""),
+                    "palette": list(item.get("palette") or []),
+                },
+            }
+            for item in run_store.list_saves()
+            if isinstance(item, Mapping)
+        ]
+    raise GuideRuntimeConflict(f"unknown guide resource kind: {kind}")
+
+
+@app.post("/api/guides/runtime/resources/reconcile")
+def reconcile_guide_runtime_resources(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.read()
+        if record is None:
+            raise GuideRuntimeConflict("guide session is no longer active")
+        if record.get("session_id") != payload.session_id or record.get("owner_page_id") != payload.page_id:
+            raise GuideRuntimeConflict("another Prisma window owns the guide session")
+        reconciled: dict[str, dict[str, Any]] = {}
+        candidates_by_kind: dict[str, list[dict[str, Any]]] = {}
+        for operation_id, raw in record.get("owned_resources", {}).items():
+            resource = deepcopy(raw)
+            kind = resource["kind"]
+            if kind not in candidates_by_kind:
+                candidates_by_kind[kind] = _guide_resource_candidates(kind)
+            candidates = candidates_by_kind[kind]
+            resource_id = resource.get("id")
+            by_id = [item for item in candidates if resource_id and item["id"] == resource_id]
+            if resource.get("status") == "pending_create" and not by_id:
+                by_identity = [
+                    item for item in candidates
+                    if item["name"].casefold() == resource["name"].casefold()
+                    and item["fingerprint"] == resource["fingerprint"]
+                ]
+                if len(by_identity) > 1:
+                    raise GuideRuntimeConflict(
+                        f'Could not uniquely reconcile Guide-created {kind} "{resource["name"]}"'
+                    )
+                by_id = by_identity
+            if by_id:
+                resource["id"] = by_id[0]["id"]
+                resource["status"] = "present"
+            else:
+                resource["status"] = "absent"
+            reconciled[operation_id] = resource
+        saved = _GUIDE_RUNTIME_STORE.replace_reconciled_resources(
+            payload.session_id,
+            payload.page_id,
+            reconciled,
+        )
+    except (GuideRuntimeError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(409, f"Guide resources could not be reconciled: {exc}") from exc
+    return {
+        "resources": list(saved.values()),
+        "present": [resource for resource in saved.values() if resource["status"] == "present"],
+    }
+
+
+def _register_request_guide_job(
+    request: Request | None,
+    *,
+    kind: str,
+    job_id: str,
+) -> None:
+    if request is None:
+        return
+    session_id = request.headers.get("x-prisma-guide-session")
+    page_id = request.headers.get("x-prisma-page-id")
+    if not session_id or not page_id:
+        return
+    try:
+        _GUIDE_RUNTIME_STORE.register_job(session_id, page_id, kind, job_id)
+    except GuideRuntimeError as exc:
+        # The background job is already running at this point. Turning a
+        # successful start into an HTTP error would invite an idempotent retry
+        # to start duplicate work. Cleanup also polls every supported job kind,
+        # so keep returning the real job ID and retain an actionable log entry.
+        logger.warning(
+            "Guide job %s/%s started but could not be added to the durable ledger: %s",
+            kind,
+            job_id,
+            exc,
+        )
+
+
+@app.post("/api/guides/runtime/restore-server")
+def restore_guide_runtime_server(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.mark_restoring(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    restored = _restore_guide_server_snapshot(record["snapshot"]["server"])
+    _GUIDE_RUNTIME_STORE.mark_restored(payload.session_id, payload.page_id)
+    return restored
+
+
+@app.post("/api/guides/runtime/finalize")
+def finalize_guide_runtime(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        epoch = _GUIDE_RUNTIME_STORE.finalize(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    _clear_guide_idempotency(payload.session_id)
+    return {"finalized": True, "workspace_epoch": epoch}
+
+
+@app.post("/api/guides/runtime/abandon")
+def abandon_guide_runtime(payload: GuideLeasePayload) -> dict:
+    try:
+        destination, epoch = _GUIDE_RUNTIME_STORE.abandon(payload.page_id)
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    _clear_guide_idempotency()
+    return {
+        "abandoned": True,
+        "preserved_as": destination.name if destination else None,
+        "workspace_epoch": epoch,
+    }
+
+
+@app.post("/api/guides/runtime/open-config-folder")
+def open_guide_runtime_config_folder() -> dict:
+    try:
+        open_folder_in_file_manager(data_paths.CONFIG_DIR)
+    except Exception as exc:
+        raise HTTPException(500, f"Could not open the configuration folder: {exc}") from exc
+    return {"opened": True}
+
+
+@app.post("/api/guides/runtime/mount-printer")
+def mount_guide_ghost_printer(payload: GuideRuntimeSessionPayload) -> dict:
+    record = _GUIDE_RUNTIME_STORE.read()
+    if record is None or record["session_id"] != payload.session_id:
+        raise HTTPException(409, "guide session is no longer active")
+    if record["owner_page_id"] != payload.page_id:
+        raise HTTPException(423, "another Prisma window owns the guide session")
+    persisted = _load_printers()
+    session["guide"].update({
+        "ghost_printer_mounted": True,
+        "active_printer_id": persisted.get("active_printer_id"),
+        "active_nozzle_size": persisted.get("active_nozzle_size"),
+    })
+    return {
+        "profile": deepcopy(_TUTORIAL_PRINTER_PROFILE),
+        "printers": _effective_printers_data(),
+        "active": _resolve_active_printer(_effective_printers_data()),
+    }
+
+
+@app.post("/api/guides/runtime/assets/{asset_id}/mount")
+def mount_guide_asset(asset_id: str, payload: GuideRuntimeSessionPayload) -> dict:
+    record = _GUIDE_RUNTIME_STORE.read()
+    if record is None or record["session_id"] != payload.session_id:
+        raise HTTPException(409, "guide session is no longer active")
+    if record["owner_page_id"] != payload.page_id:
+        raise HTTPException(423, "another Prisma window owns the guide session")
+    try:
+        metadata = _GUIDE_ASSET_CATALOG.metadata(asset_id)
+    except GuideAssetError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    session["guide"]["mounted_asset_ids"].add(asset_id)
+    return metadata
 
 
 # ── Printers ──────────────────────────────────────────────────────────────
@@ -3625,13 +4352,23 @@ def prepare_basics_guide(payload: BasicsGuidePreparePayload) -> dict:
 @app.get("/api/printers")
 def get_printers() -> dict:
     """Return all printer configs + active selection."""
-    return _load_printers()
+    return _effective_printers_data()
 
 
 @app.put("/api/printers")
 def save_printers(payload: dict) -> dict:
     """Save the full printers object (printers list + active selection)."""
-    normalized = _normalize_printers_data(payload, retired_policy="reject")
+    sanitized = deepcopy(payload)
+    sanitized["printers"] = [
+        printer
+        for printer in sanitized.get("printers", [])
+        if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    if sanitized.get("active_printer_id") == _TUTORIAL_PRINTER_PROFILE["id"]:
+        persisted = _load_printers()
+        sanitized["active_printer_id"] = persisted.get("active_printer_id")
+        sanitized["active_nozzle_size"] = persisted.get("active_nozzle_size")
+    normalized = _normalize_printers_data(sanitized, retired_policy="reject")
     normalized[
         _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
     ] = _BUILT_IN_PRINTER_PROFILES_REVISION
@@ -3648,13 +4385,42 @@ def save_printers(payload: dict) -> dict:
 @app.get("/api/printers/active")
 def get_active_printer() -> dict:
     """Return the resolved active printer and nozzle profile."""
-    data = _load_printers()
+    data = _effective_printers_data()
     return _resolve_active_printer(data)
 
 
 @app.put("/api/printers/active")
 def set_active_printer(payload: dict) -> dict:
     """Set active_printer_id and/or active_nozzle_size."""
+    overlay = _guide_printer_overlay()
+    if overlay.get("ghost_printer_mounted"):
+        data = _effective_printers_data()
+        if "active_printer_id" in payload:
+            requested_id = str(payload["active_printer_id"])
+            if not any(printer.get("id") == requested_id for printer in data.get("printers", [])):
+                raise HTTPException(404, "Printer profile not found")
+            overlay["active_printer_id"] = requested_id
+            requested_printer = next(
+                printer for printer in data["printers"] if printer.get("id") == requested_id
+            )
+            nozzles = requested_printer.get("nozzle_profiles", [])
+            if not any(
+                math.isclose(
+                    float(nozzle.get("size", 0)),
+                    float(overlay.get("active_nozzle_size") or 0),
+                    abs_tol=1e-6,
+                )
+                for nozzle in nozzles
+            ):
+                overlay["active_nozzle_size"] = nozzles[0]["size"] if nozzles else None
+        if "active_nozzle_size" in payload:
+            overlay["active_nozzle_size"] = payload["active_nozzle_size"]
+        active = _resolve_active_printer(_effective_printers_data())
+        if active.get("nozzle") is None and overlay.get("active_nozzle_size") is not None:
+            raise HTTPException(400, "The selected nozzle is unavailable for the active printer")
+        overlay["active_nozzle_size"] = active.get("nozzle", {}).get("size") if active.get("nozzle") else None
+        session["config"] = _with_active_printer_printability(session["config"], active=active)
+        return {"ok": True, **active}
     data = _load_printers()
     if "active_printer_id" in payload:
         data["active_printer_id"] = payload["active_printer_id"]
@@ -3722,7 +4488,6 @@ _SETTINGS_PROFILE_KEYS = (
     "k_max",
     "de_threshold",
     "smooth_kernel",
-    "use_corrections",
     "appearance_model_provider",
     "photo_stack_bundle_path",
     "gamut_mode",
@@ -3745,11 +4510,10 @@ _SETTINGS_PROFILE_KEYS = (
     # --- canonical staged backend params ---
     "stage1_coarsening_factor",
     "neutral_field_protection_mode",
+    "neutral_field_protection_cutoff",
     "stage2_fine_override_enabled",
     "stage2_boundary_mutation_enabled",
     "stage2_boundary_mutation_min_gain",
-    "stage2_boundary_mutation_min_component_mm",
-    "stage2_boundary_mutation_current_de_percentile",
     "stage2_boundary_mutation_max_passes",
     # --- boundary/detail cap params ---
     "cap_mode",
@@ -3985,6 +4749,12 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
         if key in incoming:
             logger.info("Dropping retired config key from settings profile: %s", key)
             incoming.pop(key, None)
+    for key in (
+        "use_corrections",
+        "stage2_boundary_mutation_current_de_percentile",
+        "stage2_boundary_mutation_min_component_mm",
+    ):
+        incoming.pop(key, None)
     retired_subject = "protect" + "_subject"
     retired_mask = "protect" + "_mask"
     for key in (
@@ -4016,6 +4786,14 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
                 incoming["neutral_field_protection_mode"]
             )
         )
+    if "neutral_field_protection_cutoff" in incoming:
+        try:
+            cutoff = float(incoming["neutral_field_protection_cutoff"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("neutral_field_protection_cutoff must be a number") from exc
+        if not math.isfinite(cutoff) or cutoff < 0 or cutoff > 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
+        incoming["neutral_field_protection_cutoff"] = cutoff
     if "base_filament" not in incoming and incoming.get("white_base"):
         incoming["base_filament"] = incoming["white_base"]
     if "cap_filament" not in incoming and "white_cap" in incoming:
@@ -4099,10 +4877,26 @@ def _persist_neutral_field_protection_profile_default(
         raw_settings = payload.get("settings")
         if not isinstance(raw_settings, dict):
             return False
-        key = "neutral_field_protection_mode"
-        if key in raw_settings:
+        changed = False
+        for key in (
+            "use_corrections",
+            "stage2_boundary_mutation_current_de_percentile",
+            "stage2_boundary_mutation_min_component_mm",
+        ):
+            if key in raw_settings:
+                raw_settings.pop(key, None)
+                changed = True
+        for key in ("neutral_field_protection_mode", "neutral_field_protection_cutoff"):
+            desired = deepcopy(record.settings[key])
+            if raw_settings.get(key) != desired:
+                raw_settings[key] = desired
+                changed = True
+        if int(payload.get("schema_version") or 0) != _SETTINGS_PROFILE_SCHEMA_VERSION:
+            payload["schema_version"] = _SETTINGS_PROFILE_SCHEMA_VERSION
+            changed = True
+        if not changed:
             return False
-        raw_settings[key] = deepcopy(record.settings[key])
+        payload["settings"] = raw_settings
         _write_json_atomic(path, payload)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(
@@ -4112,10 +4906,8 @@ def _persist_neutral_field_protection_profile_default(
         )
         return False
     logger.info(
-        "Migrated settings profile %s with %s=%s",
+        "Migrated settings profile %s to the current settings schema",
         record.id,
-        key,
-        record.settings[key],
     )
     return True
 
@@ -4505,13 +5297,20 @@ class PaletteSuggestPayload(BaseModel):
 
     image_path: str
     image_source_ref: Optional[str] = None
-    n_filaments: int = 7
-    top_k: int = 5
+    n_filaments: int = Field(default=7, strict=True, ge=2, le=16)
+    top_k: int = Field(default=5, strict=True, ge=1, le=10)
     filament_ids: Optional[List[str]] = None
-    max_swaps: Optional[int] = None  # if set, use swap-tier sweep
     palette_mode: str = "standard"
-    improvement_threshold: Optional[float] = None
-    force_all_tiers: Optional[bool] = None
+
+    @field_validator("filament_ids")
+    @classmethod
+    def _validate_distinct_filament_ids(
+        cls,
+        value: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("filament_ids must not contain duplicates")
+        return value
 
     @field_validator("palette_mode", mode="before")
     @classmethod
@@ -4608,58 +5407,6 @@ def _format_palette_candidate(cand) -> dict:
         d["rank_score"] = round(cand.rank_score, 4)
         d["rank_mode"] = cand.rank_mode or "mean"
     return d
-
-
-def _format_tier_response(
-    sweep,
-    *,
-    palette_mode: str = "standard",
-    signature_stats: Optional[dict] = None,
-    model_metadata: Optional[dict] = None,
-) -> dict:
-    tiers = getattr(sweep, "tiers", sweep)
-    tier_results = []
-    for tier in tiers:
-        tier_cands = [_format_palette_candidate(cand) for cand in tier.candidates]
-        tier_results.append({
-            "swap_count": tier.swap_count,
-            "n_filaments": tier.n_filaments,
-            "best_mean_de": round(tier.best_mean_de, 4),
-            "best_coverage_pct": round(tier.best_coverage_pct, 1),
-            "improvement": round(tier.improvement_over_prev, 1)
-                if tier.improvement_over_prev is not None else None,
-            "candidates": tier_cands,
-        })
-    response = {"tiers": tier_results, "palette_mode": palette_mode}
-    if hasattr(sweep, "alternatives"):
-        response["alternatives"] = [
-            _format_palette_candidate(cand)
-            for cand in getattr(sweep, "alternatives", [])
-        ]
-    if hasattr(sweep, "recommended"):
-        response["recommended"] = getattr(sweep, "recommended", None)
-    per_load_capped = getattr(sweep, "per_load_capped", None)
-    if per_load_capped:
-        response["per_load_capped"] = per_load_capped
-    if signature_stats:
-        response["signature_stats"] = signature_stats
-    if model_metadata:
-        response["model_metadata"] = model_metadata
-    return response
-
-
-def _palette_suggestion_ams_capacity(snapshot: dict) -> tuple[int, int]:
-    """Resolve palette-suggestion AMS capacity from active printer state."""
-    active = snapshot.get("__active_printer__") or get_active_printer() or {}
-    printer = active.get("printer") or {}
-    snapshot_units = max(1, int(snapshot.get("n_ams_units", 1) or 1))
-    snapshot_total_slots = max(1, int(snapshot.get("ams_slots", 4) or 4))
-    n_ams_units = max(1, int(printer.get("ams_units") or snapshot_units))
-    if printer.get("slots_per_ams") is not None:
-        slots_per_ams = max(1, int(printer["slots_per_ams"]))
-    else:
-        slots_per_ams = max(1, snapshot_total_slots // snapshot_units)
-    return slots_per_ams, n_ams_units
 
 
 _PALETTE_GAMUT_SAMPLING = {
@@ -4763,7 +5510,7 @@ def _build_palette_suggestion_model(
             "appearance_model_provider": provider_name,
             "gamut_backend": "historical_spline_profile",
             "gamut_domain": "model_oklab",
-            "corrections_enabled": bool(snapshot.get("use_corrections", False)),
+            "corrections_enabled": True,
             "height_budget_without_base_mm": round(height_budget, 6),
             "layer_height_mm": round(float(solve_cfg.layer_height), 6),
             "max_layers": max_layers,
@@ -4782,7 +5529,7 @@ def _build_palette_suggestion_model(
             detail="the active model library has no usable Photo Stack deployment bundle",
         )
 
-    use_corrections = bool(snapshot.get("use_corrections", False))
+    use_corrections = True
     cap_budget = float(solve_cfg.effective_boundary_d_wc_max())
     cache_key = _palette_backend_cache_key(
         bundle_path=bundle_path,
@@ -4913,6 +5660,34 @@ def _start_palette_suggestion_job(
 
     cfg = snapshot_override if snapshot_override is not None else _cfg()
 
+    suggestion_registry = _load_registry()
+    if payload.filament_ids is not None:
+        reserved_ids = set(_white_ids(cfg))
+        reserved_candidates = [
+            filament_id
+            for filament_id in payload.filament_ids
+            if filament_id in reserved_ids
+        ]
+        if reserved_candidates:
+            raise HTTPException(
+                400,
+                "Reserved base/cap filaments cannot be used as palette colors: "
+                + ", ".join(reserved_candidates),
+            )
+        from filament_policy import excluded_filament_ids
+
+        available_requested = [
+            filament_id
+            for filament_id in payload.filament_ids
+            if filament_id not in excluded_filament_ids(suggestion_registry)
+        ]
+        if len(available_requested) < payload.n_filaments:
+            raise HTTPException(
+                400,
+                f"Palette colors requests {payload.n_filaments} filaments, but only "
+                f"{len(available_requested)} selected eligible color filaments are available",
+            )
+
     # Palette suggestion is always thorough now. The old fast/quality switches
     # were only user-facing complexity; thorough is fast enough for this app.
     suggest = session["suggest"]
@@ -4990,8 +5765,7 @@ def _start_palette_suggestion_job(
             try:
                 _check_cancel()
                 _report_progress("Loading appearance model", 0.02)
-                from palette.suggest import suggest_palettes as _suggest_palettes
-                from palette.suggest import suggest_palettes_swap_aware
+                from palette.suggest import suggest_palettes_detailed
                 from palette.suggest import SUGGESTION_COVERAGE_DE_THRESHOLD
                 from palette.suggest import extract_color_signature_from_oklab
                 from palette.suggest import extract_luminance_residual_signature
@@ -5021,7 +5795,7 @@ def _start_palette_suggestion_job(
                         wb_profile=wb_profile,
                         wc_profile=wc_profile,
                         photo_stack_bundle_path=solve_cfg.photo_stack_bundle_path,
-                        use_corrections=bool(snapshot.get("use_corrections", False)),
+                        use_corrections=True,
                     )
                     if hasattr(white_rescale_provider, "fingerprint"):
                         model_metadata["provider_fingerprint"] = white_rescale_provider.fingerprint()
@@ -5090,45 +5864,27 @@ def _start_palette_suggestion_job(
                     filament_ids=payload.filament_ids,
                     # Contract bridge: never suggest filaments excluded from
                     # model-backed generation (default pool or user-supplied).
-                    exclude_filament_ids=excluded_filament_ids(_load_registry()),
+                    exclude_filament_ids=(
+                        excluded_filament_ids(suggestion_registry)
+                        | set(_white_ids(snapshot))
+                    ),
                     gamut_luminance_weight=gamut_luminance_weight,
                 )
                 common_kwargs.update(model_kwargs)
 
-                if payload.max_swaps is not None:
-                    slots_per_ams, n_ams_units = _palette_suggestion_ams_capacity(snapshot)
-                    sweep = suggest_palettes_swap_aware(
-                        sig,
-                        max_colors_per_load=payload.n_filaments,
-                        slots_per_ams=slots_per_ams,
-                        n_ams_units=n_ams_units,
-                        reserved_white=snapshot.get("white_slots", 1),
-                        max_swaps=payload.max_swaps,
-                        top_k=payload.top_k,
-                        improvement_threshold=payload.improvement_threshold or snapshot.get("swap_improvement_threshold", 2.0),
-                        force_all_tiers=payload.force_all_tiers if payload.force_all_tiers is not None else snapshot.get("force_all_tiers", False),
-                        **common_kwargs,
-                    )
-                    model_metadata.update(getattr(sweep, "model_metadata", {}) or {})
-                    result = _format_tier_response(
-                        sweep,
-                        palette_mode=palette_mode,
-                        signature_stats=signature_stats,
-                        model_metadata=model_metadata,
-                    )
-                else:
-                    candidates = _suggest_palettes(
-                        sig,
-                        n_filaments=payload.n_filaments,
-                        top_k=payload.top_k,
-                        **common_kwargs,
-                    )
-                    result = _format_candidate_response(
-                        candidates,
-                        palette_mode=palette_mode,
-                        signature_stats=signature_stats,
-                        model_metadata=model_metadata,
-                    )
+                suggestion_result = suggest_palettes_detailed(
+                    sig,
+                    n_filaments=payload.n_filaments,
+                    top_k=payload.top_k,
+                    **common_kwargs,
+                )
+                model_metadata.update(suggestion_result.model_metadata)
+                result = _format_candidate_response(
+                    suggestion_result.candidates,
+                    palette_mode=palette_mode,
+                    signature_stats=signature_stats,
+                    model_metadata=model_metadata,
+                )
 
                 if not _complete_suggest_job(
                     job_id,
@@ -5168,10 +5924,15 @@ def _start_palette_suggestion_job(
 
 
 @app.post("/api/palette/suggest")
-def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
+def suggest_palettes_endpoint(
+    payload: PaletteSuggestPayload,
+    request: Request = None,
+) -> dict:
     """Auto-suggest optimal palettes for the given image."""
 
-    return _start_palette_suggestion_job(payload)
+    started = _start_palette_suggestion_job(payload)
+    _register_request_guide_job(request, kind="suggest", job_id=started["job_id"])
+    return started
 
 
 @app.get("/api/palette/suggest/status")
@@ -5656,7 +6417,11 @@ _SOLVE_PITCH_NOZZLE_TOLERANCE_MM = 1e-6
 
 def _validate_solve_pitch_for_nozzle(cfg: dict, active: dict | None = None) -> None:
     """Reject a canonical solve grid that is finer than the active nozzle."""
-    resolved_active = active if active is not None else _resolve_active_printer(_load_printers())
+    resolved_active = (
+        active
+        if active is not None
+        else _resolve_active_printer(_effective_printers_data())
+    )
     nozzle = (resolved_active or {}).get("nozzle") or {}
     nozzle_size = nozzle.get("size")
     pitch = cfg.get("solver_fine_pitch_mm")
@@ -5706,11 +6471,16 @@ def _start_full_solve_job(
     image_path = image_path_override or _resolve_config_image_source(raw_cfg)
 
     # Snapshot config so the solve thread isn't affected by mid-solve changes
+    active_printer = (
+        dict(active_printer_override)
+        if active_printer_override is not None
+        else _resolve_active_printer(_effective_printers_data())
+    )
     cfg = _with_active_printer_printability(
         _drop_phantom_config_fields(raw_cfg),
-        active=active_printer_override,
+        active=active_printer,
     )
-    _validate_solve_pitch_for_nozzle(cfg, active=dict(active_printer_override) if active_printer_override is not None else None)
+    _validate_solve_pitch_for_nozzle(cfg, active=active_printer)
     cfg["palette"] = canonical_palette_order(
         palette,
         load_filament_order_registry(),
@@ -5730,7 +6500,7 @@ def _start_full_solve_job(
     )
     sc = _build_solve_config(
         cfg,
-        active_printer=active_printer_override,
+        active_printer=active_printer,
     )
     swap_banding_requested = len(sc.palette) > sc.color_slots()
     solve_stage_count = 10 if swap_banding_requested else 7
@@ -6590,7 +7360,7 @@ def _start_full_solve_job(
                 solve["solve_owned_fingerprint"] = _solve_owned_fingerprint(
                     cfg,
                     module_state=module_state_override,
-                    active_printer=active_printer_override,
+                    active_printer=active_printer,
                 )
                 artifact_progress.emit(
                     stage="artifacts",
@@ -6656,7 +7426,10 @@ def _start_full_solve_job(
 
 
 @app.post("/api/solve/start")
-def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
+def start_solve(
+    payload: SolveStartPayload = SolveStartPayload(),
+    request: Request = None,
+) -> dict:
     """Start one full solve in a background thread."""
 
     with _MODEL_RESOURCE_COORDINATION_LOCK:
@@ -6671,7 +7444,9 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
             "items": [],
             "cancel_requested": False,
         })
-    return _start_full_solve_job(payload)
+    started = _start_full_solve_job(payload)
+    _register_request_guide_job(request, kind="solve", job_id=started["job_id"])
+    return started
 
 
 def _palette_batch_cancel_requested(job_id: str) -> bool:
@@ -7033,7 +7808,10 @@ def _run_palette_batch(job_id: str, payload: PaletteBatchStartPayload) -> None:
 
 
 @app.post("/api/solve/palette-batch/start")
-def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
+def start_palette_batch(
+    payload: PaletteBatchStartPayload,
+    request: Request = None,
+) -> dict:
     """Sequentially solve an ordered set of explicit Palette Deck cards."""
 
     job_id = uuid.uuid4().hex
@@ -7117,7 +7895,9 @@ def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
             started_monotonic=None,
         )
         raise HTTPException(500, f"Could not start palette batch: {exc}") from exc
-    return _serialize_palette_batch_status(session["palette_batch"])
+    status = _serialize_palette_batch_status(session["palette_batch"])
+    _register_request_guide_job(request, kind="palette_batch", job_id=job_id)
+    return status
 
 
 @app.get("/api/solve/palette-batch/{job_id}/results/{result_id}")
@@ -7649,7 +8429,10 @@ def _perform_export_files(
 
 
 @app.post("/api/export/files/start")
-def export_files_start(payload: ExportFilesPayload) -> dict:
+def export_files_start(
+    payload: ExportFilesPayload,
+    request: Request = None,
+) -> dict:
     """Start a print-file export in the background so the UI can poll progress."""
     _require_model_library()
     export = session["export"]
@@ -7723,6 +8506,7 @@ def export_files_start(payload: ExportFilesPayload) -> dict:
 
     thread = threading.Thread(target=_run_export, daemon=True)
     thread.start()
+    _register_request_guide_job(request, kind="export", job_id=job_id)
     return {"job_id": job_id, "status": "running"}
 
 
@@ -8801,6 +9585,9 @@ def _validate_loaded_archive_config(cfg: dict) -> dict:
             "detail_cap_enabled is mandatory and can no longer be disabled",
         )
     incoming.pop("detail_cap_enabled", None)
+    incoming.pop("use_corrections", None)
+    incoming.pop("stage2_boundary_mutation_current_de_percentile", None)
+    incoming.pop("stage2_boundary_mutation_min_component_mm", None)
     if "cap_fixed_thickness_mm" in incoming:
         raise _retired_config_field_error("cap_fixed_thickness_mm")
     if "printability_preferred_line_length_mm" in incoming:
@@ -8819,6 +9606,17 @@ def _validate_loaded_archive_config(cfg: dict) -> dict:
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+    if "neutral_field_protection_cutoff" in incoming:
+        try:
+            cutoff = float(incoming["neutral_field_protection_cutoff"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "neutral_field_protection_cutoff must be a number") from exc
+        if not math.isfinite(cutoff) or cutoff < 0 or cutoff > 1:
+            raise HTTPException(422, "neutral_field_protection_cutoff must be between 0 and 1")
+        incoming["neutral_field_protection_cutoff"] = cutoff
+    incoming["use_corrections"] = True
+    incoming["stage2_boundary_mutation_current_de_percentile"] = None
+    incoming["stage2_boundary_mutation_min_component_mm"] = None
     return incoming
 
 

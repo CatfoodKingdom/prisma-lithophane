@@ -12,7 +12,6 @@
     "k_max": 4,
     "de_threshold": 0.01,
     "smooth_kernel": 2.5,
-    "use_corrections": true,
     "appearance_model_provider": "photo_stack_bundle",
     "photo_stack_bundle_path": null,
     "gamut_mode": "hull",
@@ -32,11 +31,10 @@
     "cell_mode": "felzenszwalb",
     "stage1_coarsening_factor": 2,
     "neutral_field_protection_mode": "off",
+    "neutral_field_protection_cutoff": 0.02,
     "stage2_fine_override_enabled": true,
     "stage2_boundary_mutation_enabled": true,
     "stage2_boundary_mutation_min_gain": null,
-    "stage2_boundary_mutation_min_component_mm": null,
-    "stage2_boundary_mutation_current_de_percentile": null,
     "stage2_boundary_mutation_max_passes": 3,
     "cap_mode": "appearance_bounded_smooth",
     "boundary_cap_de_budget": 0.004,
@@ -52,5 +50,5 @@
   },
   "created_at": "2026-07-27T06:49:19.053316Z",
   "updated_at": "2026-07-27T06:49:19.053316Z",
-  "schema_version": 1
+  "schema_version": 2
 }

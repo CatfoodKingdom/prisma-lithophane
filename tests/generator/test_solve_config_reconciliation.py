@@ -39,7 +39,7 @@ def test_role_wrappers_have_exactly_the_declared_extensions():
     solve_names = {definition.name for definition in fields(SolveConfig)}
     pipeline_names = {definition.name for definition in fields(PipelineConfig)}
 
-    assert len(shared_names) == 82
+    assert len(shared_names) == 83
     assert solve_names - shared_names == {"preprocessing_params"}
     assert pipeline_names - shared_names == {"preprocessors", "preset", "runtime"}
     assert shared_names <= solve_names

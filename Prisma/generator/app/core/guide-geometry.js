@@ -206,6 +206,37 @@ function dockPosition(name, card, viewport, margin) {
   return { left: right, top: bottom };
 }
 
+function overlapArea(first, second) {
+  const overlap = intersectRects(first, second);
+  return overlap ? overlap.width * overlap.height : 0;
+}
+
+function leastObstructiveDock(card, viewport, avoidRects, gap, margin) {
+  let best = null;
+  for (const name of GUIDE_DOCKS) {
+    const position = dockPosition(name, card, viewport, margin);
+    const cardRect = normalizeRect({
+      left: position.left,
+      top: position.top,
+      right: position.left + card.width,
+      bottom: position.top + card.height,
+    });
+    const obstruction = (avoidRects || []).reduce((total, rawRect) => {
+      const rect = normalizeRect(rawRect);
+      return total + overlapArea(cardRect, {
+        left: rect.left - gap,
+        top: rect.top - gap,
+        right: rect.right + gap,
+        bottom: rect.bottom + gap,
+      });
+    }, 0);
+    if (!best || obstruction < best.obstruction) {
+      best = { name, position, obstruction };
+    }
+  }
+  return best;
+}
+
 export function chooseGuideCardPlacement({
   targetRect,
   cardSize,
@@ -264,6 +295,10 @@ export function chooseGuideCardPlacement({
     }
   }
 
-  const dock = GUIDE_DOCKS[0];
-  return { ...dockPosition(dock, card, viewport, margin), placement: `dock-${dock}`, docked: true };
+  const fallback = leastObstructiveDock(card, viewport, avoidRects || [target], gap, margin);
+  return {
+    ...fallback.position,
+    placement: `dock-${fallback.name}`,
+    docked: true,
+  };
 }

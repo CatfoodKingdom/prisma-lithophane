@@ -266,6 +266,8 @@ def _stale_phantom_values() -> dict:
         "v2_enable_cap_topology_cleanup": True,
         "v2_max_cleanup_rounds": 9,
         "v2_full_cap_quality_report": True,
+        "swap_improvement_threshold": 3.5,
+        "force_all_tiers": True,
     }
 
 

@@ -283,18 +283,8 @@
 .settings-subsection-flow-unit > .settings-group > .section-collapse-body:empty {
   display: none;
 }
-.settings-subsection-flow-unit > .settings-subsection-head[data-settings-parent-title]::before {
-  content: attr(data-settings-parent-title) " · ";
-  color: color-mix(in srgb, var(--muted) 78%, var(--accent));
-  font-weight: 600;
-}
 .preprocessing-flow-unit .settings-subsection-head {
   margin-top: 0;
-}
-.preprocessing-flow-unit .settings-subsection-head::before {
-  content: "Preprocessing · ";
-  color: color-mix(in srgb, var(--muted) 78%, var(--accent));
-  font-weight: 600;
 }
 
 .module-preset-table {
@@ -302,12 +292,12 @@
 }
 
 .module-preset-row td:first-child {
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .module-preset-select {
   display: block;
-  width: 8rem;
+  width: 7rem;
   max-width: 100%;
   margin-left: auto;
 }

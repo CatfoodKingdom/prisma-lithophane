@@ -29,6 +29,7 @@ export function initializeApplicationState(app) {
   app.state.ui.themePreference = "system";
   app.state.ui.themeResolved = "light";
   app.state.guides.runtimeState = "idle";
+  app.state.guides.targetUnavailable = false;
   app.state.guides.onboardingState = {
     schema_version: 2,
     revision: 0,
@@ -41,6 +42,9 @@ export function initializeApplicationState(app) {
   app.state.guides.completedStepIds = new Set();
   app.state.guides.reviewingCompletedStep = false;
   app.state.guides.runtimeContext = null;
+  app.state.guides.workspaceLeaseId = null;
+  app.state.guides.workspaceSessionId = null;
+  app.state.guides.actionLedger = new Set();
   app.state.guides.presentationSnapshot = null;
   app.state.guides.dockIndex = null;
   app.state.settings.settingsDrawerOpen = false;
@@ -80,6 +84,7 @@ export function initializeApplicationState(app) {
   app.state.palette.enabledFilamentRuntimeLibraryId = null;
   app.state.palette.enabledFilamentPersistenceReady = false;
   app.state.image.availableImages = [];
+  app.state.image.guideImages = [];
   app.state.image.selectedImage = null;
   app.state.image.pendingSelectedFilename = null;
   app.state.image.activeImportBatchId = null;
@@ -124,7 +129,6 @@ export function initializeApplicationState(app) {
   app.state.palette.composerPalette = [];
   app.state.palette.deck = [];
   app.state.palette.stagingDeck = [];
-  app.state.palette.suggestCapacityNote = "";
   app.state.palette.stagingClearConfirmPending = false;
   app.state.palette.stagingClearConfirmTimer = null;
   app.state.palette.activeDeckId = null;
@@ -343,14 +347,13 @@ export function initializeApplicationState(app) {
   color_region_target_from_printability: true,
   color_region_target_width_multiplier: 2.0,
   neutral_field_protection_mode: "off",
+  neutral_field_protection_cutoff: 0.020,
   stage2_fine_override_enabled: true,
   stage2_final_printability_gate_fine_override: true,
   stage2_printability_gate_fine_override: true,
   stage2_printability_repair_fine_override: true,
   stage2_boundary_mutation_enabled: true,
   stage2_boundary_mutation_min_gain: null,
-  stage2_boundary_mutation_min_component_mm: null,
-  stage2_boundary_mutation_current_de_percentile: null,
   stage2_boundary_mutation_max_passes: 1,
   stage4_printability_gate_detail: true,
   layer_height: 0.08,
@@ -364,6 +367,7 @@ export function initializeApplicationState(app) {
   border: false,
   border_width_mm: 3.0,
   border_height_mm: 3.0,
+  // Color corrections are mandatory in the Generator-facing product contract.
   use_corrections: true,
   appearance_model_provider: "photo_stack_bundle",
   photo_stack_bundle_path: null,
@@ -390,8 +394,6 @@ export function initializeApplicationState(app) {
   luminance_detail_authoring_printability: "off",
   source_resample_kernel: "lanczos",
   preprocessing_params: {},
-  swap_improvement_threshold: 2.0,
-  force_all_tiers: false,
 };
   app.state.settings.lastColorCapMode = app.commands.loadLastColorCapMode(app.state.settings.config.cap_mode || "appearance_bounded_smooth");
   app.state.settings.capModeForcedByLuminance = false;
@@ -430,10 +432,6 @@ export function initializeApplicationState(app) {
   app.state.export.activeExportJobId = "";
   app.state.export.exportCancelPending = false;
   app.state.ui.IMAGE_ASPECT_SHORT_SIDE_MM = 120;
-  app.state.ui.DECK_GENERATION_FIELD_MAP = [
-  { configKey: "swap_improvement_threshold", paletteId: "paletteSwapThreshold", prop: "value" },
-  { configKey: "force_all_tiers", paletteId: "paletteForceAllTiers", prop: "checked" },
-];
   app.state.solve._lightboxIdx = -1;
   app.state.ui.SYSTEM_SETTINGS_PROFILE_ID = "system-default";
   app.state.ui.SYSTEM_SETTINGS_PROFILE_NAME = "Basic";
@@ -452,15 +450,13 @@ export function initializeApplicationState(app) {
   "cell_mode",
   "stage1_coarsening_factor",
   "neutral_field_protection_mode",
+  "neutral_field_protection_cutoff",
   "stage2_fine_override_enabled",
   "stage2_boundary_mutation_enabled",
   "stage2_boundary_mutation_min_gain",
-  "stage2_boundary_mutation_min_component_mm",
-  "stage2_boundary_mutation_current_de_percentile",
   "stage2_boundary_mutation_max_passes",
   "d_wb", "d_wc_min", "t_max",
   "k_max", "de_threshold", "smooth_kernel",
-  "use_corrections",
   "appearance_model_provider", "photo_stack_bundle_path",
   "gamut_mode", "gamut_white_rescale", "model_domain_ingress_lut_path", "chroma_weight",
   "luminance_mode",
@@ -490,7 +486,8 @@ export function initializeApplicationState(app) {
   luminance_mode: "Luminance Mode",
   cell_mode: "Region Method",
   stage1_coarsening_factor: "Region Planning Scale",
-  neutral_field_protection_mode: "Neutral-field Protection",
+  neutral_field_protection_mode: "Neutral-field protection",
+  neutral_field_protection_cutoff: "Neutral Chroma Cutoff",
   color_region_target_mm: "Color Region Target",
   smooth_radius_mm: "Cliff Smooth Radius",
   hybrid_split_ratio: "Hybrid Split Ratio",
@@ -521,62 +518,60 @@ export function initializeApplicationState(app) {
     key: "essentials",
     title: "Essentials",
     rows: [
-      { key: "luminance_mode", label: "Solve Mode", format: "solve-mode" },
-      { key: "solver_fine_pitch_mm", fallbackKey: "image_sample_pitch_mm", label: "Solve Pitch", unit: "mm" },
-      { key: "t_max", label: "Max Total Thickness", unit: "mm" },
-      { key: "layer_height", label: "Layer Height", unit: "mm" },
-      { key: "base_filament", label: "White Base/Cap Filament", format: "filament" },
-      { key: "d_wb", label: "Base Thickness", unit: "mm" },
+      { key: "luminance_mode", controlId: "cfgLuminanceMode", label: "Solve Mode", format: "solve-mode", default: "standard" },
+      { key: "solver_fine_pitch_mm", controlId: "cfgSolvePitch", fallbackKey: "image_sample_pitch_mm", label: "Solve Pitch", unit: "mm", default: 0.20 },
+      { key: "t_max", controlId: "cfgTMax", label: "Max Total Thickness", unit: "mm", default: 3.0 },
+      { key: "layer_height", controlId: "cfgLayerHeight", label: "Layer Height", unit: "mm", default: 0.08 },
+      { key: "base_filament", controlId: "cfgBaseFilament", label: "White Base/Cap Filament", format: "filament", default: "bambu-tough-white" },
+      { key: "d_wb", controlId: "cfgDWb", label: "Base Thickness", unit: "mm", default: 0.20 },
     ],
   },
   {
     key: "preprocessing",
-    title: "Pre-processing",
+    title: "Preprocessing Modules",
     rows: [
-      { key: "source_resample_kernel", label: "Resample Kernel", format: "title", advanced: true },
+      { key: "source_resample_kernel", controlId: "cfgSourceResampleKernel", label: "Resample kernel", format: "title", advanced: true, default: "lanczos" },
     ],
   },
   {
     key: "solver",
     title: "Color Solver",
     rows: [
-      { key: "appearance_model_provider", label: "Appearance Model", format: "appearance-model" },
-      { key: "use_corrections", label: "Color Corrections" },
-      { key: "k_max", label: "Max Colors per Region" },
-      { key: "color_region_target_mm", label: "Color Region Target", unit: "mm" },
-      { key: "gamut_white_rescale", label: "White-point Rescale" },
-      { key: "gamut_mode", label: "Out-of-gamut Handling", format: "gamut-mode", advanced: true, group: "Recipe Search" },
-      { key: "de_threshold", label: "Color Mismatch Tolerance", unit: "dE", advanced: true, group: "Recipe Search" },
-      { key: "chroma_weight", label: "Chroma Weight", advanced: true, group: "Recipe Search" },
-      { key: "cell_mode", label: "Region Method", format: "region-method", advanced: true, group: "Region Construction" },
-      { key: "stage1_coarsening_factor", label: "Region Planning Scale", format: "region-scale", advanced: true, group: "Region Construction" },
-      { key: "neutral_field_protection_mode", label: "Neutral-field Protection", format: "title", advanced: true, group: "Region Construction" },
-      { key: "stage2_fine_override_enabled", label: "Local Recipe Corrections", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_enabled", label: "Boundary Mutation", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_max_passes", label: "Mutation Passes", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_current_de_percentile", label: "Mutation Current-dE Percentile", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_min_gain", label: "Mutation Min Gain", unit: "dE", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_min_component_mm", label: "Mutation Min Contact", unit: "mm", advanced: true, group: "Region Construction" },
-      { key: "luminance_base_shading_limit_fraction", label: "Shading Balance", format: "percent", advanced: true, group: "Luminance" },
-      { key: "luminance_detail_authoring_printability", label: "Detail Printability", advanced: true, group: "Luminance" },
+      { key: "appearance_model_provider", controlId: "cfgAppearanceModelProvider", label: "Appearance Model", format: "appearance-model", advanced: true, default: "photo_stack_bundle", group: "Recipe Search" },
+      { key: "k_max", controlId: "cfgKMax", label: "Max colors per region", default: 3, group: "Recipe Search" },
+      { key: "color_region_target_mm", controlId: "cfgColorRegionTarget", label: "Color region target", unit: "mm", default: 0.60, group: "Region Construction" },
+      { key: "gamut_white_rescale", controlId: "cfgGamutWhiteRescale", label: "White-point rescale", default: false, group: "Recipe Search" },
+      { key: "gamut_mode", controlId: "cfgGamutMode", label: "Out-of-gamut handling", format: "gamut-mode", advanced: true, default: "hull", group: "Recipe Search" },
+      { key: "de_threshold", controlId: "cfgDeThreshold", label: "Color mismatch tolerance", unit: "dE", advanced: true, default: 0.01, group: "Recipe Search" },
+      { key: "chroma_weight", controlId: "cfgChromaWeight", label: "Chroma weight", advanced: true, default: 1.0, group: "Recipe Search" },
+      { key: "cell_mode", controlId: "cfgCellMode", label: "Region method", format: "region-method", advanced: true, default: "felzenszwalb", group: "Region Construction" },
+      { key: "stage1_coarsening_factor", controlId: "cfgStage1Coarsening", label: "Region planning scale", format: "region-scale", advanced: true, default: 1, group: "Region Construction" },
+      { key: "neutral_field_protection_mode", controlId: "cfgNeutralFieldProtection", label: "Neutral-field protection", format: "title", advanced: true, default: "off", group: "Region Construction" },
+      { key: "stage2_fine_override_enabled", controlId: "cfgStage2FineOverride", label: "Local recipe corrections", advanced: true, default: true, group: "Region Construction" },
+      { key: "neutral_field_protection_cutoff", controlId: "cfgNeutralFieldProtectionCutoff", label: "Neutral chroma cutoff", advanced: true, default: 0.020, group: "Region Construction" },
+      { key: "stage2_boundary_mutation_enabled", controlId: "cfgStage2BoundaryMutation", label: "Boundary mutation", advanced: true, default: true, group: "Region Construction" },
+      { key: "stage2_boundary_mutation_max_passes", controlId: "cfgStage2BoundaryMutationMaxPasses", label: "Mutation passes", advanced: true, default: 1, group: "Region Construction" },
+      { key: "stage2_boundary_mutation_min_gain", controlId: "cfgStage2BoundaryMutationMinGain", label: "Mutation min gain", unit: "dE", advanced: true, default: 0.010, group: "Region Construction" },
     ],
   },
   {
     key: "white-cap",
     title: "White Cap",
     rows: [
-      { key: "d_wc_min", label: "Min Cap Layers", format: "cap-layers" },
-      { key: "smooth_kernel", label: "Smoothing Radius", format: "smooth-radius" },
-      { key: "detail_cap_max_layers", label: "Detail Depth", unit: "layers" },
-      { key: "cap_mode", label: "Boundary Cap", format: "cap-mode", advanced: true, group: "Boundary" },
-      { key: "boundary_cap_de_budget", label: "Appearance Budget", unit: "dE", advanced: true, group: "Boundary" },
-      { key: "detail_cap_smoothing_enabled", label: "Detail Smoothing", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_exact_speckle_max_px", label: "Exact Speckle Limit", unit: "px", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_cumulative_component_max_px", label: "Component Limit", unit: "px", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_cumulative_hole_max_px", label: "Hole Limit", unit: "px", advanced: true, group: "Detail" },
+      { key: "d_wc_min", controlId: "cfgDWcMin", label: "Min Cap Layers", format: "cap-layers", default: 2 },
+      { key: "smooth_kernel", controlId: "cfgSmoothKernel", label: "Smoothing radius", format: "smooth-radius", default: 5.0, group: "Boundary" },
+      { key: "detail_cap_max_layers", controlId: "cfgDetailCapMaxLayers", label: "Detail depth", unit: "layers", default: 5, group: "Detail" },
+      { key: "cap_mode", controlId: "cfgCapMode", label: "Boundary cap", format: "cap-mode", advanced: true, default: "appearance_bounded_smooth", group: "Boundary" },
+      { key: "boundary_cap_de_budget", controlId: "cfgBoundaryCapDeBudget", label: "Appearance budget", unit: "dE", advanced: true, default: 0.004, group: "Boundary" },
+      { key: "luminance_base_shading_limit_fraction", controlId: "cfgBaseShadingLimit", label: "Shading balance", format: "percent", default: 0.75, group: "Boundary" },
     ],
   },
-];
+  ];
+  // The drawer and saved-run review both consume this descriptor. Keep the
+  // alias explicit so future presentation code cannot quietly introduce a
+  // second, divergent settings vocabulary.
+  app.state.ui.SETTINGS_PRESENTATION = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS;
+  app.state.ui.SETTINGS_PRESENTATION_VERSION = 2;
   app.state.ui.DIAGNOSTIC_PALETTE_INFERNO = "inferno-v1";
   app.state.ui.DIAGNOSTIC_PALETTE_LEGACY = "legacy-approximate";
   app.state.ui.INFERNO_RGB8_HEX = "00000401000501010601010802010a02020c02020e03021004031204031405041706041907051b08051d09061f0a07220b07240c08260d08290e092b10092d110a30120a32140b34150b37160b39180c3c190c3e1b0c411c0c431e0c451f0c48210c4a230c4c240c4f260c51280b53290b552b0b572d0b592f0a5b310a5c320a5e340a5f3609613809623909633b09643d09653e0966400a67420a68440a68450a69470b6a490b6a4a0c6b4c0c6b4d0d6c4f0d6c510e6c520e6d540f6d550f6d57106e59106e5a116e5c126e5d126e5f136e61136e62146e64156e65156e67166e69166e6a176e6c186e6d186e6f196e71196e721a6e741a6e751b6e771c6d781c6d7a1d6d7c1d6d7d1e6d7f1e6c801f6c82206c84206b85216b87216b88226a8a226a8c23698d23698f24699025689225689326679526679727669827669a28659b29649d29649f2a63a02a63a22b62a32c61a52c60a62d60a82e5fa92e5eab2f5ead305dae305cb0315bb1325ab3325ab43359b63458b73557b93556ba3655bc3754bd3853bf3952c03a51c13a50c33b4fc43c4ec63d4dc73e4cc83f4bca404acb4149cc4248ce4347cf4446d04545d24644d34743d44842d54a41d74b3fd84c3ed94d3dda4e3cdb503bdd513ade5238df5337e05536e15635e25734e35933e45a31e55c30e65d2fe75e2ee8602de9612bea632aeb6429eb6628ec6726ed6925ee6a24ef6c23ef6e21f06f20f1711ff1731df2741cf3761bf37819f47918f57b17f57d15f67e14f68013f78212f78410f8850ff8870ef8890cf98b0bf98c0af98e09fa9008fa9207fa9407fb9606fb9706fb9906fb9b06fb9d07fc9f07fca108fca309fca50afca60cfca80dfcaa0ffcac11fcae12fcb014fcb216fcb418fbb61afbb81dfbba1ffbbc21fbbe23fac026fac228fac42afac62df9c72ff9c932f9cb35f8cd37f8cf3af7d13df7d340f6d543f6d746f5d949f5db4cf4dd4ff4df53f4e156f3e35af3e55df2e661f2e865f2ea69f1ec6df1ed71f1ef75f1f179f2f27df2f482f3f586f3f68af4f88ef5f992f6fa96f8fb9af9fc9dfafda1fcffa4";

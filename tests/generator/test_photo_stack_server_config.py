@@ -170,7 +170,9 @@ def test_photo_stack_palette_backend_cache_reuses_keys_and_is_bounded(
         direct_cfg = deepcopy(cfg)
         direct_cfg["use_corrections"] = False
         direct, _metadata, _kwargs = server._build_palette_suggestion_model(direct_cfg)
-        assert direct is not first
+        # Generator-facing palette suggestions always use corrections; the
+        # lower-level provider APIs remain independently parameterized.
+        assert direct is first
 
         correction_path = bundle_path.parent / "correction_layer.json"
         correction_path.write_text(

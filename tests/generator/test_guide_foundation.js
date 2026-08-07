@@ -17,6 +17,12 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+async function settleGuideStepActions(app) {
+  for (let attempt = 0; attempt < 20 && app.state.guides.runtimeState === "preparing"; attempt += 1) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+}
+
 function tutorialPrinterProfile() {
   return {
     id: "tutorial-printer",
@@ -105,7 +111,7 @@ test("semantic event bus emits safely and disposes subscriptions", async () => {
   assert.match(reported[0][0], /listener for "solve\.completed" failed/);
 });
 
-test("guide emphasis renders strong text without interpreting arbitrary markup", async () => {
+test("guide emphasis renders strong and italic text without interpreting arbitrary markup", async () => {
   const { renderGuideTextContent } = await import(
     moduleUrl("features/guides/overlay.js")
   );
@@ -123,15 +129,17 @@ test("guide emphasis renders strong text without interpreting arbitrary markup",
     replaceChildren(...children) { this.children = children; },
   };
 
-  renderGuideTextContent(element, "A **palette** and a **solve** <remain text>.");
+  renderGuideTextContent(element, "A **palette**, a **solve**, and *potential* <remain text>.");
 
   assert.deepEqual(
     element.children.map(child => [child.tagName || "TEXT", child.textContent]),
     [
       ["TEXT", "A "],
       ["STRONG", "palette"],
-      ["TEXT", " and a "],
+      ["TEXT", ", a "],
       ["STRONG", "solve"],
+      ["TEXT", ", and "],
+      ["EM", "potential"],
       ["TEXT", " <remain text>."],
     ],
   );
@@ -167,6 +175,41 @@ test("guide geometry selects adjacent placements and deterministic docks", async
     cardSize: { width: 980, height: 680 },
     viewportRect,
   }).placement, "dock-bottom-right");
+  const adjustmentsPlacement = chooseGuideCardPlacement({
+    targetRect: {
+      left: 1630,
+      top: 52,
+      right: 2035,
+      bottom: 960,
+      width: 405,
+      height: 908,
+    },
+    cardSize: { width: 380, height: 420 },
+    viewportRect: {
+      left: 0,
+      top: 0,
+      right: 2048,
+      bottom: 969,
+      width: 2048,
+      height: 969,
+    },
+    preferred: ["left", "bottom", "top", "right"],
+    avoidRects: [
+      { left: 255, top: 228, right: 1625, bottom: 960 },
+      { left: 1630, top: 52, right: 2035, bottom: 960 },
+    ],
+  });
+  assert.equal(adjustmentsPlacement.placement, "left");
+  assert.equal(adjustmentsPlacement.left, 1240);
+  assert.equal(chooseGuideCardPlacement({
+    targetRect: { left: 0, top: 100, right: 1000, bottom: 700 },
+    cardSize: { width: 260, height: 140 },
+    viewportRect,
+    avoidRects: [
+      { left: 650, top: 0, right: 1000, bottom: 700 },
+      { left: 0, top: 220, right: 650, bottom: 700 },
+    ],
+  }).placement, "dock-top-left");
   assert.equal(chooseGuideCardPlacement({
     targetRect,
     cardSize: { width: 260, height: 140 },
@@ -312,6 +355,7 @@ test("guide definitions and target registry are stable and complete", async () =
   assert.equal(guide.steps[1].completion.event, "settings.opened");
   assert.equal(guide.steps[1].completion.predicate_id, "settings.drawer-open");
   const guidedSetup = app.commands.getGuideDefinition("guided-setup");
+  assert.equal(guidedSetup.title, "First-Time Setup");
   assert.deepEqual(
     guidedSetup.steps.map(step => step.id),
     [
@@ -329,23 +373,36 @@ test("guide definitions and target registry are stable and complete", async () =
   assert.equal(guidedSetup.restore_presentation, false);
   assert.equal(guidedSetup.steps[0].completion.event, "printer-config.opened");
   assert.equal(guidedSetup.steps[0].completion.accept_preexisting, true);
+  assert.equal(guidedSetup.steps[0].viewport_anchor, "center");
   assert.equal(guidedSetup.steps[1].completion.event, "printer-config.closed");
-  assert.equal(guidedSetup.steps[1].allow_previous, false);
+  assert.equal(guidedSetup.steps[1].allow_previous, true);
+  assert.equal(guidedSetup.steps[2].title, "Changing the Nozzle Size");
   assert.equal(guidedSetup.steps.at(-1).target_id, null);
+  assert.equal(
+    guidedSetup.steps.at(-1).followup.text,
+    "If you are new to Prisma Generator, you may want to continue with a guided introduction to its features and workflow.",
+  );
   const modelLibraryStep = guidedSetup.steps.find(step => step.id === "model-library");
-  assert.match(modelLibraryStep.body, /change the active Model Library/i);
-  assert.match(modelLibraryStep.body, /leave it unchanged during this guide/i);
+  assert.match(modelLibraryStep.body, /change the active library/i);
+  assert.match(modelLibraryStep.body, /do not change it until you finish this guide/i);
   assert.doesNotMatch(modelLibraryStep.body, /install and select/i);
   assert.equal(
     app.commands.getGuideDefinition("guided-setup-help-pointer").steps[0].completion.kind,
     "interaction",
   );
   const basics = app.commands.getGuideDefinition("prisma-generator-basics");
-  assert.equal(basics.prepare_id, "basics");
-  assert.equal(basics.version, 7);
-  assert.equal(basics.steps.length, 34);
-  assert.ok(basics.steps.length <= 35);
-  assert.ok(basics.steps.findIndex(step => step.id === "solve-first") <= 21);
+  assert.equal(basics.workspace_policy, "basic-teaching");
+  assert.equal(basics.canonical_guide_id, "prisma-generator-basics");
+  assert.equal(basics.route_id, "full");
+  assert.deepEqual(Object.keys(basics.routes), ["full", "image", "palette", "settings", "preview", "export"]);
+  assert.deepEqual(app.commands.resolveGuideLaunch("image-guide"), {
+    guide_id: "prisma-generator-basics",
+    route_id: "image",
+  });
+  assert.equal(basics.version, 18);
+  assert.equal(basics.steps.length, 42);
+  assert.ok(basics.steps.length <= 42);
+  assert.ok(basics.steps.findIndex(step => step.id === "solve-first") <= 29);
   assert.deepEqual(
     basics.chapters.map(current => current.label),
     ["Introduction", "Image", "Palette", "Settings", "Preview", "Export"],
@@ -354,30 +411,58 @@ test("guide definitions and target registry are stable and complete", async () =
     basics.detours.map(current => current.id),
     ["image-controls", "palette-tools", "settings-tools", "preview-tools", "export-choices"],
   );
+  for (const currentDetour of basics.detours) {
+    assert.equal(
+      currentDetour.return_step_id,
+      currentDetour.offer_step_id,
+      `${currentDetour.id} should return to its offering step`,
+    );
+  }
   assert.equal(basics.steps[0].id, "introduction");
   assert.equal(basics.steps[0].target_id, null);
+  assert.equal(basics.steps[0].overlay_mode, "full-scrim");
   assert.equal(basics.steps[0].next_label, "Begin");
   assert.equal(basics.steps[0].allow_previous, false);
   assert.equal(basics.steps[1].id, "core-terminology");
+  assert.equal(basics.steps[1].title, "Terminology");
   assert.equal(basics.steps[1].target_id, null);
   assert.match(basics.steps[1].body, /• A \*\*palette\*\*/);
   assert.match(basics.steps[1].body, /• A \*\*solve\*\*/);
-  assert.equal(basics.steps[2].id, "workflow");
-  assert.equal(basics.steps[2].target_id, "workflow.overview");
+  assert.equal(basics.steps[2].id, "lithophane-image-principle");
+  assert.equal(basics.steps[2].title, "How a lithophane creates an image");
+  assert.equal(basics.steps[2].target_id, null);
+  assert.equal(basics.steps[2].overlay_mode, "full-scrim");
+  assert.equal(basics.steps[3].id, "prisma-creation-overview");
+  assert.equal(basics.steps[3].title, "How Prisma turns an image into a print");
+  assert.equal(basics.steps[3].target_id, null);
+  assert.equal(basics.steps[3].overlay_mode, "full-scrim");
+  assert.equal(basics.steps[4].id, "workflow");
+  assert.equal(basics.steps[4].target_id, "workflow.overview");
+  assert.equal(basics.steps[4].viewport_anchor, "center");
   assert.match(
-    basics.steps[2].body,
+    basics.steps[4].body,
     /Image → Palette → Preview → Export\n\nSettings[\s\S]*\n\nEach stage/,
   );
-  assert.equal(basics.steps[3].id, "printer-select");
-  assert.equal(basics.steps[3].target_id, "sidebar.active-printer");
-  assert.equal(basics.steps[3].completion.event, "printer.active-changed");
-  assert.equal(basics.steps[3].completion.accept_preexisting, true);
-  assert.equal(basics.steps[4].id, "tutorial-nozzle");
-  assert.equal(basics.steps[3].placement_group, "basics-printer");
-  assert.equal(basics.steps[4].placement_group, "basics-printer");
+  assert.equal(basics.steps[5].id, "printer-select");
+  assert.equal(basics.steps[5].target_id, "sidebar.active-printer");
+  assert.equal(basics.steps[5].completion.event, "printer.active-changed");
+  assert.equal(basics.steps[5].completion.accept_preexisting, true);
+  assert.equal(basics.steps[5].viewport_anchor, "center");
+  assert.equal(basics.steps[6].id, "tutorial-nozzle");
+  assert.equal(basics.steps[6].title, "Nozzle selection");
+  assert.equal(basics.steps[6].viewport_anchor, "center");
+  assert.equal(basics.steps[6].completion.kind, "event");
+  assert.equal(basics.steps[6].completion.event, "printer.nozzle-changed");
+  assert.equal(basics.steps[6].completion.accept_preexisting, false);
+  assert.deepEqual(basics.steps[6].enter_actions, [
+    { action: "printer.select_nozzle", input: { nozzle_mm: 0.2 } },
+  ]);
+  assert.equal(basics.steps[5].placement_group, "basics-printer");
+  assert.equal(basics.steps[6].placement_group, "basics-printer");
   for (const stepId of [
-    "image-introduction",
+    "introduction",
     "palette-introduction",
+    "settings-introduction",
     "preview-introduction",
     "export-introduction",
   ]) {
@@ -385,6 +470,7 @@ test("guide definitions and target registry are stable and complete", async () =
     assert.equal(chapterStep.target_id, null);
     assert.equal(chapterStep.completion.kind, "manual");
     assert.equal(chapterStep.placement_group, undefined);
+    assert.equal(chapterStep.overlay_mode, "full-scrim");
   }
   assert.equal(
     app.commands.getGuideStep(basics, "aspect-ratios").placement_group,
@@ -398,10 +484,79 @@ test("guide definitions and target registry are stable and complete", async () =
     basics.steps.find(step => step.id === "settings-profile").placement_group,
     "basics-settings",
   );
-  assert.equal(
-    basics.steps.findIndex(step => step.id === "image-introduction") + 1,
-    basics.steps.findIndex(step => step.id === "choose-image"),
+  assert.deepEqual(
+    basics.chapters.find(current => current.id === "settings").step_ids,
+    [
+      "settings-introduction",
+      "lithophane-stack",
+      "open-settings",
+      "settings-profile",
+      "settings-solve-resolution",
+      "settings-layer-construction",
+      "close-settings",
+      "solve-first",
+    ],
   );
+  assert.equal(
+    app.commands.getGuideStep(basics, "settings-introduction").body,
+    "**Settings** allows you to alter parameters that control how an image gets solved to make a lithophane using your selected palette.\n\nAll aspects of this process can be modified to meet your tastes, but you only need to understand a handful of settings to use Prisma effectively.",
+  );
+  const lithophaneStack = app.commands.getGuideStep(basics, "lithophane-stack");
+  assert.equal(lithophaneStack.visual.clone_selector, '[data-guide-visual="lithophane-stack"]');
+  assert.equal(app.commands.getGuideStep(basics, "settings-profile").target_id, "settings.drawer-overview");
+  assert.equal(
+    app.commands.getGuideStep(basics, "settings-solve-resolution").target_id,
+    "settings.essentials-resolution",
+  );
+  assert.equal(
+    app.commands.getGuideStep(basics, "settings-layer-construction").target_id,
+    "settings.essentials-construction",
+  );
+  assert.match(
+    app.commands.getGuideStep(basics, "settings-solve-resolution").body,
+    /Leave \*\*Solve Mode\*\* set to \*\*Color\*\*/,
+  );
+  assert.doesNotMatch(
+    app.commands.getGuideStep(basics, "settings-solve-resolution").body,
+    /Luminance/,
+  );
+  assert.match(
+    app.commands.getGuideStep(basics, "settings-layer-construction").body,
+    /must exactly match the layer height used by your slicer/,
+  );
+  assert.deepEqual(
+    basics.chapters.find(current => current.id === "image").step_ids.slice(0, 5),
+    [
+      "image-introduction",
+      "image-library",
+      "image-library-maintenance",
+      "choose-image",
+      "image-preview",
+    ],
+  );
+  const imageIntroduction = app.commands.getGuideStep(basics, "image-introduction");
+  assert.equal(imageIntroduction.reveal_id, "workflow.image-page");
+  assert.equal(imageIntroduction.target_id, "workflow.image");
+  assert.equal(imageIntroduction.overlay_mode, "spotlight");
+  assert.match(imageIntroduction.body, /define what you want your lithophane to look like and how big it will be/);
+  assert.match(imageIntroduction.body, /resulting image as the visual target/);
+  const imageLibrary = app.commands.getGuideStep(basics, "image-library");
+  assert.equal(imageLibrary.title, "Adding images to the Image Library");
+  assert.match(imageLibrary.body, /Image Library contains the images available for use in Prisma/);
+  assert.match(imageLibrary.body, /contents reflect the image files stored in Prisma’s Images folder/);
+  assert.match(imageLibrary.body, /Use \*\*Add Image\*\* to import one or more images/);
+  assert.equal(imageLibrary.note.label, "Images folder");
+  assert.equal(imageLibrary.note.text, "{{imagesFolder}}");
+  assert.doesNotMatch(imageLibrary.body, /\{\{imagesFolder\}\}/);
+  const imageLibraryMaintenance = app.commands.getGuideStep(
+    basics,
+    "image-library-maintenance",
+  );
+  assert.match(imageLibraryMaintenance.body, /updates each time you start Prisma/);
+  assert.match(imageLibraryMaintenance.body, /\*\*Expand\*\* button/);
+  const chooseImage = app.commands.getGuideStep(basics, "choose-image");
+  assert.match(chooseImage.body, /\*\*\{\{tutorialImage\}\}\*\*/);
+  assert.equal(chooseImage.completion.accept_preexisting, true);
   assert.equal(
     basics.steps.findIndex(step => step.id === "palette-introduction") + 1,
     basics.steps.findIndex(step => step.id === "palette-methods"),
@@ -410,15 +565,30 @@ test("guide definitions and target registry are stable and complete", async () =
   assert.equal(paletteIntroduction.title, "Palette: choose your filaments");
   assert.match(
     paletteIntroduction.body,
-    /A \*\*palette\*\* is the set of filaments Prisma will use to recreate the colors in an image/,
+    /Recall that a palette is the set of filaments Prisma will use to recreate the colors in an image/,
   );
+  assert.match(paletteIntroduction.body, /create a palette yourself/);
+  assert.doesNotMatch(paletteIntroduction.body, /active palette|next solve/i);
   assert.doesNotMatch(paletteIntroduction.body, /\bordered\b|above the white base/i);
   const paletteMethods = app.commands.getGuideStep(basics, "palette-methods");
   assert.match(paletteMethods.body, /Auto-Suggest recommends palettes/);
-  assert.match(paletteMethods.body, /only the filaments selected in this panel/);
+  assert.match(paletteMethods.body, /only include filaments that are selected in this panel/);
   assert.match(paletteMethods.body, /Deselecting a filament prevents Auto-Suggest/);
-  assert.match(paletteMethods.body, /base and White Cap in Settings/);
-  assert.match(paletteMethods.body, /cannot be selected as a palette color/);
+  assert.match(paletteMethods.body, /white cap and base/);
+  assert.match(paletteMethods.body, /never be included in palette suggestions/);
+  assert.match(paletteMethods.body, /selection is made in \*\*Settings\*\*/);
+  const autosuggestControls = app.commands.getGuideStep(basics, "autosuggest-controls");
+  assert.equal(autosuggestControls.target_id, "palette.autosuggest-controls");
+  assert.match(autosuggestControls.body, /\*\*Palette Colors\*\*/);
+  assert.match(autosuggestControls.body, /\*\*Solve Mode\*\*/);
+  assert.match(autosuggestControls.body, /\*\*Suggestions\*\*/);
+  assert.match(autosuggestControls.body, /Color or Luminance solve modes/);
+  assert.match(autosuggestControls.body, /\[PLACEHOLDER FOR NAME OF GUIDE WHEN I WRITE IT\]/);
+  assert.doesNotMatch(autosuggestControls.body, /Max Colors|Extra Color Loads/i);
+  const suggestPalettes = app.commands.getGuideStep(basics, "suggest-palettes");
+  assert.match(suggestPalettes.body, /\*\*Palette Colors\*\* is set to exactly 3/);
+  assert.match(suggestPalettes.body, /\*\*Suggestions\*\* is at least 2/);
+  assert.match(suggestPalettes.body, /Select \*\*Suggest Palettes\*\* to continue/);
   assert.equal(
     basics.steps.findIndex(step => step.id === "solve-first") + 1,
     basics.steps.findIndex(step => step.id === "preview-introduction"),
@@ -436,7 +606,7 @@ test("guide definitions and target registry are stable and complete", async () =
     "image.framing",
   );
   const imagePreviewStep = app.commands.getGuideStep(basics, "image-preview");
-  assert.equal(imagePreviewStep.target_id, "image.adjustments");
+  assert.equal(imagePreviewStep.target_id, "image.preview-adjustments");
   assert.equal(imagePreviewStep.placement_group, "basics-image-adjustments");
   assert.equal(imagePreviewStep.preferred_placements[0], "left");
   const imageDetour = app.commands.getGuideDetour(basics, "image-controls");
@@ -471,14 +641,21 @@ test("guide definitions and target registry are stable and complete", async () =
     app.commands.getGuideStep(basics, "physical-dimensions").target_id,
     "image.physical-dimensions",
   );
+  assert.match(
+    app.commands.getGuideStep(basics, "physical-dimensions").body,
+    /divisible by the Solve Pitch\.$/,
+  );
+  assert.doesNotMatch(
+    app.commands.getGuideStep(basics, "physical-dimensions").body,
+    /learn more about what this means/i,
+  );
   assert.equal(app.commands.getGuideStep(basics, "border").target_id, "image.border");
   const imageSummary = app.commands.getGuideStep(basics, "image-summary");
   assert.match(imageSummary.body, /Solve Pitch \(the physical spacing between pixels/);
   assert.doesNotMatch(imageSummary.body, /usually requires more time/);
   const tutorialCanvas = basics.steps.find(step => step.id === "tutorial-canvas");
-  assert.match(tutorialCanvas.body, /same canvas size keeps the tutorial results consistent/);
-  assert.match(tutorialCanvas.body, /either W×H or Image/);
-  assert.match(tutorialCanvas.body, /canvas is 90 × 120 mm and the border is off/);
+  assert.match(tutorialCanvas.body, /size is set to 90 × 120 mm/);
+  assert.doesNotMatch(tutorialCanvas.body, /Aspect Ratio|border is off/);
   for (const awkwardConclusion of [
     /no particular choice is required yet/,
     /after this optional section/,
@@ -491,7 +668,11 @@ test("guide definitions and target registry are stable and complete", async () =
   }
   assert.equal(
     app.commands.getGuideStep(basics, "image-library").target_id,
-    "image.library-management",
+    "image.library-import",
+  );
+  assert.equal(
+    app.commands.getGuideStep(basics, "image-library-maintenance").target_id,
+    "image.library-maintenance",
   );
   assert.doesNotMatch(
     app.commands.getGuideStep(basics, "image-library").body,
@@ -499,13 +680,20 @@ test("guide definitions and target registry are stable and complete", async () =
   );
   const resetImageControls = basics.steps.find(step => step.id === "reset-image-controls");
   assert.equal(resetImageControls.target_id, "image.reset-framing");
+  assert.equal(resetImageControls.completion.kind, "event");
+  assert.equal(resetImageControls.completion.event, "image.controls-reset");
   assert.equal(resetImageControls.completion.predicate_id, "basics.image-reset");
+  assert.equal(resetImageControls.completion.accept_preexisting, false);
+  assert.match(resetImageControls.body, /Reset does not change whether a border is enabled/);
   assert.equal(basics.steps.find(step => step.id === "tutorial-canvas").target_id, "image.tutorial-canvas");
   assert.equal(app.commands.getGuideStep(basics, "manual-palette-add").target_id, "palette.manual");
   assert.equal(app.commands.getGuideStep(basics, "manual-palette-remove").target_id, "basics.manual-card");
+  assert.equal(app.commands.getGuideStep(basics, "open-palette-variant").target_id, "basics.palette-a");
+  assert.equal(app.commands.getGuideStep(basics, "add-palette-variant").target_id, "palette.manual");
+  assert.equal(app.commands.getGuideStep(basics, "remove-palette-variant").target_id, "basics.variant-card");
   assert.equal(
     basics.steps.find(step => step.id === "tutorial-nozzle").completion.kind,
-    "manual",
+    "event",
   );
   assert.equal(
     basics.steps.find(step => step.id === "tutorial-nozzle").completion.predicate_id,
@@ -515,12 +703,65 @@ test("guide definitions and target registry are stable and complete", async () =
     basics.steps.find(step => step.id === "tutorial-nozzle").body,
     /0\.4 mm/,
   );
+  for (const stepId of [
+    "printer-select",
+    "choose-image",
+    "reset-image-controls",
+    "open-palette",
+    "suggest-palettes",
+    "add-suggestions",
+    "manual-palette-add",
+    "manual-palette-remove",
+    "open-palette-variant",
+    "add-palette-variant",
+    "remove-palette-variant",
+    "activate-first",
+    "open-settings",
+    "advanced-settings",
+    "close-settings",
+    "solve-first",
+    "activate-second",
+    "solve-second",
+    "open-export",
+    "select-export-run",
+    "generate-files",
+  ]) {
+    assert.equal(
+      app.commands.getGuideStep(basics, stepId).completion.kind,
+      "event",
+      `${stepId} should advance after its requested action succeeds`,
+    );
+  }
   const terminologyStep = basics.steps.find(step => step.id === "core-terminology");
   assert.match(terminologyStep.body, /A \*\*palette\*\* is/);
   assert.match(terminologyStep.body, /A \*\*solve\*\* is/);
   assert.doesNotMatch(terminologyStep.body, /[“"](?:palette|solve)[”"]/i);
-  const filamentSelectionStep = app.commands.getGuideStep(basics, "candidate-filaments");
-  assert.doesNotMatch(`${filamentSelectionStep.title}\n${filamentSelectionStep.body}`, /\bcandidate/i);
+  assert.doesNotMatch(terminologyStep.body, /many possible ways/);
+  const paletteTools = app.commands.getGuideDetour(basics, "palette-tools");
+  assert.deepEqual(
+    paletteTools.steps.map(step => step.id),
+    [
+      "manual-palette-add",
+      "manual-palette-remove",
+      "open-palette-variant",
+      "add-palette-variant",
+      "remove-palette-variant",
+      "palette-saving-pointer",
+    ],
+  );
+  const settingsTools = app.commands.getGuideDetour(basics, "settings-tools");
+  assert.deepEqual(
+    settingsTools.steps.map(step => step.id),
+    ["settings-profiles", "preprocessing-solver", "white-cap", "advanced-settings"],
+  );
+  app.state.guides.currentGuide = basics;
+  app.state.guides.runtimeContext = { imagesFolder: "C:\\PrismaRuntime\\Images" };
+  assert.equal(
+    app.commands.formatGuideText(app.commands.getGuideStep(basics, "image-library").note.text).includes(
+      "C:\\PrismaRuntime\\Images",
+    ),
+    true,
+  );
   for (const definition of [guidedSetup, basics, app.commands.getGuideDefinition("guided-setup-help-pointer")]) {
     for (const currentStep of definition.steps) {
       assert.doesNotMatch(`${currentStep.title}\n${currentStep.body}`, /\bwalkthrough\b/i);
@@ -549,7 +790,14 @@ test("guide definitions and target registry are stable and complete", async () =
     "export.completed",
   );
   const imageGuide = app.commands.getGuideDefinition("image-guide");
+  const paletteGuide = app.commands.getGuideDefinition("palette-guide");
   const settingsGuide = app.commands.getGuideDefinition("settings-guide");
+  const previewGuide = app.commands.getGuideDefinition("preview-guide");
+  const exportGuide = app.commands.getGuideDefinition("export-guide");
+  assert.deepEqual(
+    [imageGuide.version, paletteGuide.version, settingsGuide.version, previewGuide.version, exportGuide.version],
+    [6, 7, 6, 7, 7],
+  );
   assert.equal(
     app.commands.getGuideStep(imageGuide, "aspect-ratios"),
     app.commands.getGuideStep(basics, "aspect-ratios"),
@@ -558,9 +806,108 @@ test("guide definitions and target registry are stable and complete", async () =
     app.commands.getGuideStep(settingsGuide, "white-cap"),
     app.commands.getGuideStep(basics, "white-cap"),
   );
-  assert.equal(settingsGuide.preparation.tutorial_printer, false);
-  assert.equal(settingsGuide.preparation.tutorial_image, false);
-  assert.equal(app.commands.getCatalogGuides().length, 8);
+  assert.equal(settingsGuide.baseline.ghost_printer, false);
+  assert.deepEqual(settingsGuide.baseline.guide_assets, []);
+  assert.equal(app.commands.getCatalogGuides().length, 9);
+});
+
+test("Saving & Loading uses the approved route and default-deny durable identities", async () => {
+  const { app } = await createFeatureHarness();
+  const guide = app.commands.getGuideDefinition("saving-and-loading");
+  const expectedIds = [
+    "saving-loading-introduction", "prepare-saving-loading-workspace",
+    "palette-saving-introduction", "save-palette", "remove-saved-palette-from-deck",
+    "load-saved-palette", "delete-saved-palette-record", "settings-saving-introduction",
+    "modify-basic-profile", "save-named-settings-profile", "modify-named-settings-profile",
+    "open-settings-profiles-with-modified-draft", "load-basic-discard-settings-draft",
+    "delete-named-settings-profile", "solved-run-saving-introduction",
+    "solve-for-saving-loading", "save-solved-run", "clear-solve-history-for-load",
+    "clear-palette-deck-for-run-load", "load-complete-saved-run", "open-run-settings",
+    "use-run-settings", "explain-temp-run-profile", "delete-saved-run-record",
+    "export-saving-introduction", "explain-export-file-ownership", "explain-export-downloads",
+    "persistence-boundaries-introduction", "unsaved-working-state-boundaries",
+    "saving-loading-complete",
+  ];
+  assert.deepEqual(guide.steps.map(step => step.id), expectedIds);
+  assert.equal(guide.chapters.length, 6);
+  assert.equal(guide.catalog.group, "Save, Reuse, and Export");
+  assert.equal(guide.steps[0].next_label, "Begin");
+  assert.equal(guide.steps[0].allow_previous, false);
+  assert.equal(
+    app.commands.getGuideStep(guide, "save-palette").viewport_anchor,
+    "center-right",
+  );
+  assert.equal(
+    app.commands.getGuideStep(guide, "remove-saved-palette-from-deck").viewport_anchor,
+    "center-right",
+  );
+  assert.equal(
+    app.commands.getGuideStep(guide, "save-named-settings-profile").viewport_anchor,
+    "center-left",
+  );
+  assert.equal(
+    app.commands.getGuideStep(guide, "solve-for-saving-loading").body.includes("Palette Palette"),
+    false,
+  );
+
+  app.state.guides.currentGuide = guide;
+  app.state.guides.currentStep = app.commands.getGuideStep(guide, "save-palette");
+  app.state.guides.runtimeState = "presenting";
+  app.state.guides.runtimeContext = {
+    tutorialPalettes: [{ id: "primary-card", filament_ids: ["cyan", "magenta", "yellow"] }],
+    names: { savedPaletteName: "Saving & Loading Palette" },
+  };
+  assert.equal(app.commands.authorizeGuideDurableMutation("palette.saved.create", {
+    deck_card_id: "primary-card",
+    palette_signature: ["cyan", "magenta", "yellow"],
+    name: "Saving & Loading Palette",
+  }), true);
+  assert.equal(app.commands.authorizeGuideDurableMutation("palette.saved.create", {
+    deck_card_id: "unrelated-card",
+    palette_signature: ["cyan", "magenta", "yellow"],
+    name: "Saving & Loading Palette",
+  }), false);
+  assert.equal(app.commands.authorizeGuideDurableMutation("settings.profile.set-startup", {
+    profile_id: "any-profile",
+  }), false);
+});
+
+test("Guide durable deletion reuses the exact identity journaled at creation", async () => {
+  const { app } = await createFeatureHarness();
+  const guide = app.commands.getGuideDefinition("saving-and-loading");
+  const transitions = [];
+  app.state.guides.currentGuide = guide;
+  app.state.guides.workspaceSessionId = "guide-session";
+  app.state.guides.runtimeContext = {};
+  app.api.transitionGuideResource = async (_sessionId, resource) => {
+    transitions.push(clone(resource));
+    return resource;
+  };
+  app.api.getRequestContext = () => ({});
+  app.api.setRequestContext = () => {};
+
+  await app.commands.performGuideDurableMutation({
+    direction: "create",
+    operationId: "saving-loading-profile",
+    kind: "settings-profile",
+    name: "Saving & Loading Profile",
+    fingerprint: { settings: { t_max: 2.6 }, modules: { color: true } },
+    resolveId: response => response.id,
+  }, async () => ({ id: "profile-id" }));
+  await app.commands.performGuideDurableMutation({
+    direction: "delete",
+    operationId: "saving-loading-profile",
+    kind: "settings-profile",
+    id: "profile-id",
+    name: "Saving & Loading Profile",
+    fingerprint: { settings: { t_max: 2.6000000001 }, modules: { color: true } },
+  }, async () => ({ deleted: "profile-id" }));
+
+  assert.deepEqual(transitions.map(item => item.status), [
+    "pending_create", "present", "pending_delete", "absent",
+  ]);
+  assert.deepEqual(transitions[2].fingerprint, transitions[0].fingerprint);
+  assert.equal(app.state.guides.runtimeContext.durableResources["saving-loading-profile"], undefined);
 });
 
 test("Basics accepts an already-active Tutorial Printer or a successful later selection", async () => {
@@ -569,19 +916,6 @@ test("Basics accepts an already-active Tutorial Printer or a successful later se
     const printerConfigPage = fakeElement();
     printerConfigPage.classList.add("is-hidden");
     const { app } = await createFeatureHarness({
-      api: {
-        async prepareBasicsGuide() {
-          return {
-            tutorial_image: {
-              filename: "Prisma Tutorial - Bubba Blanket.jpg",
-              width: 1600,
-              height: 1200,
-              size_kb: 512,
-            },
-            tutorial_printer: { status: "ready", profile },
-          };
-        },
-      },
       elements: {
         "#printerConfigPage": printerConfigPage,
       },
@@ -600,6 +934,10 @@ test("Basics accepts an already-active Tutorial Printer or a successful later se
       active_nozzle_size: 0.2,
     };
     app.commands.loadPrinters = async () => {};
+    app.api.setActivePrinter = async ({ active_nozzle_size: nozzleSize }) => {
+      app.state.session.printersData.active_nozzle_size = nozzleSize;
+      return { printer: profile, nozzle: { size: nozzleSize } };
+    };
     app.commands.renderImageTab = () => {};
     app.commands.updateRail = () => {};
     app.commands.renderGuideStep = () => {};
@@ -627,14 +965,28 @@ test("Basics accepts an already-active Tutorial Printer or a successful later se
   alreadyActive.commands.nextGuideStep();
   assert.equal(alreadyActive.state.guides.currentStep.id, "core-terminology");
   alreadyActive.commands.nextGuideStep();
+  assert.equal(alreadyActive.state.guides.currentStep.id, "lithophane-image-principle");
+  alreadyActive.commands.nextGuideStep();
+  assert.equal(alreadyActive.state.guides.currentStep.id, "prisma-creation-overview");
+  alreadyActive.commands.nextGuideStep();
   assert.equal(alreadyActive.state.guides.currentStep.id, "workflow");
   alreadyActive.commands.nextGuideStep();
   assert.equal(alreadyActive.state.guides.currentStep.id, "tutorial-nozzle");
+  await settleGuideStepActions(alreadyActive);
+  assert.equal(alreadyActive.state.guides.runtimeState, "presenting");
+  assert.equal(alreadyActive.state.session.printersData.active_nozzle_size, 0.2);
+  alreadyActive.state.session.printersData.active_nozzle_size = 0.4;
+  alreadyActive.events.emit("printer.nozzle-changed", { nozzleSize: 0.4 });
+  assert.equal(alreadyActive.state.guides.currentStep.id, "image-introduction");
 
   const selectedLater = await startWithPrinter("bambu-x1c");
   assert.equal(selectedLater.state.guides.currentStep.id, "introduction");
   selectedLater.commands.nextGuideStep();
   assert.equal(selectedLater.state.guides.currentStep.id, "core-terminology");
+  selectedLater.commands.nextGuideStep();
+  assert.equal(selectedLater.state.guides.currentStep.id, "lithophane-image-principle");
+  selectedLater.commands.nextGuideStep();
+  assert.equal(selectedLater.state.guides.currentStep.id, "prisma-creation-overview");
   selectedLater.commands.nextGuideStep();
   assert.equal(selectedLater.state.guides.currentStep.id, "workflow");
   selectedLater.commands.nextGuideStep();
@@ -650,35 +1002,22 @@ test("Basics accepts an already-active Tutorial Printer or a successful later se
     source: "sidebar",
   });
   assert.equal(selectedLater.state.guides.currentStep.id, "tutorial-nozzle");
+  await settleGuideStepActions(selectedLater);
+  assert.equal(selectedLater.state.guides.runtimeState, "presenting");
+  assert.equal(selectedLater.state.session.printersData.active_nozzle_size, 0.2);
+  selectedLater.state.session.printersData.active_nozzle_size = 0.4;
+  selectedLater.events.emit("printer.nozzle-changed", { nozzleSize: 0.4 });
+  assert.equal(selectedLater.state.guides.currentStep.id, "image-introduction");
 });
 
-test("Basics preparation materializes its image and captures only fresh top suggestions", async () => {
-  const prepareCalls = [];
-  const profile = tutorialPrinterProfile();
+test("Basics mounts a protected image, resets project work, and captures only fresh top suggestions", async () => {
   const targetFilamentCount = fakeElement();
-  const targetSwapCount = fakeElement();
   const targetSuggestCount = fakeElement();
   targetFilamentCount.value = "7";
-  targetSwapCount.value = "2";
   targetSuggestCount.value = "1";
   const { app } = await createFeatureHarness({
-    api: {
-      async prepareBasicsGuide(options = {}) {
-        prepareCalls.push(options);
-        return {
-          tutorial_image: {
-            filename: "Prisma Tutorial - Bubba Blanket.jpg",
-            width: 1600,
-            height: 1200,
-            size_kb: 512,
-          },
-          tutorial_printer: { status: "ready", profile },
-        };
-      },
-    },
     elements: {
       "#targetFilamentCount": targetFilamentCount,
-      "#targetSwapCount": targetSwapCount,
       "#targetSuggestCount": targetSuggestCount,
     },
     filaments: [
@@ -687,7 +1026,7 @@ test("Basics preparation materializes its image and captures only fresh top sugg
       { filament_id: "excluded", has_profile: true, exclude_from_model: true },
     ],
   });
-  app.state.palette.candidateSelection = new Set(["only-before-guide"]);
+  app.state.palette.candidateSelection = new Set(["eligible-a", "removed-before-restore"]);
   app.state.palette.candidateInitialized = true;
   const selectedBeforeGuide = {
     filename: "My selected image.jpg",
@@ -702,6 +1041,7 @@ test("Basics preparation materializes its image and captures only fresh top sugg
     throw new Error("Basics must not rescan the complete Image Library");
   };
   app.commands.renderImageTab = () => {};
+  app.commands.renderCreationTab = () => {};
   app.commands.updateRail = () => {};
   app.commands.renderGuideStep = () => {};
   app.commands.revealGuideTarget = () => {};
@@ -725,40 +1065,69 @@ test("Basics preparation materializes its image and captures only fresh top sugg
     app.state.settings.loadedProfileRef = clone(snapshot.loadedProfileRef);
     app.state.settings.loadedProfileSnapshot = clone(snapshot.loadedProfileSnapshot);
   };
+  app.commands.appConfirm = async () => true;
+  const preparationErrors = [];
+  app.commands.showToast = message => preparationErrors.push(message);
 
-  assert.equal(await app.commands.startGuide("prisma-generator-basics"), true);
-  assert.deepEqual(prepareCalls, [{
-    includeTutorialPrinter: true,
-    includeTutorialImage: true,
-  }]);
+  assert.equal(await app.commands.startGuide("prisma-generator-basics"), true, preparationErrors.join("\n"));
+  assert.equal(app.state.guides.runtimeContext.imagesFolder, "C:\\PrismaRuntime\\Images");
   assert.equal(
     app.state.guides.runtimeContext.tutorialImageFilename,
     "Prisma Tutorial - Bubba Blanket.jpg",
   );
+  assert.equal(
+    app.state.guides.runtimeContext.tutorialImageSourceRef,
+    "guide-image:bubba-blanket",
+  );
   assert.deepEqual(
     app.state.image.availableImages.map(image => image.filename),
-    ["My selected image.jpg", "Prisma Tutorial - Bubba Blanket.jpg"],
+    ["My selected image.jpg"],
   );
-  assert.equal(app.state.image.selectedImage, selectedBeforeGuide);
+  assert.deepEqual(
+    app.state.image.guideImages.map(image => image.source_ref),
+    ["guide-image:bubba-blanket"],
+  );
+  assert.equal(app.state.image.selectedImage, null);
   assert.equal(targetFilamentCount.value, "3");
-  assert.equal(targetSwapCount.value, "0");
   assert.equal(targetSuggestCount.value, "5");
   assert.deepEqual(
     [...app.state.palette.candidateSelection].sort(),
     ["eligible-a", "eligible-b"],
   );
-  assert.equal(app.state.settings.loadedProfileRef.id, "temporary-guide-basics");
+  assert.equal(app.state.settings.loadedProfileRef.id, "temporary-guide-prisma-generator-basics");
   assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.4);
   assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.4);
+  assert.equal(app.commands.guidePredicateSatisfied("basics.tutorial-profile-ready"), true);
+  app.state.settings.config.image_sample_pitch_mm = 0.8;
+  assert.equal(app.commands.guidePredicateSatisfied("basics.tutorial-profile-ready"), false);
+  app.state.settings.config.image_sample_pitch_mm = 0.4;
 
+  const warnings = [];
+  app.commands.showToast = message => warnings.push(message);
   app.state.palette.stagingDeck = [
-    { id: "old", name: "Old result" },
-    { id: "new-a", name: "Fresh A" },
-    { id: "new-b", name: "Fresh B" },
+    { id: "old", name: "Old result", filament_ids: ["x", "y", "z"] },
+    { id: "new-a", name: "Fresh A", filament_ids: ["a", "b", "c"] },
+    { id: "new-b", name: "Fresh B", filament_ids: ["d", "e", "f"] },
   ];
   const suggestionStep = app.commands
     .getGuideDefinition("prisma-generator-basics")
     .steps.find(step => step.id === "suggest-palettes");
+  targetFilamentCount.value = "2";
+  app.commands.captureGuideCompletion(suggestionStep, {
+    cardIds: ["new-a", "new-b"],
+  });
+  assert.equal(app.state.guides.runtimeContext.paletteA, null);
+  assert.match(warnings.at(-1), /Palette Colors to exactly 3/);
+
+  targetFilamentCount.value = "3";
+  targetSuggestCount.value = "1";
+  app.commands.captureGuideCompletion(suggestionStep, {
+    cardIds: ["new-a", "new-b"],
+  });
+  assert.equal(app.state.guides.runtimeContext.paletteA, null);
+  assert.match(warnings.at(-1), /Suggestions to at least 2/);
+
+  targetSuggestCount.value = "5";
   app.commands.captureGuideCompletion(suggestionStep, {
     cardIds: ["new-a", "new-b"],
   });
@@ -771,12 +1140,14 @@ test("Basics preparation materializes its image and captures only fresh top sugg
     id: "new-b",
     name: "Fresh B",
   });
+  assert.equal(app.commands.guidePredicateSatisfied("basics.two-suggestions-ready"), true);
 
-  app.commands.endGuide();
-  assert.deepEqual([...app.state.palette.candidateSelection], ["only-before-guide"]);
+  await app.commands.endGuide();
+  assert.deepEqual([...app.state.palette.candidateSelection], ["eligible-a"]);
   assert.equal(targetFilamentCount.value, "7");
-  assert.equal(targetSwapCount.value, "2");
   assert.equal(targetSuggestCount.value, "1");
+  assert.equal(app.state.image.guideImages.length, 0);
+  assert.equal(app.state.image.selectedImage, null);
 });
 
 test("tutorial image upsert updates an existing selected entry without duplication", async () => {
@@ -805,17 +1176,10 @@ test("tutorial image upsert updates an existing selected entry without duplicati
   assert.equal(app.state.image.selectedImage, updated);
 });
 
-test("Settings Guide preparation changes only the temporary Settings Profile", async () => {
-  const prepareCalls = [];
+test("Settings Guide uses the teaching workspace without mounting printer or image assets", async () => {
   const targetFilamentCount = fakeElement();
   targetFilamentCount.value = "8";
   const { app } = await createFeatureHarness({
-    api: {
-      async prepareBasicsGuide(options) {
-        prepareCalls.push(options);
-        return { tutorial_image: null, tutorial_printer: null };
-      },
-    },
     elements: { "#targetFilamentCount": targetFilamentCount },
   });
   const originalImage = { filename: "User image.jpg" };
@@ -829,6 +1193,8 @@ test("Settings Guide preparation changes only the temporary Settings Profile", a
   app.commands.upsertImageLibraryEntry = () => {
     throw new Error("Settings Guide must not upsert a tutorial image");
   };
+  app.commands.renderImageTab = () => {};
+  app.commands.renderCreationTab = () => {};
   app.state.settings.settingsProfiles = [{
     id: app.state.ui.SYSTEM_SETTINGS_PROFILE_ID,
     kind: "system",
@@ -844,17 +1210,17 @@ test("Settings Guide preparation changes only the temporary Settings Profile", a
   app.commands.renderGuideStep = () => {};
   app.commands.revealGuideTarget = () => {};
   app.commands.captureGuidePresentation = () => ({});
+  app.commands.appConfirm = async () => true;
+  const preparationErrors = [];
+  app.commands.showToast = message => preparationErrors.push(message);
 
-  assert.equal(await app.commands.startGuide("settings-guide"), true);
-  assert.deepEqual(prepareCalls, [{
-    includeTutorialPrinter: false,
-    includeTutorialImage: false,
-  }]);
-  assert.equal(app.state.image.selectedImage, originalImage);
-  assert.deepEqual([...app.state.palette.candidateSelection], ["user-choice"]);
+  assert.equal(await app.commands.startGuide("settings-guide"), true, preparationErrors.join("\n"));
+  assert.equal(app.state.image.selectedImage, null);
+  assert.equal(app.state.image.guideImages.length, 0);
+  assert.deepEqual([...app.state.palette.candidateSelection], []);
   assert.equal(app.state.palette.candidateInitialized, true);
-  assert.equal(targetFilamentCount.value, "8");
-  assert.equal(app.state.settings.loadedProfileRef.id, "temporary-guide-basics");
+  assert.equal(targetFilamentCount.value, "3");
+  assert.equal(app.state.settings.loadedProfileRef.id, "temporary-guide-settings-guide");
 });
 
 test("Basics reset and canvas gates preserve a clean tutorial image state", async () => {
@@ -920,11 +1286,71 @@ test("Basics reset and canvas gates preserve a clean tutorial image state", asyn
     heightMm: 160,
   });
   assert.equal(app.commands.guidePredicateSatisfied("basics.image-reset"), true);
+  app.state.settings.config.border = true;
+  assert.equal(app.commands.guidePredicateSatisfied("basics.image-reset"), false);
+  app.state.settings.config.border = false;
   app.state.image.frameState.rotation = 5;
   assert.equal(app.commands.guidePredicateSatisfied("basics.image-reset"), false);
   app.state.image.frameState.rotation = 0;
   app.state.image.imageAdjust.temperature = 0.2;
   assert.equal(app.commands.guidePredicateSatisfied("basics.image-reset"), false);
+});
+
+test("Reset image controls advances only after the reset event leaves verified defaults", async () => {
+  const { app } = await createFeatureHarness();
+  const basics = app.commands.getGuideDefinition("prisma-generator-basics");
+  const rendered = [];
+  app.commands.renderGuideStep = payload => rendered.push(payload.step.id);
+  app.commands.revealGuideTarget = () => {};
+  app.state.guides.currentGuide = basics;
+  app.state.guides.currentStep = app.commands.getGuideStep(basics, "image-preview");
+  app.state.guides.runtimeState = "presenting";
+  app.state.guides.completedStepIds = new Set();
+  app.state.guides.completedDetourIds = new Set();
+  app.state.guides.activeDetour = null;
+  app.state.guides.runtimeContext = {
+    tutorialImageFilename: "Prisma Tutorial - Bubba Blanket.jpg",
+  };
+  app.state.image.selectedImage = {
+    filename: "Prisma Tutorial - Bubba Blanket.jpg",
+  };
+  Object.assign(app.state.image.frameState, {
+    arMode: "image",
+    widthMm: 120,
+    heightMm: 160,
+    scale: 110,
+    rotation: 0,
+    panX: 0,
+    panY: 0,
+    flipH: false,
+    flipV: false,
+  });
+  app.state.image.imageAdjust = {
+    mode: "color",
+    exposure: 0,
+    contrast: 0,
+    highlight: 0,
+    shadow: 0,
+    tint_hue: 0,
+    tint_strength: 0,
+    saturation: 0,
+    temperature: 0,
+  };
+  app.state.settings.config.border = true;
+
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "reset-image-controls");
+  app.events.emit("image.controls-reset", { source: "test-dirty" });
+  assert.equal(app.state.guides.currentStep.id, "reset-image-controls");
+
+  app.state.image.frameState.scale = 100;
+  app.events.emit("image.controls-reset", { source: "test-border-on" });
+  assert.equal(app.state.guides.currentStep.id, "reset-image-controls");
+
+  app.state.settings.config.border = false;
+  app.events.emit("image.controls-reset", { source: "test-reset" });
+  assert.equal(app.state.guides.currentStep.id, "tutorial-canvas");
+  assert.deepEqual(rendered, ["reset-image-controls", "tutorial-canvas"]);
 });
 
 test("Image-adjustment guide gate follows the active Adjustments subtab", async () => {
@@ -956,7 +1382,7 @@ test("Continue to Palette waits for Palette navigation and then advances automat
   };
   app.state.guides.currentGuide = basics;
   app.state.guides.currentStep = tutorialCanvas;
-  app.state.guides.runtimeState = "running";
+  app.state.guides.runtimeState = "presenting";
   app.state.guides.completedStepIds = new Set();
   app.state.guides.completedDetourIds = new Set();
   app.state.guides.activeDetour = null;
@@ -964,7 +1390,7 @@ test("Continue to Palette waits for Palette navigation and then advances automat
 
   assert.equal(app.commands.nextGuideStep(), true);
   assert.equal(app.state.guides.currentStep.id, "open-palette");
-  assert.equal(app.state.guides.runtimeState, "waiting_for_action");
+  assert.equal(app.state.guides.runtimeState, "presenting");
   assert.equal(app.commands.nextGuideStep(), false);
   assert.equal(app.state.guides.currentStep.id, "open-palette");
 
@@ -1052,7 +1478,7 @@ test("guide controller keeps progress in memory and requires semantic success to
   assert.equal(app.state.guides.currentStep.id, "workflow-tabs");
 
   app.commands.nextGuideStep();
-  assert.equal(app.state.guides.runtimeState, "waiting_for_action");
+  assert.equal(app.state.guides.runtimeState, "presenting");
   assert.equal(app.state.guides.currentStep.id, "settings-button");
 
   app.events.emit("settings.opened");
@@ -1069,10 +1495,10 @@ test("guide controller keeps progress in memory and requires semantic success to
   app.commands.previousGuideStep();
   assert.equal(app.state.guides.currentStep.id, "settings-button");
   assert.equal(app.state.guides.reviewingCompletedStep, true);
-  assert.equal(app.state.guides.runtimeState, "running");
+  assert.equal(app.state.guides.runtimeState, "presenting");
   assert.equal(app.commands.nextGuideStep(), true);
   assert.equal(app.state.guides.currentStep.id, "white-point-rescale");
-  app.commands.endGuide();
+  await app.commands.endGuide();
   assert.equal(app.state.guides.runtimeState, "idle");
   assert.equal(app.state.guides.currentGuide, null);
   assert.equal(putCalls, 0);
@@ -1083,7 +1509,7 @@ test("guide controller keeps progress in memory and requires semantic success to
   });
 });
 
-test("Basics detours use a local route and return to the declared spine step", async () => {
+test("Basics detours return to their offering step on completion and early exit", async () => {
   const { app } = await createFeatureHarness();
   const basics = app.commands.getGuideDefinition("prisma-generator-basics");
   const offer = basics.steps.find(step => step.id === "export-introduction");
@@ -1094,9 +1520,13 @@ test("Basics detours use a local route and return to the declared spine step", a
     stepCount: payload.stepCount,
   });
   app.commands.revealGuideTarget = () => {};
+  const detourPresentation = { currentTab: "export", marker: "detour-origin" };
+  const restored = [];
+  app.commands.captureGuidePresentation = () => detourPresentation;
+  app.commands.restoreGuidePresentation = snapshot => restored.push(snapshot);
   app.state.guides.currentGuide = basics;
   app.state.guides.currentStep = offer;
-  app.state.guides.runtimeState = "running";
+  app.state.guides.runtimeState = "presenting";
   app.state.guides.completedStepIds = new Set();
   app.state.guides.completedDetourIds = new Set();
   app.state.guides.activeDetour = null;
@@ -1132,11 +1562,18 @@ test("Basics detours use a local route and return to the declared spine step", a
   assert.equal(app.state.guides.activeDetour, null);
   assert.equal(app.state.guides.currentGuide, basics);
   assert.equal(app.state.guides.runtimeContext, runtimeContext);
+  assert.deepEqual(restored, [detourPresentation]);
   assert.equal(app.commands.startGuideDetour("export-choices"), true);
   assert.equal(app.commands.nextGuideStep(), true);
-  assert.equal(app.state.guides.currentStep.id, "select-export-run");
+  assert.equal(app.state.guides.currentStep.id, "export-introduction");
+  assert.equal(app.state.guides.reviewingCompletedStep, true);
   assert.equal(app.state.guides.activeDetour, null);
   assert.equal(app.state.guides.completedDetourIds.has("export-choices"), true);
+  assert.equal(app.commands.getOfferedGuideDetour(), null);
+  assert.equal(app.commands.getGuideDetourAtCurrentStep()?.id, "export-choices");
+  assert.deepEqual(restored, [detourPresentation, detourPresentation]);
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "select-export-run");
 });
 
 test("a detour return predicate blocks invalid state before rejoining the spine", async () => {
@@ -1153,8 +1590,11 @@ test("a detour return predicate blocks invalid state before rejoining the spine"
   );
   app.state.guides.currentGuide = basics;
   app.state.guides.currentStep = detour.steps.at(-1);
-  app.state.guides.runtimeState = "waiting_for_action";
-  app.state.guides.completedStepIds = new Set([detour.steps.at(-1).id]);
+  app.state.guides.runtimeState = "presenting";
+  app.state.guides.completedStepIds = new Set([
+    detour.offer_step_id,
+    detour.steps.at(-1).id,
+  ]);
   app.state.guides.completedDetourIds = new Set();
   app.state.guides.activeDetour = { id: detour.id };
 
@@ -1163,8 +1603,51 @@ test("a detour return predicate blocks invalid state before rejoining the spine"
   assert.match(warnings.at(-1), /restore the requested tutorial state/i);
   ready = true;
   assert.equal(app.commands.nextGuideStep(), true);
-  assert.equal(app.state.guides.currentStep.id, "close-settings");
+  assert.equal(app.state.guides.currentStep.id, "settings-profile");
+  assert.equal(app.state.guides.reviewingCompletedStep, true);
   assert.equal(app.state.guides.activeDetour, null);
+});
+
+test("detour presentation snapshots restore page-specific UI modes", async () => {
+  const { app } = await createFeatureHarness();
+  app.state.ui.currentTab = "creation";
+  app.state.settings.settingsDrawerOpen = false;
+  app.state.settings.settingsAdvancedVisible = false;
+  app.state.image.frameEditorTab = "size";
+  app.state.palette.creationMode = "auto";
+  app.state.solve.solveView = "predicted";
+  app.state.solve.solveWhiteCapView = "cap_map";
+  app.state.solve.solveColorRegionsView = "color_ceiling";
+  app.state.solve.solveAdvancedViewsOpen = false;
+  const snapshot = app.commands.captureGuidePresentation();
+  let solveRenders = 0;
+  app.commands.switchFrameEditorTab = tab => { app.state.image.frameEditorTab = tab; };
+  app.commands.toggleCreationMode = mode => { app.state.palette.creationMode = mode; };
+  app.commands.setSolveAdvancedViewsOpen = open => {
+    app.state.solve.solveAdvancedViewsOpen = open;
+  };
+  app.commands.renderSolveComparisonGrid = () => { solveRenders += 1; };
+  app.commands.saveSettingsAdvancedVisible = () => {};
+  app.commands.updateAdvancedSettingsVisibility = () => {};
+  app.commands.distributeSettingsColumns = () => {};
+
+  app.state.settings.settingsAdvancedVisible = true;
+  app.state.image.frameEditorTab = "image";
+  app.state.palette.creationMode = "manual";
+  app.state.solve.solveView = "surface";
+  app.state.solve.solveWhiteCapView = "detail_cap_map";
+  app.state.solve.solveColorRegionsView = "recipe_regions";
+  app.state.solve.solveAdvancedViewsOpen = true;
+  app.commands.restoreGuidePresentation(snapshot);
+
+  assert.equal(app.state.settings.settingsAdvancedVisible, false);
+  assert.equal(app.state.image.frameEditorTab, "size");
+  assert.equal(app.state.palette.creationMode, "auto");
+  assert.equal(app.state.solve.solveView, "predicted");
+  assert.equal(app.state.solve.solveWhiteCapView, "cap_map");
+  assert.equal(app.state.solve.solveColorRegionsView, "color_ceiling");
+  assert.equal(app.state.solve.solveAdvancedViewsOpen, false);
+  assert.equal(solveRenders, 1);
 });
 
 test("chapter progress is reusable for multi-chapter and one-chapter guides", async () => {
@@ -1244,6 +1727,7 @@ test("guide completion restores presentation without persisting guide progress",
   app.state.guides.currentStep = guide.steps.at(-1);
 
   assert.equal(app.commands.nextGuideStep(), true);
+  await app.commands.endGuide();
   assert.deepEqual(restored, [{ currentTab: "creation" }]);
   assert.equal(app.state.guides.runtimeState, "idle");
   assert.equal(putCalls, 0);
@@ -1280,7 +1764,7 @@ test("only first-launch status is persisted", async () => {
   assert.deepEqual(app.state.guides.onboardingState, remote);
 });
 
-test("first launch accepts Guided Setup and records the response before starting", async () => {
+test("first launch accepts First-Time Setup and records the response before starting", async () => {
   let remote = {
     schema_version: 2,
     revision: 0,
@@ -1315,7 +1799,7 @@ test("first launch accepts Guided Setup and records the response before starting
   assert.equal(app.state.guides.currentStep.id, "printer-open");
 });
 
-test("Guided Setup reviews a completed printer step without reopening its editor", async () => {
+test("First-Time Setup navigates back through printer steps without reopening its editor", async () => {
   const printerPage = fakeElement();
   const { app } = await createFeatureHarness({
     elements: { "#printerConfigPage": printerPage },
@@ -1334,6 +1818,10 @@ test("Guided Setup reviews a completed printer step without reopening its editor
   assert.equal(await app.commands.startGuide("guided-setup"), true);
   assert.equal(app.state.guides.currentStep.id, "printer-configuration");
   assert.deepEqual(rendered, ["printer-open", "printer-configuration"]);
+  assert.equal(app.commands.previousGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "printer-open");
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "printer-configuration");
 
   printerPage.classList.add("is-hidden");
   app.events.emit("printer-config.closed", { source: "test" });
@@ -1348,8 +1836,112 @@ test("Guided Setup reviews a completed printer step without reopening its editor
   assert.equal(app.state.guides.currentStep.id, "active-nozzle");
   assert.equal(printerPage.classList.contains("is-hidden"), true);
   assert.equal(app.commands.previousGuideStep(), true);
-  assert.equal(app.commands.previousGuideStep(), false);
   assert.equal(app.state.guides.currentStep.id, "printer-configuration");
+  assert.equal(app.commands.previousGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "printer-open");
+  assert.equal(app.commands.previousGuideStep(), false);
+});
+
+test("Palette teaching activates and tracks its temporary Manual and Variant cards", async () => {
+  const { app } = await createFeatureHarness();
+  const basics = app.commands.getGuideDefinition("prisma-generator-basics");
+  const paletteA = { id: "palette-a", name: "Palette A", filament_ids: ["red"] };
+  const paletteB = { id: "palette-b", name: "Palette B", filament_ids: ["blue"] };
+  const manual = { id: "manual-1", name: "Manual", filament_ids: ["red", "blue"] };
+  const variant = { id: "variant-1", name: "Palette A Variant", filament_ids: ["green"] };
+  app.state.guides.currentGuide = basics;
+  app.state.guides.runtimeContext = {
+    paletteA,
+    paletteB,
+    manualCardId: null,
+    manualCardRemoved: false,
+    variantCardId: null,
+    variantCardRemoved: false,
+  };
+  app.state.palette.deck = [paletteA, paletteB, manual];
+  app.state.palette.activeDeckId = paletteA.id;
+  app.commands.renderDeckCards = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.syncConfigToServer = () => {};
+
+  app.commands.captureGuideCompletion(
+    app.commands.getGuideStep(basics, "manual-palette-add"),
+    { action: "added", card: manual },
+  );
+  assert.equal(app.state.guides.runtimeContext.manualCardId, manual.id);
+  assert.equal(app.state.palette.activeDeckId, manual.id);
+
+  app.state.palette.deck = [paletteA, paletteB];
+  app.commands.captureGuideCompletion(
+    app.commands.getGuideStep(basics, "manual-palette-remove"),
+    { action: "removed", cardId: manual.id, card: manual },
+  );
+  assert.equal(app.commands.guidePredicateSatisfied("basics.manual-card-removed"), true);
+
+  app.state.palette.creationMode = "manual";
+  app.state.palette.manualVariantDraft = { sourceCardId: paletteA.id };
+  assert.equal(app.commands.guidePredicateSatisfied("basics.palette-variant-started"), true);
+
+  app.state.palette.deck.push(variant);
+  app.state.palette.activeDeckId = variant.id;
+  app.commands.captureGuideCompletion(
+    app.commands.getGuideStep(basics, "add-palette-variant"),
+    { action: "added", card: variant, sourceCardId: paletteA.id },
+  );
+  assert.equal(app.commands.guidePredicateSatisfied("basics.palette-variant-added"), true);
+
+  app.state.palette.deck = [paletteA, paletteB];
+  app.commands.captureGuideCompletion(
+    app.commands.getGuideStep(basics, "remove-palette-variant"),
+    { action: "removed", cardId: variant.id, card: variant },
+  );
+  assert.equal(app.commands.guidePredicateSatisfied("basics.palette-variant-removed"), true);
+});
+
+test("Palette Deck detour distinguishes Continue, early exit, and completed return", async () => {
+  const { app } = await createFeatureHarness();
+  const basics = app.commands.getGuideDefinition("prisma-generator-basics");
+  const offer = app.commands.getGuideStep(basics, "palette-deck");
+  const detour = app.commands.getGuideDetour(basics, "palette-tools");
+  app.commands.renderGuideStep = () => {};
+  app.commands.revealGuideTarget = () => {};
+  app.state.guides.currentGuide = basics;
+  app.state.guides.currentStep = offer;
+  app.state.guides.runtimeState = "presenting";
+  app.state.guides.completedStepIds = new Set();
+  app.state.guides.completedDetourIds = new Set();
+  app.state.guides.activeDetour = null;
+
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "activate-first");
+
+  app.state.guides.currentStep = offer;
+  app.state.guides.completedStepIds = new Set();
+  assert.equal(app.commands.startGuideDetour("palette-tools"), true);
+  assert.equal(app.state.guides.currentStep.id, "manual-palette-add");
+  assert.equal(app.commands.exitGuideDetour(), true);
+  assert.equal(app.state.guides.currentStep.id, "palette-deck");
+  assert.equal(app.state.guides.reviewingCompletedStep, true);
+  assert.equal(app.commands.getOfferedGuideDetour()?.id, "palette-tools");
+
+  app.state.guides.activeDetour = { id: detour.id };
+  app.state.guides.currentStep = detour.steps.at(-1);
+  app.state.guides.reviewingCompletedStep = false;
+  app.state.guides.completedStepIds.add(detour.steps.at(-1).id);
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "palette-deck");
+  assert.equal(app.state.guides.reviewingCompletedStep, true);
+  assert.equal(app.state.guides.activeDetour, null);
+  assert.equal(app.state.guides.completedDetourIds.has("palette-tools"), true);
+  assert.equal(app.commands.getOfferedGuideDetour(), null);
+  assert.equal(app.commands.getGuideDetourAtCurrentStep()?.id, "palette-tools");
+  assert.equal(app.commands.nextGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "activate-first");
+  assert.equal(app.commands.previousGuideStep(), true);
+  assert.equal(app.state.guides.currentStep.id, "palette-deck");
+  assert.equal(app.state.guides.reviewingCompletedStep, true);
+  assert.equal(app.commands.getOfferedGuideDetour(), null);
+  assert.equal(app.commands.getGuideDetourAtCurrentStep()?.id, "palette-tools");
 });
 
 test("Not Now records the response and its Help pointer dismisses on the next click", async () => {
@@ -1405,11 +1997,12 @@ test("Not Now records the response and its Help pointer dismisses on the next cl
   assert.equal(app.state.guides.currentGuide.id, "guided-setup-help-pointer");
 
   documentTarget.dispatch("click", { target: helpButton });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(app.state.guides.runtimeState, "idle");
   assert.equal(app.state.guides.currentGuide, null);
 });
 
-test("forced Guided Setup bypasses and does not mutate saved first-launch state", async () => {
+test("forced First-Time Setup bypasses and does not mutate saved first-launch state", async () => {
   let putCalls = 0;
   const remote = {
     schema_version: 2,
@@ -1609,10 +2202,12 @@ test("target-unavailable recovery retains the step's prior runtime state", async
 
   await app.commands.startGuide("interface-preview");
   app.commands.handleGuideTargetUnavailable("workflow.tabs");
-  assert.equal(app.state.guides.runtimeState, "target_unavailable");
+  assert.equal(app.state.guides.runtimeState, "presenting");
+  assert.equal(app.state.guides.targetUnavailable, true);
 
   app.commands.handleGuideTargetAvailable();
-  assert.equal(app.state.guides.runtimeState, "running");
+  assert.equal(app.state.guides.runtimeState, "presenting");
+  assert.equal(app.state.guides.targetUnavailable, false);
   assert.deepEqual(rendered, ["workflow-tabs", "workflow-tabs"]);
 });
 
@@ -1628,15 +2223,18 @@ test("guide targets are resolved again after DOM replacement", async () => {
   assert.equal(app.commands.resolveGuideTarget("settings.white-point-rescale"), second);
 });
 
-test("a grouped guide target resolves separate spotlight regions after rerenders", async () => {
+test("the framing lesson keeps the Adjustments spotlight while its frames rerender", async () => {
   const { app } = await createFeatureHarness();
+  const adjustments = fakeElement();
   const firstCanvas = fakeElement();
   const secondCanvas = fakeElement();
   const scale = fakeElement();
   const rotation = fakeElement();
   let canvas = firstCanvas;
   app.state.ui.$ = selector => (
-    selector === "#frameCanvasWrap" ? canvas : null
+    selector === "#frameCanvasWrap" ? canvas
+      : selector === ".framing-editor" ? adjustments
+        : null
   );
   app.state.ui.$$ = selector => (
     selector === '[data-guide-target-part="image.transform-controls"]'
@@ -1645,13 +2243,21 @@ test("a grouped guide target resolves separate spotlight regions after rerenders
   );
 
   assert.deepEqual(
-    app.commands.resolveGuideTargetRegions("image.framing"),
-    [[firstCanvas], [scale, rotation]],
+    app.commands.resolveGuideTargetLayout("image.framing"),
+    {
+      spotlightRegions: [[adjustments]],
+      frameRegions: [[firstCanvas], [scale, rotation]],
+      placementRegions: [[adjustments]],
+    },
   );
   canvas = secondCanvas;
   assert.deepEqual(
-    app.commands.resolveGuideTargetRegions("image.framing"),
-    [[secondCanvas], [scale, rotation]],
+    app.commands.resolveGuideTargetLayout("image.framing"),
+    {
+      spotlightRegions: [[adjustments]],
+      frameRegions: [[secondCanvas], [scale, rotation]],
+      placementRegions: [[adjustments]],
+    },
   );
 });
 
@@ -1675,29 +2281,175 @@ test("the workflow overview frames Solve and Settings as one utility region", as
   );
 });
 
-test("adjacent Image controls share semantic frames while library actions stay distinct", async () => {
+test("Image guide spotlights group adjacent controls and separate openings from accent frames", async () => {
   const { app } = await createFeatureHarness();
   const canvas = fakeElement();
-  const direction = fakeElement();
-  const ratios = fakeElement();
-  const library = fakeElement();
-  const libraryActions = fakeElement();
+  const imageGrid = fakeElement();
+  const libraryPanel = fakeElement();
+  const addImage = fakeElement();
+  const openFolder = fakeElement();
+  const refresh = fakeElement();
+  const resize = fakeElement();
+  const preview = fakeElement();
+  const adjustments = fakeElement();
+  const aspectControls = fakeElement();
+  const transformScale = fakeElement();
+  const transformRotate = fakeElement();
+  const cropFit = fakeElement();
+  const cropWidth = fakeElement();
+  const cropHeight = fakeElement();
+  const widthControl = fakeElement();
+  const heightControl = fakeElement();
+  const borderLabel = fakeElement();
+  const borderControl = fakeElement();
+  const imageTab = fakeElement();
+  const imageControls = fakeElement();
+  const imageInfo = fakeElement();
+  const reset = fakeElement();
+  const borderToggle = fakeElement();
+  const tutorialCard = fakeElement();
+  tutorialCard.dataset.filename = "Prisma Tutorial - Bubba Blanket.jpg";
+  imageGrid.querySelectorAll = selector => selector === ".image-card" ? [tutorialCard] : [];
+  app.state.guides.runtimeContext = {
+    tutorialImageFilename: "Prisma Tutorial - Bubba Blanket.jpg",
+  };
   app.state.ui.$ = selector => ({
-    "#imageLibraryPanel": library,
-    ".library-title-actions": libraryActions,
+    "#imageGrid": imageGrid,
+    "#imageLibraryPanel": libraryPanel,
+    "#imagePreviewPane": preview,
+    ".framing-editor": adjustments,
+    "#frameControlsSize .ctrl-section-grid2": aspectControls,
+    "#frameCanvasWrap": canvas,
+    '[data-guide-target="image.adjustment-image-tab"]': imageTab,
+    "#frameControlsImage": imageControls,
+    "#imageInfoGrid": imageInfo,
+    "#borderToggle": borderToggle,
   })[selector] || null;
   app.state.ui.$$ = selector => ({
-    "#frameCanvasWrap, #directionToggle, #arButtonGroup": [canvas, direction, ratios],
+    ".upload-btn, #imageLibraryOpenFolderBtn": [addImage, openFolder],
+    "#imageLibraryRefreshBtn, #libraryResizeBtn": [refresh, resize],
+    '[data-guide-target-part="image.transform-controls"]': [transformScale, transformRotate],
+    "#fitImageBtn, #fillWidthBtn, #fillHeightBtn": [cropFit, cropWidth, cropHeight],
+    '[data-guide-target-part="image.canvas-dimensions"]': [widthControl, heightControl],
+    '[data-guide-target-part="image.border-controls"]': [borderLabel, borderControl],
+    '[data-guide-target-part="image.canvas-reset"]': [reset],
   })[selector] || [];
 
   assert.deepEqual(
-    app.commands.resolveGuideTargetRegions("image.aspect-experiment"),
-    [[canvas, direction, ratios]],
+    app.commands.resolveGuideTargetLayout("image.aspect-experiment"),
+    {
+      spotlightRegions: [[adjustments]],
+      frameRegions: [[aspectControls]],
+      placementRegions: [[adjustments]],
+    },
+  );
+  for (const [targetId, frameRegions] of [
+    ["image.framing", [[canvas], [transformScale, transformRotate]]],
+    ["image.crop-fit", [[cropFit, cropWidth, cropHeight]]],
+    ["image.physical-dimensions", [[widthControl, heightControl]]],
+    ["image.border", [[borderLabel, borderControl]]],
+    ["image.adjustment-image-tab", [[imageTab]]],
+    ["image.appearance", [[imageControls]]],
+  ]) {
+    assert.deepEqual(
+      app.commands.resolveGuideTargetLayout(targetId),
+      {
+        spotlightRegions: [[adjustments]],
+        frameRegions,
+        placementRegions: [[adjustments]],
+      },
+      targetId,
+    );
+  }
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("image.summary"),
+    {
+      spotlightRegions: [[adjustments], [imageInfo]],
+      frameRegions: [[imageInfo]],
+      placementRegions: [[adjustments]],
+    },
   );
   assert.deepEqual(
-    app.commands.resolveGuideTargetRegions("image.library-management"),
-    [[library], [libraryActions]],
+    app.commands.resolveGuideTargetLayout("image.reset-framing"),
+    {
+      spotlightRegions: [[reset], [borderToggle]],
+      frameRegions: [[reset], [borderToggle]],
+      placementRegions: [[adjustments]],
+    },
   );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("image.tutorial-canvas"),
+    {
+      spotlightRegions: [[widthControl, heightControl]],
+      frameRegions: [[widthControl, heightControl]],
+      placementRegions: [[adjustments]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetRegions("image.library-import"),
+    [[imageGrid], [addImage, openFolder]],
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetRegions("image.library-maintenance"),
+    [[imageGrid], [refresh, resize]],
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("image.preview-adjustments"),
+    {
+      spotlightRegions: [[preview], [adjustments]],
+      frameRegions: [[preview], [adjustments]],
+      placementRegions: [[adjustments]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("basics.tutorial-image"),
+    {
+      spotlightRegions: [[libraryPanel]],
+      frameRegions: [[tutorialCard]],
+      placementRegions: [[libraryPanel]],
+    },
+  );
+  assert.equal(app.commands.resolveGuideTarget("basics.tutorial-image"), tutorialCard);
+});
+
+test("Palette Auto-Suggest controls use a broad opening and a settings-only frame", async () => {
+  const { app } = await createFeatureHarness();
+  const controlsPane = fakeElement();
+  const paletteColors = fakeElement();
+  const suggestions = fakeElement();
+  const solveMode = fakeElement();
+  app.state.ui.$ = selector => (
+    selector === ".creation-controls-pane" ? controlsPane : null
+  );
+  app.state.ui.$$ = selector => (
+    selector === ".creation-controls-pane .suggest-field"
+      ? [paletteColors, suggestions, solveMode]
+      : []
+  );
+
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("palette.autosuggest-controls"),
+    {
+      spotlightRegions: [[controlsPane]],
+      frameRegions: [[paletteColors, suggestions, solveMode]],
+      placementRegions: [[controlsPane]],
+    },
+  );
+});
+
+test("the Image chapter reveal establishes its workflow page without a target", async () => {
+  const { app } = await createFeatureHarness();
+  const switched = [];
+  app.state.ui.currentTab = "creation";
+  app.commands.switchTab = tab => {
+    switched.push(tab);
+    app.state.ui.currentTab = tab;
+  };
+
+  app.commands.revealGuideTarget("workflow.image-page");
+
+  assert.deepEqual(switched, ["image"]);
+  assert.equal(app.state.ui.currentTab, "image");
 });
 
 test("guide target scrolling preserves a visible target's horizontal position", async () => {
@@ -1834,6 +2586,150 @@ test("standalone guide cards are centered within the visual viewport", async () 
   });
 });
 
+test("Palette Deck spotlights its header and cards without an accent frame", async () => {
+  const { app } = await createFeatureHarness();
+  const deck = fakeElement();
+  app.state.ui.$ = selector => selector === "#railDeck" ? deck : null;
+
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("palette.deck"),
+    {
+      spotlightRegions: [[deck]],
+      frameRegions: [],
+      placementRegions: [[deck]],
+    },
+  );
+});
+
+test("Settings steps spotlight their sections and frame the controls being discussed", async () => {
+  const { app } = await createFeatureHarness();
+  const drawer = fakeElement();
+  const essentials = fakeElement();
+  const profiles = fakeElement();
+  const resolutionRows = [fakeElement(), fakeElement()];
+  const constructionRows = [fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+  app.state.ui.$ = selector => ({
+    "#settingsDrawer": drawer,
+    '[data-settings-group="geometry"]': essentials,
+    '[data-guide-target="settings.profiles"]': profiles,
+  })[selector] || null;
+  app.state.ui.$$ = selector => ({
+    '[data-guide-target-part="settings.essentials-resolution"]': resolutionRows,
+    '[data-guide-target-part="settings.essentials-construction"]': constructionRows,
+  })[selector] || [];
+
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("settings.drawer-overview"),
+    {
+      spotlightRegions: [[drawer]],
+      frameRegions: [],
+      placementRegions: [[drawer]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("settings.essentials-resolution"),
+    {
+      spotlightRegions: [[essentials]],
+      frameRegions: [resolutionRows],
+      placementRegions: [[essentials]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("settings.essentials-construction"),
+    {
+      spotlightRegions: [[essentials]],
+      frameRegions: [constructionRows],
+      placementRegions: [[essentials]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("settings.profiles"),
+    {
+      spotlightRegions: [[profiles]],
+      frameRegions: [[profiles]],
+      placementRegions: [[profiles]],
+    },
+  );
+});
+
+test("the Settings opening step turns Advanced off before the drawer opens", async () => {
+  const { app } = await createFeatureHarness();
+  let visibilityUpdates = 0;
+  let drawerCloses = 0;
+  app.state.settings.settingsDrawerOpen = true;
+  app.state.settings.settingsAdvancedVisible = true;
+  app.commands.closeSettingsDrawer = () => {
+    drawerCloses += 1;
+    app.state.settings.settingsDrawerOpen = false;
+  };
+  app.commands.updateAdvancedSettingsVisibility = () => { visibilityUpdates += 1; };
+
+  app.commands.revealGuideTarget("topbar.settings");
+
+  assert.equal(drawerCloses, 1);
+  assert.equal(app.state.settings.settingsAdvancedVisible, false);
+  assert.equal(visibilityUpdates, 1);
+});
+
+test("First-Time Setup separates printer spotlights from their requested accent frames", async () => {
+  const { app } = await createFeatureHarness();
+  const printerRail = fakeElement();
+  const configureButton = fakeElement();
+  const configurationWindow = fakeElement();
+  const configurationFields = fakeElement();
+  app.state.ui.$ = selector => ({
+    '[data-guide-target="sidebar.printer"]': printerRail,
+    "#printerConfigBtn": configureButton,
+    '[data-guide-target="printer.configuration"]': configurationWindow,
+    '[data-guide-target="printer.configuration-fields"]': configurationFields,
+  })[selector] || null;
+
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("sidebar.printer"),
+    {
+      spotlightRegions: [[printerRail]],
+      frameRegions: [[configureButton]],
+      placementRegions: [[printerRail]],
+    },
+  );
+  assert.deepEqual(
+    app.commands.resolveGuideTargetLayout("printer.configuration"),
+    {
+      spotlightRegions: [[configurationWindow]],
+      frameRegions: [[configurationFields]],
+      placementRegions: [[configurationWindow]],
+    },
+  );
+});
+
+test("guide viewport anchors remain stable for multi-surface actions", async () => {
+  const { anchorGuideCardInViewport } = await import(
+    moduleUrl("features/guides/overlay.js")
+  );
+  const viewportRect = {
+    left: 0, top: 0, right: 1900, bottom: 900, width: 1900, height: 900,
+  };
+  const cardSize = { width: 440, height: 360 };
+
+  assert.deepEqual(
+    anchorGuideCardInViewport({ anchor: "center-right", cardSize, viewportRect }),
+    { left: 1053, top: 270, placement: "viewport-center-right", docked: false },
+  );
+  assert.deepEqual(
+    anchorGuideCardInViewport({ anchor: "center-left", cardSize, viewportRect }),
+    { left: 255, top: 270, placement: "viewport-center-left", docked: false },
+  );
+  assert.equal(
+    anchorGuideCardInViewport({
+      anchor: "center-right",
+      cardSize,
+      viewportRect: { left: 0, top: 0, right: 1280, bottom: 720, width: 1280, height: 720 },
+      avoidRects: [{ left: 445, top: 220, right: 835, bottom: 500 }],
+    }),
+    null,
+  );
+});
+
 test("dialogs, top-bar menus, and operation progress temporarily block the guide overlay", async () => {
   const { guideBlockingDialogOpen } = await import(
     moduleUrl("features/guides/overlay.js")
@@ -1878,11 +2774,19 @@ test("guide markup keeps targets inert and overlay pointer handling isolated", (
   const components = fs.readFileSync(path.join(appDir, "styles", "components.css"), "utf8");
   const tokens = fs.readFileSync(path.join(appDir, "styles", "tokens.css"), "utf8");
   const definitions = fs.readFileSync(
-    path.join(appDir, "features", "guides", "definitions.js"),
+    path.join(appDir, "features", "guides", "registry.js"),
     "utf8",
   );
   const targets = fs.readFileSync(
     path.join(appDir, "features", "guides", "targets.js"),
+    "utf8",
+  );
+  const overlay = fs.readFileSync(
+    path.join(appDir, "features", "guides", "overlay.js"),
+    "utf8",
+  );
+  const eventBindings = fs.readFileSync(
+    path.join(appDir, "features", "event-bindings.js"),
     "utf8",
   );
 
@@ -1938,19 +2842,55 @@ test("guide markup keeps targets inert and overlay pointer handling isolated", (
   );
   assert.doesNotMatch(targets, /classList\.(?:add|remove|toggle)/);
   assert.doesNotMatch(targets, /\.style\./);
+  assert.match(overlay, /const placementTarget = unionRects\(placementTargets\);/);
+  assert.match(overlay, /const finalDetourStep = inDetour && isLast;[\s\S]*?end\.disabled = finalDetourStep;/);
+  assert.match(css, /#guideStepEnd:disabled\s*{[^}]*opacity:\s*0\.45;/);
+  const resetHandler = eventBindings.match(
+    /const resetBtn = app\.state\.ui\.\$\("#frameResetBtn"\);([\s\S]*?)\/\/ Generic binder for image adjustment sliders/,
+  )?.[1] || "";
+  assert.match(resetHandler, /syncConfigToServer\(\);\s*app\.events\.emit\("image\.controls-reset"/);
+  assert.equal(
+    (eventBindings.match(/app\.events\.emit\("image\.controls-reset"/g) || []).length,
+    1,
+  );
   assert.match(
     targets,
     /"workflow\.overview": groupedTarget\(\[[\s\S]*?selector:\s*'#solveActionSplit, \[data-guide-target="topbar\.settings"\]'[\s\S]*?all:\s*true/,
   );
   assert.match(html, /id="helpGuidesMenuBtn"[\s\S]*?aria-haspopup="menu"[\s\S]*?aria-expanded="false"[\s\S]*?aria-controls="helpGuidesMenu"/);
   assert.match(html, /id="guideStepBody"[^>]*aria-live="polite"/);
+  assert.match(html, /id="guideStepNote"[^>]*aria-labelledby="guideStepNoteLabel"[^>]*hidden/);
+  assert.match(html, /class="pane-title">Image Library<\/span>/);
+  assert.match(html, /id="guideStepVisual"[^>]*role="img"[^>]*hidden/);
+  assert.match(html, /class="stack-diagram"[^>]*data-guide-visual="lithophane-stack"/);
+  assert.match(html, /<rect x="80" y="186" width="140" height="8" fill="#e8e8e8"/);
+  assert.equal(
+    (html.match(/<rect x="80" y="(?:146|154|162|170|178)" width="140" height="8" fill="#[0-9a-f]+"\/>/gi) || []).length,
+    5,
+  );
+  assert.equal(
+    (html.match(/<line x1="80" y1="(?:138|146|154|162|170|178|186)" x2="220" y2="(?:138|146|154|162|170|178|186)"\/>/g) || []).length,
+    7,
+  );
+  assert.match(html, />base thickness<\/text>/);
+  assert.match(html, />min cap layers<\/text>/);
+  assert.match(html, />max total<\/tspan>[\s\S]*?>thickness<\/tspan>/);
+  assert.match(overlay, /function syncStepVisual\(\)[\s\S]*?cloneNode\(true\)[\s\S]*?syncStepVisual\(\);/);
+  assert.match(overlay, /function syncStepNote\(\)[\s\S]*?formatGuideText\(note\.text\)[\s\S]*?syncStepNote\(\);/);
+  assert.match(css, /\.guide-step-body\s*{[^}]*overflow-wrap:\s*anywhere;/);
   assert.match(css, /\.guide-step-body\s*{[^}]*white-space:\s*pre-line;/);
+  assert.match(css, /\.guide-step-note__value\s*{[^}]*font-size:\s*10px;[^}]*overflow-wrap:\s*anywhere;/);
   assert.doesNotMatch(html, /id="guideStepCounter"/);
   assert.match(
     html,
     /class="guide-step-actions surface-footer"[\s\S]*?id="guideProgress"[\s\S]*?id="guideProgressTrack"[\s\S]*?role="progressbar"/,
   );
   assert.match(html, /id="guideStepDetour"[\s\S]*?id="guideStepDetourButton"/);
+  assert.match(
+    overlay,
+    /button\.textContent = completed \? "Complete"[\s\S]*?button\.disabled = completed;/,
+  );
+  assert.match(css, /#guideStepDetourButton:disabled\s*{[^}]*opacity:\s*0\.55;/);
   assert.match(css, /\.guide-progress\s*{[\s\S]*?border-top:/);
   assert.match(css, /\.guide-progress__segment::after\s*{[\s\S]*?width:\s*var\(--guide-progress-width, 0%\);/);
   assert.match(css, /\.guide-step-detour\s*{/);

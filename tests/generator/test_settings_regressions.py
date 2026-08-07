@@ -48,6 +48,7 @@ def test_neutral_field_protection_modes_are_canonical_and_profile_owned():
         "narrow": 0.010,
         "standard": 0.020,
         "broad": 0.035,
+        "custom": 0.020,
     }
     payload = server.ConfigPayload(neutral_field_protection_mode=" STANDARD ")
     assert payload.neutral_field_protection_mode == "standard"
@@ -101,6 +102,20 @@ def test_legacy_settings_profile_defaults_neutral_field_protection_off():
             name="Invalid",
             settings={"neutral_field_protection_mode": "maximum"},
         )
+
+
+def test_neutral_field_custom_cutoff_is_bounded_at_mandatory_settings_boundary():
+    import server
+
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": 1.4}
+    )["neutral_field_protection_cutoff"] == 1.0
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": "not-a-number"}
+    )["neutral_field_protection_cutoff"] == 0.020
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": 0.0}
+    )["neutral_field_protection_cutoff"] == 0.0
 
 
 def test_saved_run_config_validates_neutral_field_protection_compatibility():
@@ -227,14 +242,10 @@ def test_basic_white_point_and_subsection_flow_contracts_are_present():
     assert white_point_row is not None
     assert "advanced-setting" not in white_point_row.group("attrs")
     assert "extractSettingsSubsectionFlowUnits" in layout_source
-    assert 'settingsFlowWrapper = "true"' in layout_source
-    assert "wrapper.appendChild(group)" in layout_source
-    assert layout_source.index("insertionPoint.after(wrapper)") < layout_source.index(
-        "wrapper.appendChild(group)"
-    )
-    assert "if (parentGroup) unit.before(parentGroup)" in layout_source
+    assert "return grid;" in layout_source
+    assert "initCollapsibleSections()" in layout_source
     assert ".settings-subsection-flow-unit" in layout_css
-    assert 'content: attr(data-settings-parent-title) " · "' in layout_css
+    assert 'data-settings-parent-title' not in layout_css
 
 
 def test_missing_product_min_cap_defaults_to_two_layers_but_one_remains_allowed():
@@ -500,6 +511,10 @@ def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
             "stage2_boundary_mutation_enabled": True,
             "stage2_boundary_mutation_max_passes": 12,
             "stage4_printability_gate_detail": False,
+            "use_corrections": False,
+            "stage2_boundary_mutation_current_de_percentile": 90,
+            "stage2_boundary_mutation_min_component_mm": 8,
+            "neutral_field_protection_cutoff": 0.031,
         }
     )
 
@@ -513,6 +528,10 @@ def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
     assert solve_config.stage2_printability_repair_fine_override is True
     assert solve_config.stage2_boundary_mutation_max_passes == 12
     assert solve_config.stage4_printability_gate_detail is True
+    assert solve_config.use_corrections is True
+    assert solve_config.stage2_boundary_mutation_current_de_percentile is None
+    assert solve_config.stage2_boundary_mutation_min_component_mm is None
+    assert solve_config.neutral_field_protection_cutoff == 0.031
 
 
 def test_session_config_rejects_translucent_underfill_enablement():
@@ -1214,8 +1233,8 @@ def test_bundled_profile_revision_two_updates_refinement_smoothing_to_1mm(
         if profile.id == "refinement-balanced"
     )
 
-    assert server._BUNDLED_SETTINGS_PROFILE_REVISION == 2
-    assert store["state"]["bundled_profile_revision"] == 2
+    assert server._BUNDLED_SETTINGS_PROFILE_REVISION == 3
+    assert store["state"]["bundled_profile_revision"] == 3
     assert (
         balanced.settings["smooth_kernel"]
         * balanced.settings["solver_fine_pitch_mm"]
@@ -1669,8 +1688,12 @@ def test_tutorial_printer_matches_x1c_except_for_identity():
     x1c.pop("name")
     tutorial.pop("id")
     tutorial.pop("name")
+    for capability in ("virtual", "guide_only", "editable", "deletable", "renameable"):
+        tutorial.pop(capability)
 
     assert tutorial == x1c
+    assert server._TUTORIAL_PRINTER_PROFILE["guide_only"] is True
+    assert server._TUTORIAL_PRINTER_PROFILE["editable"] is False
     assert server._TUTORIAL_PRINTER_PROFILE["id"] == "tutorial-printer"
     assert server._TUTORIAL_PRINTER_PROFILE["name"] == "Tutorial Printer"
     assert server._DEFAULT_PRINTERS["active_printer_id"] == "bambu-x1c"

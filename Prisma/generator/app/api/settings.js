@@ -1,4 +1,4 @@
-import { apiFetch } from "./client.js";
+import { apiFetch } from "./client.js?v=2026-08-04-saving-loading-fixes-v1";
 
 export function fetchSettingsProfiles() { return apiFetch("/settings-profiles"); }
 export function createSettingsProfile(payload) {

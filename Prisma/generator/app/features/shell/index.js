@@ -616,7 +616,13 @@ export function installFeaturesShellIndex(app) {
 
   function appConfirm(
     message,
-    { ok = "OK", cancel = "Cancel", title = "Confirm", restoreFocus = null } = {},
+    {
+      ok = "OK",
+      cancel = "Cancel",
+      title = "Confirm",
+      restoreFocus = null,
+      emphasis = [],
+    } = {},
   ) {
     return new Promise(resolve => {
       const overlay = app.state.ui.$("#appDialog");
@@ -634,7 +640,40 @@ export function installFeaturesShellIndex(app) {
       const previousFocus = dialogDocument.activeElement;
       const focusRestoreTarget = restoreFocus || previousFocus;
       if (titleEl) titleEl.textContent = title;
-      msg.textContent = message;
+      const emphasisValues = [...new Set(
+        (Array.isArray(emphasis) ? emphasis : [])
+          .map(value => String(value))
+          .filter(Boolean),
+      )];
+      if (emphasisValues.length) {
+        const source = String(message);
+        let cursor = 0;
+        let messageHtml = "";
+        while (cursor < source.length) {
+          let nextIndex = -1;
+          let nextValue = "";
+          for (const value of emphasisValues) {
+            const index = source.indexOf(value, cursor);
+            if (
+              index >= 0
+              && (nextIndex < 0 || index < nextIndex || (index === nextIndex && value.length > nextValue.length))
+            ) {
+              nextIndex = index;
+              nextValue = value;
+            }
+          }
+          if (nextIndex < 0) {
+            messageHtml += app.commands.esc2(source.slice(cursor));
+            break;
+          }
+          messageHtml += app.commands.esc2(source.slice(cursor, nextIndex));
+          messageHtml += `<strong class="app-dialog-emphasis">${app.commands.esc2(nextValue)}</strong>`;
+          cursor = nextIndex + nextValue.length;
+        }
+        msg.innerHTML = messageHtml;
+      } else {
+        msg.textContent = message;
+      }
       input.style.display = "none";
       if (hint) {
         hint.classList.add("is-hidden");
@@ -1060,39 +1099,47 @@ export function installFeaturesShellIndex(app) {
 
     // Pixelation pass — always on in sidebar (shows actual print resolution)
     {
-      const pxSizeMm = app.state.settings.config.image_sample_pitch_mm || 0.20;
-      const gridW = Math.max(1, Math.round(app.state.image.frameState.widthMm / pxSizeMm));
-      const gridH = Math.max(1, Math.round(app.state.image.frameState.heightMm / pxSizeMm));
+      let solveGrid = null;
+      try {
+        solveGrid = app.commands.getCurrentResolvedSolveGrid();
+      } catch {
+        // Invalid pitches are reported by the Image-page warning and rejected
+        // by config sync. Keep the unpixelated preview usable in the meantime.
+      }
+      if (solveGrid) {
+        const gridW = solveGrid.cells.width;
+        const gridH = solveGrid.cells.height;
 
-      // Draw image only at solve-grid resolution, using the same crop-cover model.
-      const tmp = document.createElement("canvas");
-      tmp.width = gridW;
-      tmp.height = gridH;
-      const tmpCtx = tmp.getContext("2d");
-      const gGeom = app.commands.cropCoverImageGeometry(gridW, gridH, imgNatW, imgNatH, app.state.image.frameState.scale, app.state.image.frameState.rotation);
-      const gDispW = gGeom.displayW;
-      const gDispH = gGeom.displayH;
-      const gSlackX = Math.max(0, gGeom.visualW - gridW);
-      const gSlackY = Math.max(0, gGeom.visualH - gridH);
-      const gOffX = app.state.image.frameState.panX * gSlackX / 2;
-      const gOffY = app.state.image.frameState.panY * gSlackY / 2;
-      tmpCtx.save();
-      tmpCtx.translate(gridW / 2 - gOffX, gridH / 2 - gOffY);
-      tmpCtx.rotate(app.state.image.frameState.rotation * Math.PI / 180);
-      tmpCtx.scale(app.state.image.frameState.flipH ? -1 : 1, app.state.image.frameState.flipV ? -1 : 1);
-      tmpCtx.drawImage(srcImg, -gDispW / 2, -gDispH / 2, gDispW, gDispH);
-      tmpCtx.restore();
+        // Draw image only at solve-grid resolution, using the same crop-cover model.
+        const tmp = document.createElement("canvas");
+        tmp.width = gridW;
+        tmp.height = gridH;
+        const tmpCtx = tmp.getContext("2d");
+        const gGeom = app.commands.cropCoverImageGeometry(gridW, gridH, imgNatW, imgNatH, app.state.image.frameState.scale, app.state.image.frameState.rotation);
+        const gDispW = gGeom.displayW;
+        const gDispH = gGeom.displayH;
+        const gSlackX = Math.max(0, gGeom.visualW - gridW);
+        const gSlackY = Math.max(0, gGeom.visualH - gridH);
+        const gOffX = app.state.image.frameState.panX * gSlackX / 2;
+        const gOffY = app.state.image.frameState.panY * gSlackY / 2;
+        tmpCtx.save();
+        tmpCtx.translate(gridW / 2 - gOffX, gridH / 2 - gOffY);
+        tmpCtx.rotate(app.state.image.frameState.rotation * Math.PI / 180);
+        tmpCtx.scale(app.state.image.frameState.flipH ? -1 : 1, app.state.image.frameState.flipV ? -1 : 1);
+        tmpCtx.drawImage(srcImg, -gDispW / 2, -gDispH / 2, gDispW, gDispH);
+        tmpCtx.restore();
 
-      // Black background then pixelated image on top
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(bPx, bPx, frameW, frameH);
-      ctx.clip();
-      ctx.fillStyle = "#000";
-      ctx.fillRect(bPx, bPx, frameW, frameH);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(tmp, 0, 0, gridW, gridH, bPx, bPx, frameW, frameH);
-      ctx.restore();
+        // Black background then pixelated image on top
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(bPx, bPx, frameW, frameH);
+        ctx.clip();
+        ctx.fillStyle = "#000";
+        ctx.fillRect(bPx, bPx, frameW, frameH);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tmp, 0, 0, gridW, gridH, bPx, bPx, frameW, frameH);
+        ctx.restore();
+      }
     }
 
     // Thin outline around the whole thing

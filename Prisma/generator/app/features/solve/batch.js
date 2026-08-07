@@ -78,7 +78,7 @@ export function installFeaturesSolveBatch(app) {
       : focus === "last"
         ? items.at(-1)
         : items.find(item => item.getAttribute("aria-checked") === "true") || items[0];
-    target.focus();
+    target.focus({ preventScroll: true });
   }
 
   function toggleSolveModeMenu() {
@@ -219,7 +219,7 @@ export function installFeaturesSolveBatch(app) {
       closeSolveModeMenu();
     });
     app.lifecycle.listen(viewport, "resize", () => closeSolveModeMenu());
-    app.lifecycle.listen(viewport, "scroll", () => closeSolveModeMenu(), true);
+    app.lifecycle.listen(viewport, "scroll", () => closeSolveModeMenu());
   }
 
   function ensureBatchPreviewRuns(status) {
@@ -420,7 +420,7 @@ export function installFeaturesSolveBatch(app) {
     })();
   }
 
-  async function handleStartPaletteBatch() {
+  async function handleStartPaletteBatch({ throwOnError = false, confirmCost = true } = {}) {
     if (
       app.state.solve.paletteBatchStartPending
       || ["running", "cancelling"].includes(app.state.solve.solveStatus.status)
@@ -500,15 +500,20 @@ export function installFeaturesSolveBatch(app) {
         }
       }
 
+      const preparedDimensions = await app.commands.syncSolveDimensionsWithGridRemediation({
+        intent: "batch",
+      });
+      if (!preparedDimensions.proceed) return;
+
       const names = cards.map((card, index) => `${index + 1}. ${card.name}`).join("\n");
-      const confirmed = await app.commands.appConfirm(
-        `Prisma will run ${cards.length} full production solves sequentially using the same frozen image and settings.\n\n${names}\n\nThis may take roughly ${cards.length} times a normal solve and use substantial temporary storage. Unsaved results are removed when Prisma restarts.`,
-        {
-          ok: `Solve ${cards.length} Palettes`,
-          cancel: "Cancel",
-          title: "Solve Palette Batch",
-        },
-      );
+      const confirmed = !confirmCost || await app.commands.appConfirm(
+          `Prisma will run ${cards.length} full production solves sequentially using the same frozen image and settings.\n\n${names}\n\nThis may take roughly ${cards.length} times a normal solve and use substantial temporary storage. Unsaved results are removed when Prisma restarts.`,
+          {
+            ok: `Solve ${cards.length} Palettes`,
+            cancel: "Cancel",
+            title: "Solve Palette Batch",
+          },
+        );
       if (!confirmed) return;
 
       setBatchDeckLocked(true, cards.map(card => card.id));
@@ -543,6 +548,7 @@ export function installFeaturesSolveBatch(app) {
       app.commands.switchTab("solve");
       app.commands.renderSolveProgress();
       app.commands.startPaletteBatchPolling(status);
+      return status;
     } catch (error) {
       if (acceptedStatus?.job_id) {
         app.state.solve.activeSolveJobId = acceptedStatus.job_id;
@@ -553,10 +559,11 @@ export function installFeaturesSolveBatch(app) {
           "warn",
         );
         app.commands.startPaletteBatchPolling(acceptedStatus);
-        return;
+        return acceptedStatus;
       }
       setBatchDeckLocked(false);
       app.commands.showToast(`Palette batch failed to start: ${error.message}`, "error");
+      if (throwOnError) throw error;
     } finally {
       app.state.solve.paletteBatchStartPending = false;
       app.commands.syncSolveModeUi();

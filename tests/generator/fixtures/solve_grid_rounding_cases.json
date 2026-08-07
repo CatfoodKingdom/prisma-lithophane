@@ -1,0 +1,56 @@
+[
+  {
+    "name": "aligned",
+    "width_mm": 100.0,
+    "height_mm": 80.0,
+    "pitch_mm": 0.4,
+    "cells": { "width": 250, "height": 200 },
+    "resolved": { "width_mm": 100.0, "height_mm": 80.0 },
+    "aligned": true
+  },
+  {
+    "name": "half_up_tie",
+    "width_mm": 100.2,
+    "height_mm": 100.2,
+    "pitch_mm": 0.4,
+    "cells": { "width": 251, "height": 251 },
+    "resolved": { "width_mm": 100.4, "height_mm": 100.4 },
+    "aligned": false
+  },
+  {
+    "name": "below_half_tie",
+    "width_mm": 100.1999,
+    "height_mm": 100.1999,
+    "pitch_mm": 0.4,
+    "cells": { "width": 250, "height": 250 },
+    "resolved": { "width_mm": 100.0, "height_mm": 100.0 },
+    "aligned": false
+  },
+  {
+    "name": "above_half_tie",
+    "width_mm": 100.2001,
+    "height_mm": 100.2001,
+    "pitch_mm": 0.4,
+    "cells": { "width": 251, "height": 251 },
+    "resolved": { "width_mm": 100.4, "height_mm": 100.4 },
+    "aligned": false
+  },
+  {
+    "name": "lower_boundary_chooses_in_range_cells",
+    "width_mm": 10.0,
+    "height_mm": 10.0,
+    "pitch_mm": 6.0,
+    "cells": { "width": 2, "height": 2 },
+    "resolved": { "width_mm": 12.0, "height_mm": 12.0 },
+    "aligned": false
+  },
+  {
+    "name": "upper_boundary_chooses_in_range_cells",
+    "width_mm": 300.0,
+    "height_mm": 300.0,
+    "pitch_mm": 0.7,
+    "cells": { "width": 428, "height": 428 },
+    "resolved": { "width_mm": 299.6, "height_mm": 299.6 },
+    "aligned": false
+  }
+]

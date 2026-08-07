@@ -183,7 +183,7 @@ def test_printer_defaults_bootstrap_into_missing_distribution_config_dir(tmp_pat
     assert printers_path.read_bytes() == before
 
 
-def test_existing_printer_config_receives_tutorial_profile_once(tmp_path, monkeypatch):
+def test_existing_printer_config_does_not_seed_tutorial_profile(tmp_path, monkeypatch):
     from Prisma.generator import server
 
     printers_path = tmp_path / "existing-user-data" / "config" / "printers.json"
@@ -218,12 +218,7 @@ def test_existing_printer_config_receives_tutorial_profile_once(tmp_path, monkey
 
     assert migrated["active_printer_id"] == "custom-printer"
     assert migrated["printers"][0]["name"] == "My Edited Printer"
-    tutorial = next(
-        printer
-        for printer in migrated["printers"]
-        if printer["id"] == "tutorial-printer"
-    )
-    assert tutorial["name"] == "Tutorial Printer"
+    assert [printer["id"] for printer in migrated["printers"]] == ["custom-printer"]
     assert (
         migrated[server._BUILT_IN_PRINTER_PROFILES_REVISION_KEY]
         == server._BUILT_IN_PRINTER_PROFILES_REVISION
@@ -255,3 +250,34 @@ def test_migrated_printer_config_respects_tutorial_profile_deletion(
 
     assert [printer["id"] for printer in loaded["printers"]] == ["bambu-x1c"]
     assert printers_path.read_bytes() == before
+
+
+def test_legacy_tutorial_printer_is_deleted_and_active_selection_falls_back(
+    tmp_path, monkeypatch
+):
+    from Prisma.generator import server
+
+    printers_path = tmp_path / "config" / "printers.json"
+    printers_path.parent.mkdir(parents=True)
+    legacy = {
+        "printers": [
+            deepcopy(server._TUTORIAL_PRINTER_PROFILE),
+            {
+                **deepcopy(server._TUTORIAL_PRINTER_PROFILE),
+                "name": "My Modified Tutorial Printer",
+            },
+        ],
+        "active_printer_id": "tutorial-printer",
+        "active_nozzle_size": 0.4,
+        server._BUILT_IN_PRINTER_PROFILES_REVISION_KEY: 1,
+    }
+    printers_path.write_text(json.dumps(legacy), encoding="utf-8")
+    monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
+
+    migrated = server._load_printers()
+
+    assert [printer["id"] for printer in migrated["printers"]] == ["bambu-x1c"]
+    assert migrated["active_printer_id"] == "bambu-x1c"
+    assert migrated["active_nozzle_size"] == 0.4
+    persisted = json.loads(printers_path.read_text(encoding="utf-8"))
+    assert all(printer["id"] != "tutorial-printer" for printer in persisted["printers"])

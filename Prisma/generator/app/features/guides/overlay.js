@@ -4,40 +4,44 @@ import {
   intersectRects,
   normalizeRect,
   shadeRectsAroundTargets,
-} from "../../core/guide-geometry.js?v=2026-08-01-guide-placement-continuity-v1";
+} from "../../core/guide-geometry.js?v=2026-08-01-guide-image-review-batch-v1";
 
 const TARGET_WAIT_MS = 1400;
 
 /**
  * Render the guide's deliberately small rich-text vocabulary. Guide copy may
- * mark strong emphasis with paired ** delimiters; every run is still assigned
- * through textContent, so definitions cannot inject arbitrary markup.
+ * mark strong emphasis with paired ** delimiters and regular emphasis with
+ * paired * delimiters. Every run is still assigned through textContent, so
+ * definitions cannot inject arbitrary markup.
  */
 export function renderGuideTextContent(element, text, documentRoot = element?.ownerDocument) {
   if (!element) return;
   const source = String(text ?? "");
-  const pattern = /\*\*([^*\n]+)\*\*/g;
+  const pattern = /\*\*([^*\n]+)\*\*|\*([^*\n]+)\*/g;
   const runs = [];
   let cursor = 0;
   let match = pattern.exec(source);
   while (match) {
-    if (match.index > cursor) runs.push({ text: source.slice(cursor, match.index), strong: false });
-    runs.push({ text: match[1], strong: true });
+    if (match.index > cursor) runs.push({ text: source.slice(cursor, match.index), emphasis: null });
+    runs.push({
+      text: match[1] || match[2],
+      emphasis: match[1] ? "strong" : "regular",
+    });
     cursor = pattern.lastIndex;
     match = pattern.exec(source);
   }
-  if (cursor < source.length) runs.push({ text: source.slice(cursor), strong: false });
-  if (!runs.length) runs.push({ text: source, strong: false });
+  if (cursor < source.length) runs.push({ text: source.slice(cursor), emphasis: null });
+  if (!runs.length) runs.push({ text: source, emphasis: null });
 
   if (!documentRoot?.createElement || !documentRoot?.createTextNode || !element.replaceChildren) {
     element.textContent = runs.map(run => run.text).join("");
     return;
   }
   const nodes = runs.map((run) => {
-    if (!run.strong) return documentRoot.createTextNode(run.text);
-    const strong = documentRoot.createElement("strong");
-    strong.textContent = run.text;
-    return strong;
+    if (!run.emphasis) return documentRoot.createTextNode(run.text);
+    const emphasis = documentRoot.createElement(run.emphasis === "strong" ? "strong" : "em");
+    emphasis.textContent = run.text;
+    return emphasis;
   });
   element.replaceChildren(...nodes);
 }
@@ -93,15 +97,66 @@ export function centerStandaloneGuideCard({
 
 /** Report whether transient application UI should temporarily hide a guide. */
 export function guideBlockingDialogOpen(app) {
-  const dialog = app?.state?.ui?.$(".modal-overlay[aria-hidden=\"false\"]");
-  if (
-    dialog?.classList?.contains("modal-overlay")
+  const participating = new Set(app?.state?.guides?.currentStep?.participating_surfaces || []);
+  const firstDialog = app?.state?.ui?.$(".modal-overlay[aria-hidden=\"false\"]");
+  const dialogs = [...(app?.state?.ui?.$$?.(".modal-overlay[aria-hidden=\"false\"]") || (firstDialog ? [firstDialog] : []))];
+  if (dialogs.some(dialog => dialog?.classList?.contains("modal-overlay")
     && dialog?.getAttribute?.("aria-hidden") === "false"
-  ) return true;
-  const openMenu = app?.state?.ui?.$(".topbar-menu:not([hidden])");
-  if (openMenu && openMenu.hidden !== true) return true;
+    && (!dialog.id || !participating.has(`#${dialog.id}`)))) return true;
+  const firstMenu = app?.state?.ui?.$(".topbar-menu:not([hidden])");
+  const menus = [...(app?.state?.ui?.$$?.(".topbar-menu:not([hidden])") || (firstMenu ? [firstMenu] : []))];
+  if (menus.some(menu => menu.hidden !== true && (!menu.id || !participating.has(`#${menu.id}`)))) return true;
   const progress = app?.state?.ui?.$("#opProgress:not(.is-hidden)");
-  return Boolean(progress && !progress.classList?.contains("is-hidden"));
+  return Boolean(progress && !progress.classList?.contains("is-hidden") && !participating.has("#opProgress"));
+}
+
+/** Place a Guide card at a stable viewport reading position through modal phases. */
+export function anchorGuideCardInViewport({
+  anchor,
+  cardSize,
+  viewportRect: rawViewport,
+  avoidRects = [],
+  gap = 10,
+  margin = 8,
+}) {
+  const viewport = normalizeRect(rawViewport);
+  const width = Math.min(
+    Math.max(1, Number(cardSize?.width) || 1),
+    Math.max(1, viewport.width - (2 * margin)),
+  );
+  const height = Math.min(
+    Math.max(1, Number(cardSize?.height) || 1),
+    Math.max(1, viewport.height - (2 * margin)),
+  );
+  const horizontalFraction = anchor === "center-left"
+    ? 0.25
+    : anchor === "center-right" ? 0.67 : 0.5;
+  const left = Math.max(
+    viewport.left + margin,
+    Math.min(
+      viewport.left + (viewport.width * horizontalFraction) - (width / 2),
+      viewport.right - width - margin,
+    ),
+  );
+  const top = Math.max(
+    viewport.top + margin,
+    Math.min(
+      viewport.top + ((viewport.height - height) / 2),
+      viewport.bottom - height - margin,
+    ),
+  );
+  const cardRect = normalizeRect({ left, top, right: left + width, bottom: top + height });
+  const obscuresTarget = avoidRects.some((rawRect) => {
+    const rect = normalizeRect(rawRect);
+    return Boolean(intersectRects(cardRect, {
+      left: rect.left - gap,
+      top: rect.top - gap,
+      right: rect.right + gap,
+      bottom: rect.bottom + gap,
+    }));
+  });
+  if (obscuresTarget) return null;
+  return { left, top, placement: `viewport-${anchor}`, docked: false };
 }
 
 /** Previous always stays within the active guide or detour route. */
@@ -265,25 +320,43 @@ export function installFeaturesGuidesOverlay(app) {
     layoutScheduled = false;
     if (!root || root.classList.contains("is-hidden") || !currentStep) return;
     if (guideBlockingDialogOpen(app)) {
+      root.classList.remove("is-interrupt-elevated");
       root.classList.add("is-suspended");
       app.commands.setGuideSuspended?.(true);
       return;
     }
     root.classList.remove("is-suspended");
+    root.classList.toggle(
+      "is-interrupt-elevated",
+      app.state.guides.currentStep?.participating_surfaces?.includes("#appDialog")
+        && app.state.ui.$("#appDialog")?.getAttribute("aria-hidden") === "false",
+    );
     app.commands.setGuideSuspended?.(false);
     const viewport = viewportRect();
     card.style.maxWidth = `${Math.max(1, viewport.width - 16)}px`;
     card.style.maxHeight = `${Math.max(1, viewport.height - 16)}px`;
 
     if (!currentStep.target_id) {
-      setFrameVisible(false);
+      if (currentStep.overlay_mode === "full-scrim") {
+        ensureOverlayElements(frames, 0, "guide-target-frame");
+        ensureOverlayElements(shades, 1, "guide-overlay-shade");
+        applyRect(shades[0], viewport);
+      } else {
+        setFrameVisible(false);
+      }
       observeTargets([]);
       positionStandaloneCard();
       return;
     }
 
-    const targetRegions = app.commands.resolveGuideTargetRegions(currentStep.target_id);
-    if (!targetRegions) {
+    const targetLayout = app.commands.resolveGuideTargetLayout?.(currentStep.target_id)
+      || (() => {
+        const regions = app.commands.resolveGuideTargetRegions(currentStep.target_id);
+        return regions
+          ? { spotlightRegions: regions, frameRegions: regions, placementRegions: regions }
+          : null;
+      })();
+    if (!targetLayout) {
       setFrameVisible(false);
       observeTargets([]);
       positionDockedCard();
@@ -299,27 +372,39 @@ export function installFeaturesGuidesOverlay(app) {
       }
       return;
     }
+    const {
+      spotlightRegions,
+      frameRegions,
+      placementRegions = spotlightRegions,
+    } = targetLayout;
+    const layoutRegions = [...spotlightRegions, ...frameRegions, ...placementRegions]
+      .filter((region, index, regions) => regions.findIndex(candidate => (
+        candidate.length === region.length
+        && candidate.every((element, elementIndex) => element === region[elementIndex])
+      )) === index);
 
     if (scrollOnNextLayout) {
       scrollOnNextLayout = false;
-      if (targetRegions.length === 1) {
-        scrollGuideRegionIntoView(targetRegions[0], { block: "center" });
+      if (layoutRegions.length === 1) {
+        scrollGuideRegionIntoView(layoutRegions[0], { block: "center" });
       } else {
-        targetRegions.forEach(region => scrollGuideRegionIntoView(region));
+        layoutRegions.forEach(region => scrollGuideRegionIntoView(region));
       }
       scheduleGuideOverlayLayout();
       return;
     }
 
-    const visibleTargets = targetRegions.map(clippedRegionRect);
-    if (visibleTargets.some(target => !target)) {
+    const visibleSpotlights = spotlightRegions.map(clippedRegionRect);
+    const visibleFrames = frameRegions.map(clippedRegionRect);
+    const visiblePlacements = placementRegions.map(clippedRegionRect);
+    if ([...visibleSpotlights, ...visibleFrames, ...visiblePlacements].some(target => !target)) {
       if (app.state.guides.reviewingCompletedStep) {
         setFrameVisible(false);
         observeTargets([]);
         positionDockedCard();
         return;
       }
-      targetRegions.forEach(region => scrollGuideRegionIntoView(region));
+      layoutRegions.forEach(region => scrollGuideRegionIntoView(region));
       if (now() >= targetDeadline) {
         app.commands.handleGuideTargetUnavailable?.(currentStep.target_id);
       } else {
@@ -329,9 +414,9 @@ export function installFeaturesGuidesOverlay(app) {
     }
 
     app.commands.handleGuideTargetAvailable?.();
-    observeTargets(targetRegions.flat());
+    observeTargets([...new Set(layoutRegions.flat())]);
     const padding = 4;
-    const framedTargets = visibleTargets.map(visibleTarget => (
+    const padTarget = visibleTarget => (
       intersectRects(
         {
           left: visibleTarget.left - padding,
@@ -341,22 +426,34 @@ export function installFeaturesGuidesOverlay(app) {
         },
         viewport,
       ) || visibleTarget
-    ));
+    );
+    const spotlightTargets = visibleSpotlights.map(padTarget);
+    const framedTargets = visibleFrames.map(padTarget);
+    const placementTargets = visiblePlacements.map(padTarget);
     ensureOverlayElements(frames, framedTargets.length, "guide-target-frame");
     framedTargets.forEach((rect, index) => applyRect(frames[index], rect));
-    const shadeLayout = shadeRectsAroundTargets(framedTargets, viewport);
+    const shadeLayout = shadeRectsAroundTargets(spotlightTargets, viewport);
     ensureOverlayElements(shades, shadeLayout.length, "guide-overlay-shade");
     shadeLayout.forEach((rect, index) => applyRect(shades[index], rect));
 
-    const placementTarget = unionRects(framedTargets);
-    const placement = chooseGuideCardPlacement({
+    const placementTarget = unionRects(placementTargets);
+    const cardSize = { width: card.offsetWidth, height: card.offsetHeight };
+    const anchoredPlacement = currentStep.viewport_anchor && !Number.isInteger(app.state.guides.dockIndex)
+      ? anchorGuideCardInViewport({
+        anchor: currentStep.viewport_anchor,
+        cardSize,
+        viewportRect: viewport,
+        avoidRects: spotlightTargets,
+      })
+      : null;
+    const placement = anchoredPlacement || chooseGuideCardPlacement({
       targetRect: placementTarget,
-      cardSize: { width: card.offsetWidth, height: card.offsetHeight },
+      cardSize,
       viewportRect: viewport,
       preferred: currentStep.preferred_placements,
       dockIndex: app.state.guides.dockIndex,
       previousPosition: currentStep.placement_group ? lastCardPosition : null,
-      avoidRects: framedTargets,
+      avoidRects: spotlightTargets,
     });
     card.style.left = `${Math.round(placement.left)}px`;
     card.style.top = `${Math.round(placement.top)}px`;
@@ -385,10 +482,15 @@ export function installFeaturesGuidesOverlay(app) {
     if (actions) actions.hidden = dismissOnInteraction;
     if (end) {
       const inDetour = currentRouteKind === "detour";
+      const finalDetourStep = inDetour && isLast;
       end.textContent = inDetour ? "Exit Detour" : "End Guide";
+      end.disabled = finalDetourStep;
+      end.title = finalDetourStep ? "Use Return to complete this detour" : "";
       end.setAttribute(
         "aria-label",
-        inDetour ? "Exit detour and return to the parent guide" : "End guide",
+        finalDetourStep
+          ? "Exit detour unavailable on the final step; use Return to complete the detour"
+          : inDetour ? "Exit detour and return to the parent guide" : "End guide",
       );
     }
     if (previous) {
@@ -407,6 +509,7 @@ export function installFeaturesGuidesOverlay(app) {
         || (
           currentStep.completion.kind === "event"
           && !app.state.guides.reviewingCompletedStep
+          && !app.state.guides.completedStepIds.has(currentStep.id)
         );
       next.textContent = currentStep.next_label
         || (isLast ? (currentRouteKind === "detour" ? "Return" : "Finish") : "Next");
@@ -420,6 +523,9 @@ export function installFeaturesGuidesOverlay(app) {
           ? "Select any control to dismiss this message."
         : app.state.guides.reviewingCompletedStep
           ? "This step is already complete."
+        : currentStep.completion.kind === "event"
+          && app.state.guides.completedStepIds.has(currentStep.id)
+          ? "Action complete. Select Next to continue."
         : currentStep.completion.kind === "event"
           ? "Waiting for this action…"
           : "";
@@ -442,17 +548,59 @@ export function installFeaturesGuidesOverlay(app) {
     const container = app.state.ui.$("#guideStepDetour");
     const text = app.state.ui.$("#guideStepDetourText");
     const button = app.state.ui.$("#guideStepDetourButton");
-    const currentDetour = app.commands.getOfferedGuideDetour?.();
+    const currentDetour = app.commands.getGuideDetourAtCurrentStep?.();
+    const completed = currentDetour
+      ? app.state.guides.completedDetourIds.has(currentDetour.id)
+      : false;
     if (container) container.hidden = !currentDetour;
     if (!currentDetour) {
-      if (button) delete button.dataset.detourId;
+      if (button) {
+        button.disabled = false;
+        delete button.dataset.detourId;
+      }
       return;
     }
     if (text) text.textContent = currentDetour.description;
     if (button) {
-      button.textContent = `Explore ${currentDetour.label}`;
-      button.dataset.detourId = currentDetour.id;
+      button.textContent = completed ? "Complete" : `Explore ${currentDetour.label}`;
+      button.disabled = completed;
+      if (completed) {
+        delete button.dataset.detourId;
+      } else {
+        button.dataset.detourId = currentDetour.id;
+      }
     }
+  }
+
+  function syncStepVisual() {
+    const container = app.state.ui.$("#guideStepVisual");
+    if (!container) return;
+    const visual = currentStep?.visual;
+    const source = visual?.clone_selector
+      ? documentTarget.querySelector?.(visual.clone_selector)
+      : null;
+    if (typeof container.replaceChildren === "function") container.replaceChildren();
+    else container.textContent = "";
+    container.hidden = !source;
+    if (!source) {
+      container.removeAttribute("aria-label");
+      return;
+    }
+    const clone = source.cloneNode(true);
+    clone.removeAttribute("data-guide-visual");
+    clone.setAttribute("aria-hidden", "true");
+    container.setAttribute("aria-label", visual.label || "Guide illustration");
+    container.appendChild(clone);
+  }
+
+  function syncStepNote() {
+    const container = app.state.ui.$("#guideStepNote");
+    const label = app.state.ui.$("#guideStepNoteLabel");
+    const value = app.state.ui.$("#guideStepNoteValue");
+    const note = currentStep?.note;
+    if (container) container.hidden = !note;
+    if (label) label.textContent = note?.label || "";
+    if (value) value.textContent = note ? app.commands.formatGuideText(note.text) : "";
   }
 
   function syncGuideProgress() {
@@ -514,6 +662,8 @@ export function installFeaturesGuidesOverlay(app) {
       app.commands.formatGuideText(step.body),
       body?.ownerDocument || documentTarget,
     );
+    syncStepNote();
+    syncStepVisual();
     syncStepFollowup();
     syncStepDetour();
     syncGuideProgress();

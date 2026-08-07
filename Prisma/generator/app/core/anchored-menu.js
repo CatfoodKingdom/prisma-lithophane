@@ -111,7 +111,7 @@ export function createAnchoredMenuController({
     close();
   });
   listen(viewportTarget, "resize", () => close());
-  listen(viewportTarget, "scroll", () => close(), true);
+  listen(viewportTarget, "scroll", () => close());
   if (viewportTarget.visualViewport) {
     listen(viewportTarget.visualViewport, "resize", () => close());
     listen(viewportTarget.visualViewport, "scroll", () => close());

@@ -13,6 +13,18 @@ function groupedTarget(regions, revealId) {
   });
 }
 
+function layeredTarget({ spotlightRegions, frameRegions, placementRegions = spotlightRegions }, revealId) {
+  const freezeRegions = regions => Object.freeze(
+    regions.map(region => Object.freeze({ ...region })),
+  );
+  return Object.freeze({
+    spotlight_regions: freezeRegions(spotlightRegions),
+    frame_regions: freezeRegions(frameRegions),
+    placement_regions: freezeRegions(placementRegions),
+    reveal_id: revealId,
+  });
+}
+
 function context(app) {
   return app.state.guides.runtimeContext || {};
 }
@@ -21,6 +33,13 @@ function cardById(root, cardId, attribute = "data-card-id") {
   if (!root || !cardId) return null;
   return [...root.querySelectorAll(`[${attribute}]`)]
     .find(element => element.getAttribute(attribute) === cardId) || null;
+}
+
+function tutorialImageCard(app) {
+  const filename = context(app).tutorialImageFilename;
+  const sourceRef = context(app).tutorialImageSourceRef;
+  return [...(app.state.ui.$("#imageGrid")?.querySelectorAll(".image-card") || [])]
+    .find(card => card.dataset.filename === filename && card.dataset.sourceRef === sourceRef) || null;
 }
 
 function structurallyEqual(left, right) {
@@ -43,9 +62,15 @@ function structurallyEqual(left, right) {
 }
 
 const TARGETS = Object.freeze({
-  "sidebar.printer": staticTarget('[data-guide-target="sidebar.printer"]', "sidebar.printer"),
+  "sidebar.printer": layeredTarget({
+    spotlightRegions: [{ selector: '[data-guide-target="sidebar.printer"]', all: false }],
+    frameRegions: [{ selector: "#printerConfigBtn", all: false }],
+  }, "sidebar.printer"),
   "sidebar.active-printer": staticTarget('[data-guide-target="sidebar.active-printer"]', "sidebar.active-printer"),
-  "printer.configuration": staticTarget('[data-guide-target="printer.configuration"]', "printer.configuration"),
+  "printer.configuration": layeredTarget({
+    spotlightRegions: [{ selector: '[data-guide-target="printer.configuration"]', all: false }],
+    frameRegions: [{ selector: '[data-guide-target="printer.configuration-fields"]', all: false }],
+  }, "printer.configuration"),
   "sidebar.active-nozzle": staticTarget('[data-guide-target="sidebar.active-nozzle"]', "sidebar.active-nozzle"),
   "sidebar.model-library": staticTarget('[data-guide-target="sidebar.model-library"]', "sidebar.model-library"),
   "sidebar.active-filaments": staticTarget('[data-guide-target="sidebar.active-filaments"]', "sidebar.active-filaments"),
@@ -55,6 +80,7 @@ const TARGETS = Object.freeze({
   "topbar.settings": staticTarget('[data-guide-target="topbar.settings"]', "topbar.settings"),
   "topbar.solve": staticTarget("#startSolveBtn", "topbar.solve"),
   "workflow.tabs": staticTarget('[data-guide-target="workflow.tabs"]', "workflow.tabs"),
+  "workflow.image": staticTarget('[data-guide-target="workflow.image"]', "workflow.image-page"),
   "workflow.overview": groupedTarget([
     { selector: '[data-guide-target="workflow.tabs"]', all: false },
     {
@@ -66,67 +92,120 @@ const TARGETS = Object.freeze({
   "workflow.preview": staticTarget('.mode-button[data-tab="solve"]', "workflow.preview"),
   "workflow.export": staticTarget('.mode-button[data-tab="export"]', "workflow.export"),
   "image.library": staticTarget('[data-guide-target="image.library"]', "image.library"),
-  "image.library-management": groupedTarget([
-    { selector: "#imageLibraryPanel", all: false },
-    { selector: ".library-title-actions", all: false },
-  ], "image.library-management"),
+  "image.library-import": groupedTarget([
+    { selector: "#imageGrid", all: false },
+    { selector: ".upload-btn, #imageLibraryOpenFolderBtn", all: true },
+  ], "image.library-import"),
+  "image.library-maintenance": groupedTarget([
+    { selector: "#imageGrid", all: false },
+    { selector: "#imageLibraryRefreshBtn, #libraryResizeBtn", all: true },
+  ], "image.library-maintenance"),
   "image.preview": staticTarget("#imagePreviewPane", "image.preview"),
   "image.adjustments": staticTarget(".framing-editor", "image.adjustments"),
-  "image.aspect-experiment": groupedTarget([
-    { selector: "#frameCanvasWrap, #directionToggle, #arButtonGroup", all: true },
-  ], "image.aspect-experiment"),
+  "image.preview-adjustments": layeredTarget({
+    spotlightRegions: [
+      { selector: "#imagePreviewPane", all: false },
+      { selector: ".framing-editor", all: false },
+    ],
+    frameRegions: [
+      { selector: "#imagePreviewPane", all: false },
+      { selector: ".framing-editor", all: false },
+    ],
+    placementRegions: [
+      { selector: ".framing-editor", all: false },
+    ],
+  }, "image.preview-adjustments"),
+  "image.aspect-experiment": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: "#frameControlsSize .ctrl-section-grid2", all: false }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.aspect-experiment"),
   "image.aspect-controls": staticTarget("#frameControlsSize", "image.aspect-controls"),
-  "image.framing": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    {
-      selector: '[data-guide-target-part="image.transform-controls"]',
-      all: true,
-    },
-  ], "image.framing"),
-  "image.adjustment-image-tab": staticTarget(
-    '[data-guide-target="image.adjustment-image-tab"]',
-    "image.adjustment-image-tab",
-  ),
-  "image.appearance": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    { selector: "#frameControlsImage", all: false },
-  ], "image.appearance"),
-  "image.border": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    { selector: '[data-guide-target-part="image.border-controls"]', all: true },
-  ], "image.border"),
-  "image.reset-framing": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    { selector: '[data-guide-target-part="image.canvas-reset"]', all: true },
-  ], "image.reset-framing"),
-  "image.crop-fit": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    { selector: "#fitImageBtn, #fillWidthBtn, #fillHeightBtn", all: true },
-  ], "image.crop-fit"),
-  "image.physical-dimensions": groupedTarget([
-    { selector: '[data-guide-target-part="image.canvas-dimensions"]', all: true },
-  ], "image.physical-dimensions"),
-  "image.tutorial-canvas": groupedTarget([
-    { selector: "#frameCanvasWrap", all: false },
-    { selector: "#arButtonGroup", all: false },
-    { selector: '[data-guide-target-part="image.canvas-dimensions"]', all: true },
-  ], "image.tutorial-canvas"),
+  "image.framing": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [
+      { selector: "#frameCanvasWrap", all: false },
+      { selector: '[data-guide-target-part="image.transform-controls"]', all: true },
+    ],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.framing"),
+  "image.adjustment-image-tab": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: '[data-guide-target="image.adjustment-image-tab"]', all: false }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.adjustment-image-tab"),
+  "image.appearance": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: "#frameControlsImage", all: false }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.appearance"),
+  "image.border": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: '[data-guide-target-part="image.border-controls"]', all: true }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.border"),
+  "image.reset-framing": layeredTarget({
+    spotlightRegions: [
+      { selector: '[data-guide-target-part="image.canvas-reset"]', all: true },
+      { selector: "#borderToggle", all: false },
+    ],
+    frameRegions: [
+      { selector: '[data-guide-target-part="image.canvas-reset"]', all: true },
+      { selector: "#borderToggle", all: false },
+    ],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.reset-framing"),
+  "image.crop-fit": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: "#fitImageBtn, #fillWidthBtn, #fillHeightBtn", all: true }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.crop-fit"),
+  "image.physical-dimensions": layeredTarget({
+    spotlightRegions: [{ selector: ".framing-editor", all: false }],
+    frameRegions: [{ selector: '[data-guide-target-part="image.canvas-dimensions"]', all: true }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.physical-dimensions"),
+  "image.tutorial-canvas": layeredTarget({
+    spotlightRegions: [{ selector: '[data-guide-target-part="image.canvas-dimensions"]', all: true }],
+    frameRegions: [{ selector: '[data-guide-target-part="image.canvas-dimensions"]', all: true }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.tutorial-canvas"),
   "image.canvas-settings": staticTarget("#frameControlsSize", "image.canvas-settings"),
-  "image.summary": staticTarget("#imageInfoGrid", "image.summary"),
-  "basics.tutorial-image": dynamicTarget((app) => {
-    const filename = context(app).tutorialImageFilename;
-    return [...(app.state.ui.$("#imageGrid")?.querySelectorAll(".image-card") || [])]
-      .find(card => card.dataset.filename === filename) || null;
+  "image.summary": layeredTarget({
+    spotlightRegions: [
+      { selector: ".framing-editor", all: false },
+      { selector: "#imageInfoGrid", all: false },
+    ],
+    frameRegions: [{ selector: "#imageInfoGrid", all: false }],
+    placementRegions: [{ selector: ".framing-editor", all: false }],
+  }, "image.summary"),
+  "basics.tutorial-image": layeredTarget({
+    spotlightRegions: [{ selector: "#imageLibraryPanel", all: false }],
+    frameRegions: [{ resolve: tutorialImageCard }],
   }, "basics.tutorial-image"),
   "palette.modes": staticTarget(".creation-mode-tabs", "palette.modes"),
   "palette.autosuggest-overview": groupedTarget([
     { selector: ".creation-mode-tabs", all: false },
     { selector: "#candidateGrid", all: false },
   ], "palette.autosuggest-overview"),
+  "palette.autosuggest-controls": layeredTarget({
+    spotlightRegions: [
+      { selector: ".creation-controls-pane", all: false },
+    ],
+    frameRegions: [
+      { selector: ".creation-controls-pane .suggest-field", all: true },
+    ],
+    placementRegions: [
+      { selector: ".creation-controls-pane", all: false },
+    ],
+  }, "palette.autosuggest-controls"),
   "palette.candidates": staticTarget("#candidateGrid", "palette.candidates"),
   "palette.suggest": staticTarget("#suggestPalettesBtn", "palette.suggest"),
   "palette.suggestions": staticTarget("#deckCards", "palette.suggestions"),
-  "palette.deck": staticTarget("#railDeckList", "palette.deck"),
+  "palette.deck": layeredTarget({
+    spotlightRegions: [{ selector: "#railDeck", all: false }],
+    frameRegions: [],
+  }, "palette.deck"),
   "palette.manual": groupedTarget([
     { selector: "#panelManualBuilder", all: false },
     { selector: "#manualPalettePanel", all: false },
@@ -134,6 +213,10 @@ const TARGETS = Object.freeze({
   "basics.manual-card": dynamicTarget(
     app => cardById(app.state.ui.$("#railDeckList"), context(app).manualCardId),
     "basics.manual-card",
+  ),
+  "basics.variant-card": dynamicTarget(
+    app => cardById(app.state.ui.$("#railDeckList"), context(app).variantCardId),
+    "basics.variant-card",
   ),
   "basics.palette-a": dynamicTarget(
     app => cardById(app.state.ui.$("#railDeckList"), context(app).paletteA?.id),
@@ -144,6 +227,22 @@ const TARGETS = Object.freeze({
     "basics.palette-b",
   ),
   "settings.drawer": staticTarget("#settingsDrawer", "settings.drawer"),
+  "settings.drawer-overview": layeredTarget({
+    spotlightRegions: [{ selector: "#settingsDrawer", all: false }],
+    frameRegions: [],
+  }, "settings.drawer-overview"),
+  "settings.essentials-resolution": layeredTarget({
+    spotlightRegions: [{ selector: '[data-settings-group="geometry"]', all: false }],
+    frameRegions: [{ selector: '[data-guide-target-part="settings.essentials-resolution"]', all: true }],
+  }, "settings.essentials-resolution"),
+  "settings.essentials-construction": layeredTarget({
+    spotlightRegions: [{ selector: '[data-settings-group="geometry"]', all: false }],
+    frameRegions: [{ selector: '[data-guide-target-part="settings.essentials-construction"]', all: true }],
+  }, "settings.essentials-construction"),
+  "settings.profiles": staticTarget(
+    '[data-guide-target="settings.profiles"]',
+    "settings.profiles",
+  ),
   "settings.advanced": groupedTarget([
     { selector: "#settingsAdvancedToggle", all: false },
     { selector: "#settingsDrawerBody", all: false },
@@ -182,6 +281,61 @@ const TARGETS = Object.freeze({
     app => cardById(app.state.ui.$("#exportRunCards"), context(app).runAId, "data-export-run-id"),
     "basics.export-run-a",
   ),
+  "saving.palette-card": dynamicTarget(
+    app => app.state.ui.$("#paletteSaveModal[aria-hidden=\"false\"]")
+      || (!app.state.ui.$("#deckCardMenu")?.hidden ? app.state.ui.$("#deckCardMenu") : null)
+      || cardById(app.state.ui.$("#railDeckList"), context(app).tutorialPalettes?.[0]?.id),
+    "saving.palette-card",
+  ),
+  "saving.palette-load": dynamicTarget(
+    app => app.state.ui.$(".load-palette-popover") || app.state.ui.$("#railLoadPaletteBtn"),
+    "saving.palette-load",
+  ),
+  "saving.palette-clear": staticTarget("#railClearDeckBtn", "saving.palette-clear"),
+  "saving.settings-thickness": groupedTarget([
+    { selector: ".settings-profile-bar", all: false },
+    { selector: "#cfgTMax", all: false },
+  ], "saving.settings-thickness"),
+  "saving.settings-save": dynamicTarget(
+    app => app.state.ui.$("#settingsProfileSaveModal[aria-hidden=\"false\"]")
+      || app.state.ui.$("#appDialog[aria-hidden=\"false\"]")
+      || app.state.ui.$("#settingsProfileSaveBtn"),
+    "saving.settings-save",
+  ),
+  "saving.settings-profiles": dynamicTarget(
+    app => app.state.ui.$("#settingsProfileModal[aria-hidden=\"false\"]")
+      || app.state.ui.$("#settingsProfileBrowseBtn"),
+    "saving.settings-profiles",
+  ),
+  "saving.settings-profiles-reopen": dynamicTarget(
+    app => app.state.ui.$("#settingsProfileModal[aria-hidden=\"false\"]")
+      || app.state.ui.$("#settingsProfileBrowseBtn"),
+    "saving.settings-profiles-reopen",
+  ),
+  "saving.solve": dynamicTarget(
+    app => app.state.ui.$("#opProgress:not(.is-hidden)") || app.state.ui.$("#startSolveBtn"),
+    "saving.solve",
+  ),
+  "saving.run-card": dynamicTarget(
+    app => app.state.ui.$("#appDialog[aria-hidden=\"false\"]")
+      || cardById(app.state.ui.$("#solveRunCards"), context(app).loadedRunId || context(app).guideRunId, "data-run-id")
+      || app.state.ui.$("#solveRunCards .solve-run-card"),
+    "saving.run-card",
+  ),
+  "saving.history-clear": staticTarget("#clearSolveHistoryBtn", "saving.history-clear"),
+  "saving.saved-runs": dynamicTarget(
+    app => app.state.ui.$("#savedRunsModal[aria-hidden=\"false\"]") || app.state.ui.$("#savedRunsBtn"),
+    "saving.saved-runs",
+  ),
+  "saving.saved-runs-reopen": dynamicTarget(
+    app => app.state.ui.$("#savedRunsModal[aria-hidden=\"false\"]") || app.state.ui.$("#savedRunsBtn"),
+    "saving.saved-runs-reopen",
+  ),
+  "saving.run-settings": dynamicTarget(
+    app => app.state.solve.solveRunSettingsPanelEl || app.state.ui.$("#solveRunCards .solve-run-settings-btn"),
+    "saving.run-settings",
+  ),
+  "saving.export": staticTarget("#tabExport", "saving.export"),
 });
 
 const KNOWN_GUIDE_PREDICATES = new Set([
@@ -191,6 +345,25 @@ const KNOWN_GUIDE_PREDICATES = new Set([
   "printer-config.closed",
   "basics.tutorial-printer-active",
   "basics.tutorial-nozzle-active",
+  "saving.prepared",
+  "saving.palette-saved",
+  "saving.palette-removed",
+  "saving.palette-loaded",
+  "saving.palette-save-deleted",
+  "saving.settings-2.6-modified",
+  "saving.settings-profile-saved",
+  "saving.settings-3.0-modified",
+  "saving.settings-browser-open",
+  "saving.basic-restored",
+  "saving.settings-profile-deleted",
+  "saving.solve-complete",
+  "saving.run-saved",
+  "saving.history-cleared",
+  "saving.deck-cleared",
+  "saving.run-loaded",
+  "saving.run-settings-open",
+  "saving.temp-loaded",
+  "saving.run-save-deleted",
   "basics.tutorial-image-selected",
   "basics.image-reset",
   "basics.canvas-ready",
@@ -201,6 +374,9 @@ const KNOWN_GUIDE_PREDICATES = new Set([
   "basics.tutorial-palettes-in-deck",
   "basics.manual-card-added",
   "basics.manual-card-removed",
+  "basics.palette-variant-started",
+  "basics.palette-variant-added",
+  "basics.palette-variant-removed",
   "basics.palette-a-active",
   "basics.palette-b-active",
   "basics.tutorial-profile-ready",
@@ -214,34 +390,76 @@ const KNOWN_GUIDE_PREDICATES = new Set([
   "basics.export-complete",
 ]);
 
+const KNOWN_GUIDE_REVEALS = new Set([
+  "workflow.image-page",
+  "saving.palette-page",
+  "saving.preview-page",
+  "saving.settings-drawer",
+]);
+
 /** Install stable guide-target resolution, runtime capture, and presentation-only reveals. */
 export function installFeaturesGuidesTargets(app) {
-  function resolveGuideTargetRegions(targetId) {
+  function resolveRegionSpecs(regionSpecs) {
+    const regions = regionSpecs.map((region) => {
+      if (typeof region.resolve === "function") {
+        const resolved = region.resolve(app);
+        return (Array.isArray(resolved) ? resolved : [resolved]).filter(Boolean);
+      }
+      const elements = region.all
+        ? [...app.state.ui.$$(region.selector)]
+        : [app.state.ui.$(region.selector)];
+      return elements.filter(Boolean);
+    });
+    return regions.every(region => region.length > 0) ? regions : null;
+  }
+
+  function resolveGuideTargetLayout(targetId) {
     const descriptor = TARGETS[targetId];
     if (!descriptor) return null;
+    if (descriptor.spotlight_regions || descriptor.frame_regions || descriptor.placement_regions) {
+      const spotlightRegions = resolveRegionSpecs(descriptor.spotlight_regions || []);
+      const frameRegions = resolveRegionSpecs(descriptor.frame_regions || []);
+      const placementRegions = resolveRegionSpecs(
+        descriptor.placement_regions || descriptor.spotlight_regions || [],
+      );
+      if (!spotlightRegions || !frameRegions || !placementRegions) return null;
+      return { spotlightRegions, frameRegions, placementRegions };
+    }
     if (descriptor.regions) {
-      const regions = descriptor.regions.map((region) => {
-        const elements = region.all
-          ? [...app.state.ui.$$(region.selector)]
-          : [app.state.ui.$(region.selector)];
-        return elements.filter(Boolean);
-      });
-      return regions.every(region => region.length > 0) ? regions : null;
+      const regions = resolveRegionSpecs(descriptor.regions);
+      return regions
+        ? { spotlightRegions: regions, frameRegions: regions, placementRegions: regions }
+        : null;
     }
     const target = descriptor.resolve
       ? descriptor.resolve(app)
       : app.state.ui.$(descriptor.selector);
-    return target ? [[target]] : null;
+    const regions = target ? [[target]] : null;
+    return regions
+      ? { spotlightRegions: regions, frameRegions: regions, placementRegions: regions }
+      : null;
+  }
+
+  function resolveGuideTargetRegions(targetId) {
+    return resolveGuideTargetLayout(targetId)?.spotlightRegions || null;
   }
 
   function resolveGuideTarget(targetId) {
-    return resolveGuideTargetRegions(targetId)?.[0]?.[0] || null;
+    const layout = resolveGuideTargetLayout(targetId);
+    return layout?.frameRegions?.[0]?.[0] || layout?.spotlightRegions?.[0]?.[0] || null;
   }
 
   function captureGuidePresentation() {
     return {
       currentTab: app.state.ui.currentTab || "image",
       settingsDrawerOpen: !!app.state.settings.settingsDrawerOpen,
+      settingsAdvancedVisible: !!app.state.settings.settingsAdvancedVisible,
+      frameEditorTab: app.state.image.frameEditorTab || "size",
+      creationMode: app.state.palette.creationMode || "auto",
+      solveView: app.state.solve.solveView || "predicted",
+      solveWhiteCapView: app.state.solve.solveWhiteCapView,
+      solveColorRegionsView: app.state.solve.solveColorRegionsView,
+      solveAdvancedViewsOpen: !!app.state.solve.solveAdvancedViewsOpen,
       settingsScrollTop: app.state.ui.$("#settingsDrawerBody")?.scrollTop || 0,
       tabSwitchScrollLeft: app.state.ui.$("#tabSwitch")?.scrollLeft || 0,
       tabContentScrollTop: app.state.ui.$(".tab-content-area")?.scrollTop || 0,
@@ -254,6 +472,68 @@ export function installFeaturesGuidesTargets(app) {
   }
 
   function revealGuideTarget(revealId, { reviewOnly = false } = {}) {
+    if (revealId === "saving.palette-page") {
+      app.commands.switchTab("creation");
+      return;
+    }
+    if (revealId === "saving.preview-page") {
+      app.commands.closeSettingsProfileBrowserModal?.();
+      app.commands.closeSettingsDrawer?.();
+      app.commands._setSavedRunsModalOpen?.(false);
+      app.commands.hideSolveRunSettingsPanel?.();
+      app.commands.switchTab("solve");
+      return;
+    }
+    if (revealId === "saving.settings-drawer") {
+      app.commands._setSavedRunsModalOpen?.(false);
+      app.commands.hideSolveRunSettingsPanel?.();
+      app.commands.openSettingsDrawer?.();
+      return;
+    }
+    if (revealId === "saving.settings-profiles-reopen") {
+      app.commands.openSettingsDrawer?.();
+      if (!reviewOnly && app.state.ui.$("#settingsProfileModal")?.getAttribute("aria-hidden") !== "false") {
+        void app.commands.handleSettingsProfilesBrowse?.();
+      }
+      return;
+    }
+    if (revealId === "saving.saved-runs-reopen") {
+      app.commands.closeSettingsDrawer?.();
+      app.commands.switchTab("solve");
+      if (!reviewOnly && app.state.ui.$("#savedRunsModal")?.getAttribute("aria-hidden") !== "false") {
+        void app.commands.openSavedRunsModal?.("run");
+      }
+      return;
+    }
+    if (revealId.startsWith("saving.palette")) {
+      app.commands.closeSettingsProfileBrowserModal?.();
+      app.commands._setSavedRunsModalOpen?.(false);
+      app.commands.hideSolveRunSettingsPanel?.();
+      app.commands.switchTab("creation");
+      return;
+    }
+    if (revealId.startsWith("saving.settings")) {
+      app.commands._setSavedRunsModalOpen?.(false);
+      app.commands.hideSolveRunSettingsPanel?.();
+      app.commands.openSettingsDrawer?.();
+      return;
+    }
+    if (["saving.solve", "saving.run-card", "saving.history-clear", "saving.saved-runs", "saving.run-settings"].includes(revealId)) {
+      if (!reviewOnly) app.commands.closeSettingsProfileBrowserModal?.();
+      app.commands.switchTab("solve");
+      return;
+    }
+    if (revealId === "saving.export") {
+      app.commands.closeSettingsProfileBrowserModal?.();
+      app.commands._setSavedRunsModalOpen?.(false);
+      app.commands.hideSolveRunSettingsPanel?.();
+      app.commands.switchTab("export");
+      return;
+    }
+    if (revealId === "workflow.image-page") {
+      switchTo("image");
+      return;
+    }
     if (revealId === "printer.configuration") {
       if (reviewOnly) return;
       const page = app.state.ui.$("#printerConfigPage");
@@ -261,7 +541,11 @@ export function installFeaturesGuidesTargets(app) {
       return;
     }
     if (revealId === "topbar.settings") {
-      if (!reviewOnly && app.state.settings.settingsDrawerOpen) app.commands.closeSettingsDrawer();
+      if (!reviewOnly) {
+        if (app.state.settings.settingsDrawerOpen) app.commands.closeSettingsDrawer();
+        app.state.settings.settingsAdvancedVisible = false;
+        app.commands.updateAdvancedSettingsVisibility?.();
+      }
       return;
     }
     if (revealId.startsWith("settings.")) {
@@ -293,8 +577,12 @@ export function installFeaturesGuidesTargets(app) {
       || revealId === "basics.palette-a"
       || revealId === "basics.palette-b"
       || revealId === "basics.manual-card"
+      || revealId === "basics.variant-card"
     ) {
-      if (["palette.deck", "basics.palette-a", "basics.palette-b", "basics.manual-card"].includes(revealId)) {
+      if ([
+        "palette.deck", "basics.palette-a", "basics.palette-b", "basics.manual-card",
+        "basics.variant-card",
+      ].includes(revealId)) {
         if (app.state.settings.settingsDrawerOpen) app.commands.closeSettingsDrawer();
         return;
       }
@@ -320,6 +608,40 @@ export function installFeaturesGuidesTargets(app) {
     } else if (!snapshot.settingsDrawerOpen && app.state.settings.settingsDrawerOpen) {
       app.commands.closeSettingsDrawer();
     }
+    if (
+      snapshot.settingsAdvancedVisible != null
+      && app.state.settings.settingsAdvancedVisible !== snapshot.settingsAdvancedVisible
+    ) {
+      app.state.settings.settingsAdvancedVisible = snapshot.settingsAdvancedVisible;
+      app.commands.saveSettingsAdvancedVisible?.(snapshot.settingsAdvancedVisible);
+      app.commands.updateAdvancedSettingsVisibility?.();
+      app.commands.distributeSettingsColumns?.();
+    }
+    if (snapshot.frameEditorTab && app.state.image.frameEditorTab !== snapshot.frameEditorTab) {
+      app.commands.switchFrameEditorTab?.(snapshot.frameEditorTab);
+    }
+    if (snapshot.creationMode && app.state.palette.creationMode !== snapshot.creationMode) {
+      app.commands.toggleCreationMode?.(snapshot.creationMode);
+    }
+    let solvePresentationChanged = false;
+    for (const [key, value] of [
+      ["solveView", snapshot.solveView],
+      ["solveWhiteCapView", snapshot.solveWhiteCapView],
+      ["solveColorRegionsView", snapshot.solveColorRegionsView],
+    ]) {
+      if (value != null && app.state.solve[key] !== value) {
+        app.state.solve[key] = value;
+        solvePresentationChanged = true;
+      }
+    }
+    if (
+      snapshot.solveAdvancedViewsOpen != null
+      && app.state.solve.solveAdvancedViewsOpen !== snapshot.solveAdvancedViewsOpen
+    ) {
+      app.commands.setSolveAdvancedViewsOpen?.(snapshot.solveAdvancedViewsOpen);
+      solvePresentationChanged = true;
+    }
+    if (solvePresentationChanged) app.commands.renderSolveComparisonGrid?.();
     const restoreScroll = () => {
       const drawerBody = app.state.ui.$("#settingsDrawerBody");
       const tabSwitch = app.state.ui.$("#tabSwitch");
@@ -353,9 +675,11 @@ export function installFeaturesGuidesTargets(app) {
     const runtime = context(app);
     const frame = app.state.image.frameState || {};
     return app.state.image.selectedImage?.filename === runtime.tutorialImageFilename
+      && app.state.image.selectedImage?.source_ref === runtime.tutorialImageSourceRef
       && frame.arMode === "image"
       && Math.abs(Number(frame.widthMm) - 120) < 0.001
       && Math.abs(Number(frame.heightMm) - 160) < 0.001
+      && !app.state.settings.config.border
       && settingsAreReset();
   }
 
@@ -394,7 +718,8 @@ export function installFeaturesGuidesTargets(app) {
       return tutorialPrinterReady({ requireNozzle: true });
     }
     if (predicateId === "basics.tutorial-image-selected") {
-      return app.state.image.selectedImage?.filename === runtime.tutorialImageFilename;
+      return app.state.image.selectedImage?.filename === runtime.tutorialImageFilename
+        && app.state.image.selectedImage?.source_ref === runtime.tutorialImageSourceRef;
     }
     if (predicateId === "basics.image-reset") {
       return tutorialImageIsReset();
@@ -402,6 +727,7 @@ export function installFeaturesGuidesTargets(app) {
     if (predicateId === "basics.canvas-ready") {
       const frame = app.state.image.frameState || {};
       return app.state.image.selectedImage?.filename === runtime.tutorialImageFilename
+        && app.state.image.selectedImage?.source_ref === runtime.tutorialImageSourceRef
         && tutorialPrinterReady({ requireNozzle: true })
         && ["specified", "image"].includes(frame.arMode)
         && Math.abs(Number(frame.widthMm) - 90) < 0.001
@@ -415,7 +741,14 @@ export function installFeaturesGuidesTargets(app) {
     if (predicateId === "tab.creation") return app.state.ui.currentTab === "creation";
     if (predicateId === "tab.export") return app.state.ui.currentTab === "export";
     if (predicateId === "basics.two-suggestions-ready") {
-      return !!runtime.paletteA?.id && !!runtime.paletteB?.id;
+      const paletteColors = Number(app.state.ui.$("#targetFilamentCount")?.value);
+      const suggestions = Number(app.state.ui.$("#targetSuggestCount")?.value);
+      const capturedCards = [runtime.paletteA, runtime.paletteB].map(captured => (
+        app.state.palette.stagingDeck.find(card => card.id === captured?.id)
+      ));
+      return paletteColors === 3
+        && suggestions >= 2
+        && capturedCards.every(card => Array.isArray(card?.filament_ids) && card.filament_ids.length === 3);
     }
     if (predicateId === "basics.tutorial-palettes-in-deck") {
       const ids = new Set(app.state.palette.deck.map(card => card.id));
@@ -432,6 +765,22 @@ export function installFeaturesGuidesTargets(app) {
         && !app.state.palette.deck.some(card => card.id === runtime.manualCardId)
         && guidePredicateSatisfied("basics.tutorial-palettes-in-deck");
     }
+    if (predicateId === "basics.palette-variant-started") {
+      return app.state.palette.manualVariantDraft?.sourceCardId === runtime.paletteA?.id
+        && app.state.palette.creationMode === "manual";
+    }
+    if (predicateId === "basics.palette-variant-added") {
+      return !!runtime.variantCardId
+        && app.state.palette.activeDeckId === runtime.variantCardId
+        && app.state.palette.deck.some(card => card.id === runtime.variantCardId)
+        && guidePredicateSatisfied("basics.tutorial-palettes-in-deck");
+    }
+    if (predicateId === "basics.palette-variant-removed") {
+      return !!runtime.variantCardId
+        && runtime.variantCardRemoved === true
+        && !app.state.palette.deck.some(card => card.id === runtime.variantCardId)
+        && guidePredicateSatisfied("basics.tutorial-palettes-in-deck");
+    }
     if (predicateId === "basics.palette-a-active") {
       return guidePredicateSatisfied("basics.tutorial-palettes-in-deck")
         && app.state.palette.activeDeckId === runtime.paletteA?.id;
@@ -441,8 +790,16 @@ export function installFeaturesGuidesTargets(app) {
         && app.state.palette.activeDeckId === runtime.paletteB?.id;
     }
     if (predicateId === "basics.tutorial-profile-ready") {
-      return app.state.settings.loadedProfileRef?.id === "temporary-guide-basics"
-        && !app.commands.isSettingsProfileModified();
+      const expectedProfileId = app.state.guides.currentGuide?.id
+        ? `temporary-guide-${app.state.guides.currentGuide.id}`
+        : null;
+      return !!expectedProfileId
+        && app.state.settings.loadedProfileRef?.id === expectedProfileId
+        && !!runtime.tutorialSettingsSnapshot
+        && structurallyEqual(
+          app.commands._configSettingsProfileSnapshot(),
+          runtime.tutorialSettingsSnapshot,
+        );
     }
     if (predicateId === "basics.advanced-viewed-and-off") {
       return runtime.advancedSeenOn === true && !app.state.settings.settingsAdvancedVisible;
@@ -481,11 +838,135 @@ export function installFeaturesGuidesTargets(app) {
       return !!runtime.exportId
         && app.commands.getRunExportRecords(run).some(record => record.id === runtime.exportId);
     }
+    const primary = runtime.tutorialPalettes?.[0];
+    const support = runtime.tutorialPalettes?.[1];
+    const basicId = app.state.ui.SYSTEM_SETTINGS_PROFILE_ID;
+    if (predicateId === "saving.prepared") {
+      const selectedFilaments = new Set(app.state.palette.enabledFilaments);
+      const requiredFilaments = new Set(runtime.requiredFilaments || []);
+      const frame = app.state.image.frameState || {};
+      return app.state.settings.loadedProfileRef?.id === basicId
+        && !app.commands.isSettingsProfileModified()
+        && Math.abs(Number(app.state.settings.config.t_max) - 3) < 1e-6
+        && app.state.settings.config.luminance_mode === "standard"
+        && app.state.settings.config.base_filament === "bambu-tough-white"
+        && app.state.session.printersData?.active_printer_id === "tutorial-printer"
+        && Math.abs(Number(app.state.session.printersData?.active_nozzle_size) - 0.2) < 1e-6
+        && app.state.image.selectedImage?.source_ref === runtime.tutorialImage?.source_ref
+        && Math.abs(Number(frame.widthMm) - 30) < 1e-6
+        && Math.abs(Number(frame.heightMm) - 40) < 1e-6
+        && selectedFilaments.size === requiredFilaments.size
+        && [...requiredFilaments].every(id => selectedFilaments.has(id))
+        && !!primary && !!support && app.state.palette.activeDeckId === primary.id
+        && app.state.palette.deck.length === 2
+        && structurallyEqual(app.state.palette.deck.map(card => card.filament_ids), [primary.filament_ids, support.filament_ids]);
+    }
+    if (predicateId === "saving.palette-saved") {
+      const card = app.state.palette.deck.find(item => item.id === primary?.id);
+      return !!runtime.savedPaletteId && card?.saved_source_id === runtime.savedPaletteId && card.saved === true;
+    }
+    if (predicateId === "saving.palette-removed") {
+      return !!runtime.savedPaletteId
+        && !app.state.palette.deck.some(item => item.id === primary?.id)
+        && app.state.palette.savedPalettesData?.palettes?.some(item => item.id === runtime.savedPaletteId);
+    }
+    if (predicateId === "saving.palette-loaded") {
+      const card = app.state.palette.deck.find(item => item.id === runtime.loadedPaletteId);
+      return !!card && card.saved_source_id === runtime.savedPaletteId && app.state.palette.activeDeckId === card.id;
+    }
+    if (predicateId === "saving.palette-save-deleted") {
+      const card = app.state.palette.deck.find(item => item.id === runtime.loadedPaletteId);
+      return !!runtime.savedPaletteDeleted && !!card && !card.saved_source_id && card.saved !== true;
+    }
+    if (predicateId === "saving.settings-2.6-modified") {
+      return app.state.settings.loadedProfileRef?.id === basicId
+        && Math.abs(Number(app.state.settings.config.t_max) - 2.6) < 1e-6
+        && app.commands.isSettingsProfileModified();
+    }
+    if (predicateId === "saving.settings-profile-saved") {
+      const saved = app.commands.findSettingsProfile(runtime.savedProfileId);
+      return !!runtime.savedProfileId
+        && saved?.name === runtime.names?.savedProfileName
+        && Math.abs(Number(saved?.settings?.t_max) - 2.6) < 1e-6
+        && app.state.settings.loadedProfileRef?.id === runtime.savedProfileId
+        && !app.commands.isSettingsProfileModified();
+    }
+    if (predicateId === "saving.settings-3.0-modified") {
+      return app.state.settings.loadedProfileRef?.id === runtime.savedProfileId
+        && Math.abs(Number(app.state.settings.config.t_max) - 3) < 1e-6
+        && app.commands.isSettingsProfileModified();
+    }
+    if (predicateId === "saving.settings-browser-open") {
+      const modal = app.state.ui.$("#settingsProfileModal");
+      const selected = modal?.querySelector?.(`[data-profile-id="${runtime.savedProfileId}"]`);
+      return modal?.getAttribute("aria-hidden") === "false"
+        && selected?.classList?.contains("is-selected")
+        && [...(modal?.querySelectorAll?.("[data-browser-action='load']") || [])]
+          .some(button => button.textContent?.trim() === "Reload Saved Version");
+    }
+    if (predicateId === "saving.basic-restored") {
+      return app.state.settings.loadedProfileRef?.id === basicId
+        && Math.abs(Number(app.state.settings.config.t_max) - 3) < 1e-6
+        && !app.commands.isSettingsProfileModified();
+    }
+    if (predicateId === "saving.settings-profile-deleted") {
+      return !!runtime.savedProfileDeleted && !app.commands.findSettingsProfile(runtime.savedProfileId)
+        && guidePredicateSatisfied("saving.basic-restored")
+        && app.state.settings.userDefaultProfileId === runtime.names?.startupSettingsProfileId;
+    }
+    if (predicateId === "saving.solve-complete") {
+      const run = app.state.solve.solveRuns.find(item => item.id === runtime.guideRunId);
+      return !!run?.results
+        && structurallyEqual(run.palette, primary?.filament_ids)
+        && Math.abs(Number(run.config?.t_max) - 3) < 1e-6
+        && run.image?.filename === runtime.tutorialImage?.filename
+        && app.state.ui.currentTab === "solve"
+        && !!app.state.ui.$(`#solveRunCards [data-run-id="${runtime.guideRunId}"]`)
+        && !!app.state.ui.$(`[data-solve-card-kind][data-run-id="${runtime.guideRunId}"]`);
+    }
+    if (predicateId === "saving.run-saved") {
+      const run = app.state.solve.solveRuns.find(item => item.id === runtime.guideRunId);
+      return !!runtime.savedRunId
+        && run?.saved_run_id === runtime.savedRunId
+        && run?.label === runtime.names?.savedRunName;
+    }
+    if (predicateId === "saving.history-cleared") return runtime.historyCleared === true
+      && app.state.solve.solveRuns.length === 0
+      && !!runtime.savedRunId;
+    if (predicateId === "saving.deck-cleared") return runtime.deckCleared === true && app.state.palette.deck.length === 0;
+    if (predicateId === "saving.run-loaded") {
+      const run = app.state.solve.solveRuns.find(item => item.id === runtime.loadedRunId);
+      return !!run?.results
+        && run.source_save_id === runtime.savedRunId
+        && structurallyEqual(run.palette, primary?.filament_ids)
+        && app.state.palette.activeDeckId != null
+        && app.state.image.selectedImage?.filename === runtime.tutorialImage?.filename;
+    }
+    if (predicateId === "saving.run-settings-open") return runtime.runSettingsOpen === true;
+    if (predicateId === "saving.temp-loaded") return app.state.settings.loadedProfileRef?.kind === "temporary"
+      && app.state.settings.temporarySettingsProfile?.source?.run_id === runtime.loadedRunId;
+    if (predicateId === "saving.run-save-deleted") {
+      return runtime.savedRunDeleted === true
+        && app.state.solve.solveRuns.some(run => run.id === runtime.loadedRunId)
+        && app.state.settings.loadedProfileRef?.kind === "temporary";
+    }
     return false;
   }
 
   function captureGuideCompletion(currentStep, detail = {}) {
     const runtime = context(app);
+    if (currentStep.id === "save-palette" && detail.savedRecordId) runtime.savedPaletteId = detail.savedRecordId;
+    if (currentStep.id === "load-saved-palette" && detail.deckCardId) runtime.loadedPaletteId = detail.deckCardId;
+    if (currentStep.id === "delete-saved-palette-record" && detail.savedRecordId === runtime.savedPaletteId) runtime.savedPaletteDeleted = true;
+    if (currentStep.id === "save-named-settings-profile" && detail.profileId) runtime.savedProfileId = detail.profileId;
+    if (currentStep.id === "delete-named-settings-profile" && detail.profileId === runtime.savedProfileId) runtime.savedProfileDeleted = true;
+    if (currentStep.id === "solve-for-saving-loading" && detail.runId) runtime.guideRunId = detail.runId;
+    if (currentStep.id === "save-solved-run" && detail.runId === runtime.guideRunId) runtime.savedRunId = detail.saveId;
+    if (currentStep.id === "clear-solve-history-for-load") runtime.historyCleared = true;
+    if (currentStep.id === "clear-palette-deck-for-run-load") runtime.deckCleared = true;
+    if (currentStep.id === "load-complete-saved-run" && detail.saveId === runtime.savedRunId) runtime.loadedRunId = detail.cardId;
+    if (currentStep.id === "open-run-settings" && detail.runId === runtime.loadedRunId) runtime.runSettingsOpen = true;
+    if (currentStep.id === "delete-saved-run-record" && detail.saveId === runtime.savedRunId) runtime.savedRunDeleted = true;
     if (
       currentStep.id === "printer-select"
       && !tutorialPrinterReady()
@@ -496,10 +977,23 @@ export function installFeaturesGuidesTargets(app) {
       );
     }
     if (currentStep.id === "suggest-palettes") {
+      const paletteColors = Number(app.state.ui.$("#targetFilamentCount")?.value);
+      const suggestions = Number(app.state.ui.$("#targetSuggestCount")?.value);
+      if (paletteColors !== 3 || suggestions < 2) {
+        runtime.paletteA = null;
+        runtime.paletteB = null;
+        const correction = paletteColors !== 3 && suggestions < 2
+          ? "Set Palette Colors to exactly 3 and Suggestions to at least 2, then try again."
+          : paletteColors !== 3
+            ? "Set Palette Colors to exactly 3, then try again."
+            : "Set Suggestions to at least 2, then try again.";
+        app.commands.showToast(correction, "warn");
+        return;
+      }
       const addedIds = Array.isArray(detail.cardIds) ? detail.cardIds : [];
-      const cards = addedIds
+      const cards = [...new Set(addedIds)]
         .map(id => app.state.palette.stagingDeck.find(card => card.id === id))
-        .filter(Boolean);
+        .filter(card => Array.isArray(card?.filament_ids) && card.filament_ids.length === 3);
       if (cards.length >= 2) {
         runtime.paletteA = { id: cards[0].id, name: cards[0].name };
         runtime.paletteB = { id: cards[1].id, name: cards[1].name };
@@ -507,7 +1001,7 @@ export function installFeaturesGuidesTargets(app) {
         runtime.paletteA = null;
         runtime.paletteB = null;
         app.commands.showToast(
-          "Prisma Generator Basics needs at least two new suggestions. Keep the tutorial filament selection and suggestion controls unchanged, then try again.",
+          "Prisma Generator Basics needs at least two new three-color suggestions. Keep Palette Colors at 3 and Suggestions at 2 or more, then try again.",
           "warn",
         );
       }
@@ -516,9 +1010,26 @@ export function installFeaturesGuidesTargets(app) {
       if (detail.action === "added" && detail.card?.id?.startsWith("manual-")) {
         runtime.manualCardId = detail.card.id;
         runtime.manualCardRemoved = false;
+        app.commands.activateDeckCard(detail.card.id);
       } else if (detail.action === "removed" && detail.cardId === runtime.manualCardId) {
         runtime.manualCardRemoved = true;
       }
+    }
+    if (
+      currentStep.id === "add-palette-variant"
+      && detail.action === "added"
+      && detail.card?.id?.startsWith("variant-")
+      && detail.sourceCardId === runtime.paletteA?.id
+    ) {
+      runtime.variantCardId = detail.card.id;
+      runtime.variantCardRemoved = false;
+    }
+    if (
+      currentStep.id === "remove-palette-variant"
+      && detail.action === "removed"
+      && detail.cardId === runtime.variantCardId
+    ) {
+      runtime.variantCardRemoved = true;
     }
     if (currentStep.id === "advanced-settings" && detail.visible === true) {
       runtime.advancedSeenOn = true;
@@ -551,9 +1062,21 @@ export function installFeaturesGuidesTargets(app) {
     const runtime = context(app);
     const replacements = {
       "{{tutorialImage}}": runtime.tutorialImageFilename || "the tutorial image",
+      "{{imagesFolder}}": runtime.imagesFolder || "the Images folder",
       "{{paletteA}}": runtime.paletteA?.name || "the first suggested palette",
       "{{paletteB}}": runtime.paletteB?.name || "the second suggested palette",
     };
+    const resolvePath = path => path.split(".").reduce(
+      (current, part) => (current == null ? undefined : current[part]),
+      runtime,
+    );
+    for (const [token, path] of Object.entries(app.state.guides.currentGuide?.text_substitutions || {})) {
+      const replacement = resolvePath(path);
+      if (!["string", "number"].includes(typeof replacement)) {
+        throw new Error(`Guide text substitution ${token} is unavailable`);
+      }
+      replacements[token] = String(replacement);
+    }
     return Object.entries(replacements).reduce(
       (text, [token, replacement]) => text.split(token).join(replacement),
       String(value || ""),
@@ -561,167 +1084,32 @@ export function installFeaturesGuidesTargets(app) {
   }
 
   async function prepareGuideRuntime(guide) {
-    app.state.guides.runtimeContext = {};
-    if (guide.prepare_id !== "basics") return true;
-    const requirements = {
-      tutorial_printer: true,
-      tutorial_image: true,
-      tutorial_settings: true,
-      palette_controls: true,
-      ...(guide.preparation || {}),
-    };
-    if (
-      app.state.image.activeImportBatchId
-      || app.state.ui.activeSuggestJobId
-      || app.state.solve.solveStartPending
-      || app.state.solve.paletteBatchStartPending
-      || app.state.solve.activeSolveJobId
-      || app.state.export.exportRunning
-      || app.state.export.activeExportJobId
-    ) {
-      app.commands.showToast(`Finish the current operation before starting ${guide.title}.`, "warn");
-      return false;
-    }
-    if (app.state.palette.manualVariantDraft) {
-      app.commands.showToast(
-        `Finish or cancel the current Manual palette variant before starting ${guide.title}.`,
-        "warn",
-      );
-      return false;
-    }
-    const tutorialControls = ["targetFilamentCount", "targetSwapCount", "targetSuggestCount"];
-    const initialControlValues = requirements.palette_controls
-      ? Object.fromEntries(
-        tutorialControls.map(id => [id, app.state.ui.$(`#${id}`)?.value ?? null]),
-      )
-      : null;
-    const initialCandidateSelection = requirements.palette_controls
-      ? [...app.state.palette.candidateSelection]
-      : null;
-    const initialCandidateInitialized = requirements.palette_controls
-      ? app.state.palette.candidateInitialized
-      : null;
-    const initialSettingsState = requirements.tutorial_settings
-      ? app.commands._captureLiveSettingsProfileState()
-      : null;
-    let prepared;
-    try {
-      const prepareOptions = {
-        includeTutorialPrinter: requirements.tutorial_printer,
-        includeTutorialImage: requirements.tutorial_image,
-      };
-      prepared = await app.api.prepareBasicsGuide(prepareOptions);
-      if (requirements.tutorial_printer && prepared.tutorial_printer?.status !== "ready") {
-        const condition = prepared.tutorial_printer?.status === "modified" ? "modified" : "missing";
-        const restore = await app.commands.appConfirm(
-          `The Tutorial Printer profile is ${condition}. Restore the built-in tutorial copy? Other printer profiles will not be changed.`,
-          { title: "Restore Tutorial Printer", ok: "Restore", cancel: "Cancel Guide" },
-        );
-        if (!restore) return false;
-        prepared = await app.api.prepareBasicsGuide({
-          ...prepareOptions,
-          restoreTutorialPrinter: true,
-        });
-      }
-      if (
-        (requirements.tutorial_printer && (
-          prepared.tutorial_printer?.status !== "ready"
-          || !prepared.tutorial_printer?.profile
-        ))
-        || (requirements.tutorial_image && !prepared.tutorial_image?.filename)
-      ) {
-        throw new Error("the tutorial inputs were not returned in a usable state");
-      }
-      if (requirements.tutorial_printer) await app.commands.loadPrinters();
-      if (requirements.tutorial_image) app.commands.upsertImageLibraryEntry(prepared.tutorial_image);
-      if (requirements.tutorial_settings) {
-        const systemProfile = app.commands.findSettingsProfile(app.state.ui.SYSTEM_SETTINGS_PROFILE_ID);
-        if (!systemProfile) throw new Error("the built-in Basic Settings Profile is unavailable");
-        const now = new Date().toISOString();
-        const tutorialProfile = {
-          ...app.commands._cloneValue(systemProfile),
-          id: "temporary-guide-basics",
-          kind: "temporary",
-          name: "Tutorial Basics",
-          settings: {
-            ...app.commands._cloneValue(systemProfile.settings || {}),
-            image_sample_pitch_mm: 0.4,
-            solver_fine_pitch_mm: 0.4,
-          },
-          modules: app.commands._cloneValue(systemProfile.modules || {}),
-          source: {
-            kind: "guide",
-            label: guide.title,
-          },
-          created_at: now,
-          updated_at: now,
-        };
-        await app.commands._doLoadSettingsProfile(tutorialProfile);
-      }
-    } catch (error) {
-      app.commands.showToast(`Could not prepare ${guide.title}: ${error.message}`, "error");
-      return false;
-    }
-    app.state.guides.runtimeContext = {
-      tutorialImageFilename: prepared.tutorial_image?.filename || null,
-      tutorialPrinterProfile: prepared.tutorial_printer?.profile || null,
-      paletteA: null,
-      paletteB: null,
-      manualCardId: null,
-      manualCardRemoved: false,
-      advancedSeenOn: false,
-      runAId: null,
-      runBId: null,
-      exportId: null,
-      initialCandidateSelection,
-      initialCandidateInitialized,
-      initialControlValues,
-      initialSettingsState,
-      preparation: requirements,
-    };
-    if (requirements.palette_controls) {
-      app.commands.selectAllCandidates();
-      app.state.palette.candidateInitialized = true;
-      const tutorialValues = {
-        targetFilamentCount: "3",
-        targetSwapCount: "0",
-        targetSuggestCount: "5",
-      };
-      for (const [id, value] of Object.entries(tutorialValues)) {
-        const input = app.state.ui.$(`#${id}`);
-        if (input) input.value = value;
-      }
-    }
-    return true;
+    return app.commands.prepareGuideWorkspace(guide);
   }
 
-  async function cleanupGuideRuntime(guide) {
-    const runtime = context(app);
-    if (guide?.prepare_id !== "basics") return;
-    if (runtime.initialControlValues) {
-      app.state.palette.candidateSelection = new Set(runtime.initialCandidateSelection || []);
-      app.state.palette.candidateInitialized = !!runtime.initialCandidateInitialized;
-      for (const [id, value] of Object.entries(runtime.initialControlValues)) {
-        const input = app.state.ui.$(`#${id}`);
-        if (input && value !== null) input.value = value;
-      }
-    }
-    if (runtime.initialSettingsState) {
-      await app.commands._restoreLiveSettingsProfileState(runtime.initialSettingsState);
-    }
-    if (app.state.ui.currentTab === "creation") app.commands.renderCreationTab?.();
+  async function cleanupGuideRuntime(guide, options = {}) {
+    return app.commands.cleanupGuideWorkspace(guide, options);
   }
 
-  function validateGuideTargetRegistry() {
-    for (const guide of app.state.guides.definitions || []) {
-      for (const currentStep of app.commands.getAllGuideSteps(guide)) {
+  function validateGuideTargetRegistry(guides = app.state.guides.definitions || []) {
+    for (const guide of guides) {
+      const guideSteps = [
+        ...(guide?.steps || []),
+        ...(guide?.detours || []).flatMap(current => current.steps || []),
+      ];
+      for (const currentStep of guideSteps) {
         if (
           currentStep.completion?.predicate_id
           && !KNOWN_GUIDE_PREDICATES.has(currentStep.completion.predicate_id)
         ) {
           throw new Error(`Unknown guide predicate: ${currentStep.completion.predicate_id}`);
         }
-        if (currentStep.target_id === null && currentStep.reveal_id === null) continue;
+        if (currentStep.target_id === null) {
+          if (currentStep.reveal_id && !KNOWN_GUIDE_REVEALS.has(currentStep.reveal_id)) {
+            throw new Error(`Unknown guide reveal: ${currentStep.reveal_id}`);
+          }
+          continue;
+        }
         const descriptor = TARGETS[currentStep.target_id];
         if (!descriptor) throw new Error(`Unknown guide target: ${currentStep.target_id}`);
         if (descriptor.reveal_id !== currentStep.reveal_id) {
@@ -748,6 +1136,7 @@ export function installFeaturesGuidesTargets(app) {
     guidePredicateSatisfied,
     prepareGuideRuntime,
     resolveGuideTarget,
+    resolveGuideTargetLayout,
     resolveGuideTargetRegions,
     restoreGuidePresentation,
     revealGuideTarget,

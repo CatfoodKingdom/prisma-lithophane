@@ -19,7 +19,7 @@
       document.documentElement.style.colorScheme = resolved;
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=2026-08-01-guide-catalog-v1">
+  <link rel="stylesheet" href="style.css?v=2026-08-04-settings-polish-v3">
 </head>
 <body>
   <div class="app-shell">
@@ -97,7 +97,7 @@
       <section class="panel mode-panel">
         <div class="mode-switch" id="tabSwitch">
           <div class="workflow-tab-strip" data-guide-target="workflow.tabs">
-            <button class="mode-button is-active" data-tab="image">
+            <button class="mode-button is-active" data-tab="image" data-guide-target="workflow.image">
               <span class="step-number">1</span> Image
             </button>
             <span class="step-connector"></span>
@@ -165,7 +165,7 @@
             <div class="panel inset-panel image-library" id="imageLibraryPanel" data-state="contracted"
                  data-guide-target="image.library">
               <div class="library-title-bar" id="libraryTitleBar">
-                <span class="pane-title">Library</span>
+                <span class="pane-title">Image Library</span>
                 <div class="library-title-actions">
                   <label class="ghost-button xxs upload-btn" title="Add a source image from your computer">
                     Add Image
@@ -362,9 +362,13 @@
                   </button>
                   &harr; Width
                 </label>
-                <div class="input-with-unit" data-guide-target-part="image.canvas-dimensions">
-                  <input type="text" id="outputWidthMm" class="unit-input" value="100.0">
-                  <span class="unit-suffix">mm</span>
+                <div class="solve-grid-dimension-control" data-guide-target-part="image.canvas-dimensions">
+                  <span class="stg-field-warn solve-grid-dimension-marker" id="outputWidthSolveGridWarning"
+                        aria-hidden="true">⚠</span>
+                  <div class="input-with-unit">
+                    <input type="text" id="outputWidthMm" class="unit-input" value="100.0">
+                    <span class="unit-suffix">mm</span>
+                  </div>
                 </div>
                 <input type="range" id="widthSlider" class="control-slider" min="10" max="300" step="0.5" value="100"
                        data-guide-target-part="image.canvas-dimensions">
@@ -378,12 +382,19 @@
                   </button>
                   &varr; Height
                 </label>
-                <div class="input-with-unit" data-guide-target-part="image.canvas-dimensions">
-                  <input type="text" id="outputHeightMm" class="unit-input" value="100.0">
-                  <span class="unit-suffix">mm</span>
+                <div class="solve-grid-dimension-control" data-guide-target-part="image.canvas-dimensions">
+                  <span class="stg-field-warn solve-grid-dimension-marker" id="outputHeightSolveGridWarning"
+                        aria-hidden="true">⚠</span>
+                  <div class="input-with-unit">
+                    <input type="text" id="outputHeightMm" class="unit-input" value="100.0">
+                    <span class="unit-suffix">mm</span>
+                  </div>
                 </div>
                 <input type="range" id="heightSlider" class="control-slider" min="10" max="300" step="0.5" value="100"
                        data-guide-target-part="image.canvas-dimensions">
+
+                <div class="stg-warn image-solve-grid-warning is-hidden" id="imageSolveGridWarning"
+                     aria-live="polite"></div>
 
                 <!-- Divider -->
                 <hr class="ctrl-divider">
@@ -536,7 +547,7 @@
             <button type="button" class="segmented-btn is-active" id="paletteModeAuto" data-panel="auto" role="tab" aria-selected="true" aria-controls="panelAutoSuggest">Auto-Suggest</button>
             <button type="button" class="segmented-btn" id="paletteModeManual" data-panel="manual" role="tab" aria-selected="false" aria-controls="panelManualBuilder">Manual</button>
           </div>
-          <p class="creation-mode-note" id="creationModeNote">Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.</p>
+          <p class="creation-mode-note" id="creationModeNote">Choose the exact number of palette colors and how many suggestions to create. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.</p>
 
           <div class="creation-layout">
 
@@ -561,53 +572,27 @@
                   </div>
                   <!-- Controls + AMS preview -->
                   <div class="creation-controls-pane">
-                    <div class="suggest-field" title="Maximum colored filaments per AMS load. Extra color-load tiers can add more total colors across additional AMS loads.">
-                      <label>Max colors</label>
+                    <div class="suggest-field" title="Exact number of colored filaments in each suggested palette, not counting the reserved base/cap filament.">
+                      <label for="targetFilamentCount">Palette Colors</label>
                       <input type="number" id="targetFilamentCount" class="control-input" value="" min="2" max="16" step="1" autocomplete="off">
-                    </div>
-                    <div class="suggest-field" title="Additional AMS loading groups the suggestion search may consider beyond the first load.">
-                      <label>Extra color loads</label>
-                      <input type="number" id="targetSwapCount" class="control-input" value="0" min="0" max="4" step="1">
                     </div>
                     <div class="suggest-field">
                       <label for="targetSuggestCount">Suggestions</label>
                       <input type="number" id="targetSuggestCount" class="control-input" value="5" min="1" max="10" step="1">
                     </div>
                     <div class="suggest-field">
-                      <label for="paletteSuggestMode">Solve mode</label>
+                      <label for="paletteSuggestMode">Solve Mode</label>
                       <select id="paletteSuggestMode" class="control-input">
                         <option value="standard">Color</option>
                         <option value="luminance_detail">Luminance</option>
                       </select>
                     </div>
-                    <div class="ams-preview" id="amsPreview"></div>
+                    <div class="ams-preview" id="amsPreview" aria-live="polite" aria-atomic="true"></div>
                     <div class="palette-suggest-actions">
                       <button class="primary-button small" id="suggestPalettesBtn">Suggest Palettes</button>
                     </div>
                   </div>
                 </div>
-                <details class="creation-settings-shell" id="creationSettingsShell">
-                  <summary class="creation-settings-summary">
-                    <span class="creation-settings-summary-title">Palette Suggestion Settings</span>
-                  </summary>
-                  <div class="creation-settings-card" id="creationDeckSettings">
-                    <div class="creation-settings-grid">
-                      <label class="creation-setting-row" title="Minimum coverage gain per added color required before recommending a larger palette or computing another color-load tier.">
-                        <span>Min added-color gain</span>
-                        <div class="input-with-unit creation-setting-unit">
-                          <input type="text" id="paletteSwapThreshold" class="unit-input" value="2.0" inputmode="decimal" autocomplete="off">
-                          <span class="unit-suffix">%</span>
-                        </div>
-                      </label>
-                      <div class="creation-setting-row creation-setting-row-check" title="Compute all color-load tiers even if the improvement falls below the threshold.">
-                        <span>Compute all load tiers</span>
-                        <label class="stg-check">
-                          <input type="checkbox" id="paletteForceAllTiers"> Enabled
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                </details>
               </div>
             </div>
 
@@ -637,7 +622,6 @@
                         title="No suggested palettes to clear" aria-label="No suggested palettes to clear"
                         aria-disabled="true" disabled>Clear</button>
               </div>
-              <p class="small-copy" id="suggestCapacityNote" hidden></p>
               <div class="deck-cards" id="deckCards">
                 <p class="muted-line palette-empty-msg">Suggest palettes to stage them here</p>
               </div>
@@ -665,7 +649,7 @@
         <!-- #settingsTabNav removed in Task 6 S3 (Settings destination retired; #tabSettings is now a hidden grid host only) -->
         <div class="settings-grid">
           <!-- ── Bucket: Static ─────────────────────────────────────────── -->
-          <div class="preset-bar settings-profile-bar" data-bucket="static">
+          <div class="preset-bar settings-profile-bar" data-bucket="static" data-guide-target="settings.profiles">
             <div class="settings-profile-section-header">
               <span class="settings-profile-section-title">Settings Profile</span>
             </div>
@@ -687,83 +671,95 @@
             </div>
           </div>
 
-          <div class="settings-derived" data-bucket="static" id="derivedParams"></div>
           <!-- ── Bucket: Essentials ─────────────────────────────────────── -->
           <div class="settings-group" data-bucket="geometry" data-settings-group="geometry">
             <h4 class="settings-section-head">Essentials</h4>
 
             <!-- Stack cross-section diagram -->
-            <div class="stack-diagram">
-              <svg viewBox="20 96 270 130" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+            <div class="stack-diagram" data-guide-visual="lithophane-stack">
+              <svg viewBox="0 96 300 130" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
                 <!-- White base -->
-                <rect x="80" y="170" width="140" height="30" fill="#e8e8e8" stroke="#999" stroke-width="1"/>
-                <text x="150" y="189" text-anchor="middle" font-size="9" fill="#666">white base</text>
+                <rect x="80" y="186" width="140" height="8" fill="#e8e8e8" stroke="#999" stroke-width="1"/>
 
-                <!-- Color layers (3 example layers) -->
-                <rect x="80" y="146" width="140" height="24" fill="#d4e8f0" stroke="#999" stroke-width="1"/>
-                <line x1="80" y1="154" x2="220" y2="154" stroke="#999" stroke-width="0.5" stroke-dasharray="2,2"/>
-                <line x1="80" y1="162" x2="220" y2="162" stroke="#999" stroke-width="0.5" stroke-dasharray="2,2"/>
-                <rect x="80" y="146" width="140" height="8" fill="#7ecbea" stroke="none" opacity="0.5"/>
-                <rect x="80" y="154" width="140" height="8" fill="#e87e9a" stroke="none" opacity="0.5"/>
-                <rect x="80" y="162" width="140" height="8" fill="#f0c95e" stroke="none" opacity="0.5"/>
-                <rect x="80" y="146" width="140" height="24" fill="none" stroke="#999" stroke-width="1"/>
-                <text x="150" y="160" text-anchor="middle" font-size="8" fill="#555">color layers</text>
+                <!-- Five color layers using three non-CMY filament colors -->
+                <rect x="80" y="146" width="140" height="8" fill="#7a5cc7"/>
+                <rect x="80" y="154" width="140" height="8" fill="#ed7d31"/>
+                <rect x="80" y="162" width="140" height="8" fill="#4f9d69"/>
+                <rect x="80" y="170" width="140" height="8" fill="#7a5cc7"/>
+                <rect x="80" y="178" width="140" height="8" fill="#ed7d31"/>
+                <rect x="80" y="146" width="140" height="40" fill="none" stroke="#999" stroke-width="1"/>
+                <text x="150" y="168" text-anchor="middle" font-size="8" font-weight="600" fill="#fff">color layers</text>
 
                 <!-- White cap -->
                 <rect x="80" y="130" width="140" height="16" fill="#f0f0f0" stroke="#999" stroke-width="1"/>
                 <text x="150" y="141" text-anchor="middle" font-size="8" fill="#666">white cap</text>
 
+                <!-- Dashed guides mark each layer-height unit -->
+                <g stroke="#666" stroke-width="0.5" stroke-dasharray="3,2" opacity="0.9">
+                  <line x1="80" y1="138" x2="220" y2="138"/>
+                  <line x1="80" y1="146" x2="220" y2="146"/>
+                  <line x1="80" y1="154" x2="220" y2="154"/>
+                  <line x1="80" y1="162" x2="220" y2="162"/>
+                  <line x1="80" y1="170" x2="220" y2="170"/>
+                  <line x1="80" y1="178" x2="220" y2="178"/>
+                  <line x1="80" y1="186" x2="220" y2="186"/>
+                </g>
+
                 <!-- Bracket: base [ -->
-                <line x1="72" y1="170" x2="72" y2="200" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="170" x2="77" y2="170" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="200" x2="77" y2="200" stroke="#444" stroke-width="0.8"/>
-                <text x="66" y="188" text-anchor="end" font-size="8" fill="#333">base</text>
+                <line x1="72" y1="186" x2="72" y2="194" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="186" x2="77" y2="186" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="194" x2="77" y2="194" stroke="var(--ink)" stroke-width="0.8"/>
+                <text x="66" y="193" text-anchor="end" font-size="8" fill="var(--ink)">base thickness</text>
 
                 <!-- Bracket: min cap [ -->
-                <line x1="72" y1="130" x2="72" y2="146" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="130" x2="77" y2="130" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="146" x2="77" y2="146" stroke="#444" stroke-width="0.8"/>
-                <text x="66" y="141" text-anchor="end" font-size="8" fill="#333">min cap</text>
+                <line x1="72" y1="130" x2="72" y2="146" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="130" x2="77" y2="130" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="146" x2="77" y2="146" stroke="var(--ink)" stroke-width="0.8"/>
+                <text x="66" y="141" text-anchor="end" font-size="8" fill="var(--ink)">min cap layers</text>
 
                 <!-- Bracket: max total ] -->
-                <line x1="228" y1="130" x2="228" y2="200" stroke="#444" stroke-width="0.8"/>
-                <line x1="222" y1="130" x2="228" y2="130" stroke="#444" stroke-width="0.8"/>
-                <line x1="222" y1="200" x2="228" y2="200" stroke="#444" stroke-width="0.8"/>
-                <text x="236" y="168" font-size="8" fill="#333">max total</text>
+                <line x1="228" y1="130" x2="228" y2="194" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="222" y1="130" x2="228" y2="130" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="222" y1="194" x2="228" y2="194" stroke="var(--ink)" stroke-width="0.8"/>
+                <text x="236" y="159" font-size="8" fill="var(--ink)">
+                  <tspan x="236" dy="0">max total</tspan>
+                  <tspan x="236" dy="10">thickness</tspan>
+                </text>
 
                 <!-- Bracket: layer ht [ -->
-                <line x1="72" y1="154" x2="72" y2="162" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="154" x2="77" y2="154" stroke="#444" stroke-width="0.8"/>
-                <line x1="72" y1="162" x2="77" y2="162" stroke="#444" stroke-width="0.8"/>
-                <text x="66" y="161" text-anchor="end" font-size="8" fill="#333">layer ht</text>
+                <line x1="72" y1="154" x2="72" y2="162" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="154" x2="77" y2="154" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="72" y1="162" x2="77" y2="162" stroke="var(--ink)" stroke-width="0.8"/>
+                <text x="66" y="161" text-anchor="end" font-size="8" fill="var(--ink)">layer ht</text>
 
                 <!-- Bracket: pixel size |___| -->
-                <line x1="80" y1="208" x2="98" y2="208" stroke="#444" stroke-width="0.8"/>
-                <line x1="80" y1="202" x2="80" y2="208" stroke="#444" stroke-width="0.8"/>
-                <line x1="98" y1="202" x2="98" y2="208" stroke="#444" stroke-width="0.8"/>
-                <text x="89" y="218" text-anchor="middle" font-size="8" fill="#333">pixel size</text>
+                <line x1="80" y1="202" x2="98" y2="202" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="80" y1="196" x2="80" y2="202" stroke="var(--ink)" stroke-width="0.8"/>
+                <line x1="98" y1="196" x2="98" y2="202" stroke="var(--ink)" stroke-width="0.8"/>
+                <text x="89" y="212" text-anchor="middle" font-size="8" fill="var(--ink)">pixel size</text>
 
                 <!-- Viewing side label + arrow -->
-                <text x="150" y="108" text-anchor="middle" font-size="9" font-weight="600" fill="#333">viewing side</text>
-                <line x1="150" y1="112" x2="150" y2="122" stroke="#444" stroke-width="0.8"/>
-                <polygon points="150,125 147,119 153,119" fill="#444"/>
+                <text x="150" y="108" text-anchor="middle" font-size="9" font-weight="600" fill="var(--ink)">viewing side</text>
+                <line x1="150" y1="112" x2="150" y2="122" stroke="var(--ink)" stroke-width="0.8"/>
+                <polygon points="150,125 147,119 153,119" fill="var(--ink)"/>
               </svg>
             </div>
 
             <table class="settings-table">
-              <tr><td title="Choose whether the solve prioritizes direct color-stack matching or uses the white cap as a luminance/detail carrier.">Solve Mode</td><td>
+              <tr data-guide-target-part="settings.essentials-resolution"><td title="Choose whether the solve prioritizes direct color-stack matching or uses the white cap as a luminance/detail carrier.">Solve Mode</td><td>
                 <div class="segmented-control solve-mode-control" id="cfgLuminanceMode" role="radiogroup" aria-label="Solve mode">
                   <button type="button" class="segmented-btn is-active" data-value="standard" role="radio" aria-checked="true" title="Color mode prioritizes direct color-stack matching.">Color</button>
                   <button type="button" class="segmented-btn" data-value="luminance_detail" role="radio" aria-checked="false" title="Luminance mode uses the white cap as a major luminance/detail carrier.">Luminance</button>
                 </div>
               </td></tr>
-              <tr><td title="Spacing of the color solver grid. It cannot be smaller than the active nozzle diameter; larger values reduce solve and export cost but also reduce detail.">Solve Pitch <span class="stg-range" id="cfgSolvePitchHint">minimum 0.20 mm</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgSolvePitch" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
-              <tr><td title="Maximum total print thickness including base, color layers, and cap.">Max Total Thickness <span class="stg-range">1.0–5.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgTMax" class="unit-input" value="2.5"><span class="unit-suffix">mm</span></div></td></tr>
-              <tr><td title="Height of each printed layer. Must match your slicer layer height exactly.">Layer Height <span class="stg-range">0.04–0.20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgLayerHeight" class="unit-input" value="0.08"><span class="unit-suffix">mm</span></div></td></tr>
-              <tr><td title="White filament used for both the solid base plate and the viewing-side cap.">White Base/Cap Filament</td><td><select id="cfgBaseFilament" class="stg-select stg-filament-select"></select></td></tr>
-              <tr><td title="Thickness of the solid base plate.">Base Thickness <span class="stg-range">0.08–1.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDWb" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr data-guide-target-part="settings.essentials-resolution"><td title="Spacing of the color solver grid. It cannot be smaller than the active nozzle diameter; larger values reduce solve and export cost but also reduce detail.">Solve Pitch <span class="stg-range" id="cfgSolvePitchHint">minimum 0.20 mm</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgSolvePitch" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr data-guide-target-part="settings.essentials-construction"><td title="Maximum total print thickness including base, color layers, and cap.">Max Total Thickness <span class="stg-range">1.0–5.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgTMax" class="unit-input" value="2.5"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr data-guide-target-part="settings.essentials-construction"><td title="Height of each printed layer. Must match your slicer layer height exactly.">Layer Height <span class="stg-range">0.04–0.20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgLayerHeight" class="unit-input" value="0.08"><span class="unit-suffix">mm</span></div></td></tr>
+              <tr data-guide-target-part="settings.essentials-construction"><td title="White filament used for both the solid base plate and the viewing-side cap.">White Base/Cap Filament</td><td><select id="cfgBaseFilament" class="stg-select stg-filament-select"></select></td></tr>
+              <tr data-guide-target-part="settings.essentials-construction"><td title="Thickness of the solid base plate.">Base Thickness <span class="stg-range">0.08–1.0</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDWb" class="unit-input" value="0.20"><span class="unit-suffix">mm</span></div></td></tr>
             </table>
-            <div class="stg-footnote" id="stackDerived"></div>
+            <div class="stg-footnote settings-derived-footnote" id="stackDerived"></div>
+            <div class="settings-derived" data-bucket="static" id="derivedParams"></div>
           </div>
 
           <!-- ── Bucket: Preprocessing Modules ──────────────────────────── -->
@@ -789,7 +785,7 @@
           <div class="settings-group" data-bucket="solver" data-settings-group="solver">
             <h4 class="settings-section-head">Color Solver</h4>
             <table class="settings-table">
-              <tr><td title="Forward color model used for recipe lookup, previews, diagnostics, and luminance cap response.">Appearance Model</td><td>
+              <tr class="advanced-setting"><td title="Forward color model used for recipe lookup, previews, diagnostics, and luminance cap response.">Appearance Model</td><td>
                 <select id="cfgAppearanceModelProvider" class="stg-select">
                   <option value="historical_spline">Color Model v1</option>
                   <option value="photo_stack_bundle" selected>Color Model v2</option>
@@ -805,7 +801,6 @@
                 </select>
               </td></tr>
               <tr data-guide-target="settings.white-point-rescale"><td title="Scale image targets so source white maps to the print's paper white (thinnest white stack). Keeps pale tints in gamut instead of clipping them to white. Predicted previews are print-relative and will read slightly darker/warmer when enabled.">White-point rescale</td><td><label class="stg-check"><input type="checkbox" id="cfgGamutWhiteRescale"> Enabled</label></td></tr>
-              <tr><td title="Apply calibrated correction data during solve LUT construction. Color Model v1 uses legacy pair corrections; Color Model v2 uses its correction layer.">Color corrections</td><td><label class="stg-check"><input type="checkbox" id="cfgUseCorrections" checked> Enabled</label></td></tr>
               <tr><td title="Maximum number of distinct colored filaments used to build a planned color region's recipe. Higher values can match colors better but increase recipe search cost.">Max colors per region <span class="stg-range">1–7</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgKMax" class="unit-input" value="3"></div></td></tr>
               <tr class="advanced-setting"><td title="How far (OKLab dE) a color may be from the nearest printable color before it is treated as out of gamut and remapped. Applies the same way in every out-of-gamut handling mode. Lower values are stricter.">Color mismatch tolerance <span class="stg-range">0.01–0.20</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDeThreshold" class="unit-input" value="0.01"><span class="unit-suffix">dE</span></div></td></tr>
               <tr class="advanced-setting"><td title="Trade-off between color accuracy and brightness accuracy when matching printable recipes. Center = balanced. Each step right makes color errors count less against brightness (one step ≈ accepting double the brightness error to fix the same color error); steps left favor tone instead. The number shown is the raw weight used by the solver.">Chroma weight <span class="stg-range">0.125–8.0</span></td><td><div class="chroma-weight-control"><div class="chroma-weight-track"><div class="chroma-weight-labels"><span>Tone</span><span>Color</span></div><input type="range" id="cfgChromaWeight" class="control-slider slider-with-center" min="-3" max="3" step="0.25" value="0" data-center="0"></div><span class="range-value" id="cfgChromaWeightReadout">1.00</span></div></td></tr>
@@ -827,14 +822,14 @@
                   <option value="narrow">Narrow</option>
                   <option value="standard">Standard</option>
                   <option value="broad">Broad</option>
+                  <option value="custom">Custom</option>
                 </select>
               </td></tr>
               <tr class="advanced-setting"><td title="Allow localized solve-grid pixels inside a broader color region to use a better-matching recipe when the color improvement is strong enough. This can preserve fine image detail, but may create more small recipe patches.">Local recipe corrections</td><td><label class="stg-check"><input type="checkbox" id="cfgStage2FineOverride" checked> Enabled</label></td></tr>
+              <tr class="neutral-field-custom-row advanced-setting"><td title="Maximum normalized chroma treated as neutral when Custom protection is selected.">Neutral chroma cutoff <span class="stg-range">0–1</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgNeutralFieldProtectionCutoff" class="unit-input" value="0.020" min="0" max="1" step="0.001"></div></td></tr>
               <tr class="advanced-setting"><td title="Refine recipe boundaries after region solving: boundary pixels adopt a neighboring recipe where that clearly lowers color error. Can run multiple passes when Mutation passes is above 1.">Boundary mutation</td><td><label class="stg-check"><input type="checkbox" id="cfgStage2BoundaryMutation" checked> Enabled</label></td></tr>
               <tr class="boundary-mutation-field advanced-setting"><td title="Maximum number of boundary refinement passes. Each pass can move a recipe boundary by one pixel; passes stop early once no further improvements are found. 1 preserves the old single-pass default.">Mutation passes <span class="stg-range">1–16</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMaxPasses" class="unit-input" placeholder="1"></div></td></tr>
-              <tr class="boundary-mutation-field advanced-setting"><td title="Only consider boundary pixels whose current color error is at or above this percentile of all boundary candidates, recomputed each pass. Empty = no filter (all boundary candidates eligible).">Mutation current-dE percentile</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationPercentile" class="unit-input" placeholder="off"><span class="unit-suffix">pctl</span></div></td></tr>
               <tr class="boundary-mutation-field advanced-setting"><td title="Minimum average color-error improvement (dE) a connected patch must achieve to be accepted. Empty = 0.010.">Mutation min gain</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMinGain" class="unit-input" placeholder="0.010"><span class="unit-suffix">dE</span></div></td></tr>
-              <tr class="boundary-mutation-field advanced-setting"><td title="Minimum shared boundary with the donor region: an accepted patch must touch the region it borrows its recipe from along at least this length. Empty = 1 pixel of contact.">Mutation min contact</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgStage2BoundaryMutationMinComponent" class="unit-input" placeholder="off"><span class="unit-suffix">mm</span></div></td></tr>
             </table>
           </div>
 
@@ -842,11 +837,11 @@
           <div class="settings-group" data-bucket="white-cap" data-settings-group="white-cap">
             <h4 class="settings-section-head" data-guide-target-part="settings.white-cap.overview">White Cap</h4>
             <table class="settings-table" data-guide-target-part="settings.white-cap.overview">
-              <tr><td title="Minimum number of white cap layers above color layers. The millimeter thickness is this layer count multiplied by the current layer height.">Min Cap Layers <span class="stg-range">1+</span></td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDWcMin" class="unit-input" value="2" min="1" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
+              <tr><td title="Minimum number of white cap layers above color layers. The millimeter thickness is this layer count multiplied by the current layer height.">Min Cap Layers <span class="stg-range">1+</span></td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDWcMin" class="unit-input" value="2" min="1" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
             </table>
             <h5 class="settings-subsection-head" data-guide-target-part="settings.white-cap.boundary">Boundary</h5>
             <table class="settings-table" data-guide-target-part="settings.white-cap.boundary">
-              <tr class="luminance-mode-field luminance-limit-row"><td title="Controls whether broad luminance shading is carried more by the smooth boundary cap or by fine detail cap relief.">Shading balance <span class="stg-range">0-100</span></td><td><div class="luminance-limit-control"><button class="ghost-button xxs" id="cfgBaseShadingLimitSuggest" type="button" title="Suggest a shading balance from the selected image">Suggest</button><div class="range-row luminance-limit-range"><span class="range-end-label">Detail</span><input type="range" id="cfgBaseShadingLimitSlider" min="0" max="100" step="5" value="75"><span class="range-end-label">Smooth</span></div><div class="input-with-unit stg-iwu"><input type="number" id="cfgBaseShadingLimit" class="unit-input" value="75" min="0" max="100" step="5" inputmode="numeric"><span class="unit-suffix">%</span></div></div></td></tr>
+              <tr class="luminance-mode-field luminance-limit-row"><td title="Controls whether broad luminance shading is carried more by the smooth boundary cap or by fine detail cap relief.">Shading balance <span class="stg-range">0-100</span></td><td><div class="luminance-limit-control"><div class="range-row luminance-limit-range"><span class="range-end-label">Detail</span><input type="range" id="cfgBaseShadingLimitSlider" min="0" max="100" step="5" value="75"><span class="range-end-label">Smooth</span></div><button class="ghost-button xxs" id="cfgBaseShadingLimitSuggest" type="button" title="Suggest a shading balance from the selected image">Suggest</button><div class="input-with-unit stg-iwu"><input type="text" id="cfgBaseShadingLimit" class="unit-input" value="75" min="0" max="100" step="5" inputmode="numeric"><span class="unit-suffix">%</span></div></div></td></tr>
               <tr class="cap-mode-field advanced-setting"><td title="Controls the white boundary cap that covers the color stack. Smooth prioritizes a continuous outer surface; Detail Aware preserves more final appearance while keeping the structural boundary cap minimal.">Boundary cap</td><td>
                 <select id="cfgCapMode" class="stg-select">
                   <option value="appearance_bounded_smooth">Detail Aware</option>
@@ -858,7 +853,7 @@
             </table>
             <h5 class="settings-subsection-head detail-section-head" data-guide-target-part="settings.white-cap.detail">Detail</h5>
             <table class="settings-table" data-guide-target-part="settings.white-cap.detail">
-              <tr class="detail-surface-field"><td title="Maximum number of whole white detail layers allowed above the boundary screen. This permits detail height; it does not force the detail cap to use every layer.">Detail depth</td><td><div class="input-with-unit stg-iwu"><input type="number" id="cfgDetailCapMaxLayers" class="unit-input" value="5" min="0" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
+              <tr class="detail-surface-field"><td title="Maximum number of whole white detail layers allowed above the boundary screen. This permits detail height; it does not force the detail cap to use every layer.">Detail depth</td><td><div class="input-with-unit stg-iwu"><input type="text" id="cfgDetailCapMaxLayers" class="unit-input" value="5" min="0" step="1" inputmode="numeric"><span class="unit-suffix">layers</span></div></td></tr>
             </table>
           </div>
 
@@ -1202,7 +1197,7 @@
             <!-- Printer fields -->
             <div class="pc-section">
               <div class="settings-section-head">General</div>
-              <div class="pc-fields">
+              <div class="pc-fields" data-guide-target="printer.configuration-fields">
                 <label class="ctrl-lbl">Name</label>
                 <input type="text" id="pcName" class="control-input">
                 <label class="ctrl-lbl">Print Area X</label>
@@ -1558,7 +1553,7 @@
 
   <div class="topbar-menu help-guides-menu" id="helpGuidesMenu" role="menu" aria-label="Help &amp; Guides" hidden>
     <button type="button" role="menuitem" data-help-guides-action="guided-setup">
-      <span>Guided Setup</span><small>Configure Prisma for your printer</small>
+      <span>First-Time Setup</span><small>Configure Prisma for your printer</small>
     </button>
     <button type="button" role="menuitem" data-help-guides-action="generator-basics">
       <span>Prisma Generator Basics</span><small>Create and export a tutorial lithophane</small>
@@ -1593,6 +1588,25 @@
     </div>
   </div>
 
+  <div class="workspace-lock-interstitial is-hidden" id="workspaceLockInterstitial"
+       aria-hidden="true" role="alertdialog" aria-modal="true"
+       aria-labelledby="workspaceLockTitle" aria-describedby="workspaceLockMessage">
+    <section class="modal-dialog modal-dialog-window surface-window workspace-lock-window">
+      <div class="window-header surface-header">
+        <div class="window-header__title-slot">
+          <h3 class="window-header__title surface-title" id="workspaceLockTitle">Guide in Progress</h3>
+        </div>
+      </div>
+      <div class="surface-body workspace-lock-body">
+        <p id="workspaceLockMessage">Another Prisma window is changing this workspace.</p>
+        <p class="small-copy">This window is read-only until that guide has ended. Reload to use the restored workspace.</p>
+      </div>
+      <div class="surface-footer workspace-lock-actions">
+        <button class="primary-button small" id="workspaceLockReload" type="button">Reload Prisma</button>
+      </div>
+    </section>
+  </div>
+
   <div class="guide-overlay-root is-hidden" id="guideOverlayRoot" aria-hidden="true">
     <div class="guide-overlay-shade" aria-hidden="true"></div>
     <div class="guide-overlay-shade" aria-hidden="true"></div>
@@ -1611,6 +1625,11 @@
       </div>
       <div class="guide-step-content surface-body">
         <p class="guide-step-body" id="guideStepBody" aria-live="polite"></p>
+        <aside class="guide-step-note" id="guideStepNote" aria-labelledby="guideStepNoteLabel" hidden>
+          <span class="guide-step-note__label" id="guideStepNoteLabel"></span>
+          <code class="guide-step-note__value" id="guideStepNoteValue"></code>
+        </aside>
+        <div class="guide-step-visual" id="guideStepVisual" role="img" hidden></div>
         <div class="guide-step-followup" id="guideStepFollowup" hidden>
           <p id="guideStepFollowupText"></p>
           <button class="primary-button small" id="guideStepFollowupButton" type="button"></button>
@@ -1673,6 +1692,6 @@
     </button>
   </div>
 
-  <script type="module" src="bootstrap.js?v=2026-08-01-guide-palette-copy-v1"></script>
+  <script type="module" src="bootstrap.js?v=2026-08-04-saving-loading-fixes-v1"></script>
 </body>
 </html>

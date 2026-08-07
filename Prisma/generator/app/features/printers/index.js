@@ -26,6 +26,8 @@ export function installFeaturesPrintersIndex(app) {
     }
     app.commands.renderPrinterRail();
     app.commands.updateDerivedParams();
+    app.commands.updateSuggestSlotHint?.();
+    app.commands.renderAmsPreview?.();
   }
 
   async function loadPrinters() {
@@ -264,11 +266,13 @@ export function installFeaturesPrintersIndex(app) {
 
     const printer = printers.find(p => p.id === selectedId);
     if (!printer) return;
+    const protectedPrinter = printer.editable === false || printer.guide_only === true;
 
     // Fill fields
     const pcName = app.state.ui.$("#pcName");
     if (pcName) {
       pcName.value = printer.name;
+      pcName.disabled = protectedPrinter;
       pcName.oninput = () => {
         const nextName = (pcName.value || "").trim() || "New Printer";
         printer.name = nextName;
@@ -276,13 +280,13 @@ export function installFeaturesPrintersIndex(app) {
       };
     }
     const pcAreaX = app.state.ui.$("#pcAreaX");
-    if (pcAreaX) pcAreaX.value = printer.max_print_area?.x || 256;
+    if (pcAreaX) { pcAreaX.value = printer.max_print_area?.x || 256; pcAreaX.disabled = protectedPrinter; }
     const pcAreaY = app.state.ui.$("#pcAreaY");
-    if (pcAreaY) pcAreaY.value = printer.max_print_area?.y || 256;
+    if (pcAreaY) { pcAreaY.value = printer.max_print_area?.y || 256; pcAreaY.disabled = protectedPrinter; }
     const pcAmsUnits = app.state.ui.$("#pcAmsUnits");
-    if (pcAmsUnits) pcAmsUnits.value = printer.ams_units || 1;
+    if (pcAmsUnits) { pcAmsUnits.value = printer.ams_units || 1; pcAmsUnits.disabled = protectedPrinter; }
     const pcSlotsPerAms = app.state.ui.$("#pcSlotsPerAms");
-    if (pcSlotsPerAms) pcSlotsPerAms.value = printer.slots_per_ams || 4;
+    if (pcSlotsPerAms) { pcSlotsPerAms.value = printer.slots_per_ams || 4; pcSlotsPerAms.disabled = protectedPrinter; }
 
     // Nozzle table
     const tbody = app.state.ui.$("#pcNozzleBody");
@@ -307,6 +311,8 @@ export function installFeaturesPrintersIndex(app) {
       }).join("");
 
       tbody.querySelectorAll(".nz-delete").forEach(btn => {
+        btn.disabled = protectedPrinter;
+        btn.hidden = protectedPrinter;
         btn.addEventListener("click", () => {
           const idx = parseInt(btn.dataset.idx);
           printer.nozzle_profiles.splice(idx, 1);
@@ -314,6 +320,7 @@ export function installFeaturesPrintersIndex(app) {
         });
       });
       tbody.querySelectorAll("tr").forEach(row => {
+        row.querySelectorAll("input").forEach(input => { input.disabled = protectedPrinter; });
         const sync = () => {
           app.commands.validateNozzleRow(row);
           app.commands.syncNozzleDerivedLength(row);
@@ -327,7 +334,7 @@ export function installFeaturesPrintersIndex(app) {
     // Delete printer button visibility
     const delBtn = app.state.ui.$("#pcDeletePrinterBtn");
     if (delBtn) {
-      delBtn.style.display = printers.length > 1 ? "" : "none";
+      delBtn.style.display = printers.length > 1 && !protectedPrinter ? "" : "none";
       if (!app.state.session.printerDeleteConfirmPending) {
         delBtn.textContent = "Delete";
         delBtn.title = "Delete selected printer";
@@ -342,6 +349,7 @@ export function installFeaturesPrintersIndex(app) {
     const selectedId = app.state.session.printerConfigEditingId || (sel ? sel.value : app.state.session.printersData.active_printer_id);
     const printer = printers.find(p => p.id === selectedId);
     if (!printer) return null;
+    if (printer.editable === false || printer.guide_only === true) return printer;
 
     printer.name = (app.state.ui.$("#pcName")?.value || printer.name).trim();
     printer.max_print_area = {

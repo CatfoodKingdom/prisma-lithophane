@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   createFeatureHarness,
   fakeElement,
@@ -46,6 +48,10 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.ok(keys.includes("detail_cap_max_layers"));
   assert.ok(keys.includes("color_region_target_mm"));
   assert.ok(keys.includes("neutral_field_protection_mode"));
+  assert.ok(keys.includes("neutral_field_protection_cutoff"));
+  assert.ok(!keys.includes("use_corrections"));
+  assert.ok(!keys.includes("stage2_boundary_mutation_current_de_percentile"));
+  assert.ok(!keys.includes("stage2_boundary_mutation_min_component_mm"));
   assert.ok(!keys.includes("enforce_printability"));
   assert.ok(!keys.includes("cap_continuity_cleanup"));
   assert.ok(!keys.includes("printability_minimum_extrusion_width_mm"));
@@ -55,13 +61,77 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.equal(app.state.settings.config.cap_continuity_cleanup, true);
 });
 
+test("settings numeric display values are rounded without inventing precision", async () => {
+  const { app } = await harness();
+  assert.equal(app.commands.formatSettingsInputNumber(0.7999999999999999), "0.8");
+  assert.equal(app.commands.formatSettingsInputNumber(0.004000000000000001), "0.004");
+  assert.equal(app.commands.formatSettingsInputNumber(75), "75");
+  assert.equal(app.commands.formatSettingsInputNumber(""), "");
+});
+
+test("settings wheel direction increases on upward gestures", async () => {
+  const { app } = await harness();
+  assert.equal(app.commands.settingsWheelMultiplier(-1), 1);
+  assert.equal(app.commands.settingsWheelMultiplier(1), -1);
+  assert.equal(app.commands.settingsWheelMultiplier(0), 0);
+});
+
+test("settings steppers are limited to genuinely quantized controls", async () => {
+  const { app } = await harness();
+  for (const controlId of [
+    "cfgDWcMin",
+    "cfgKMax",
+    "cfgStage1Coarsening",
+    "cfgStage2BoundaryMutationMaxPasses",
+    "cfgBaseShadingLimit",
+    "cfgDetailCapMaxLayers",
+  ]) {
+    assert.equal(app.commands.settingsNumericRuleFor(controlId).quantized, true);
+  }
+  for (const controlId of [
+    "cfgDeThreshold",
+    "cfgColorRegionTarget",
+    "cfgStage2BoundaryMutationMinGain",
+    "cfgBoundaryCapDeBudget",
+    "cfgSmoothKernel",
+  ]) {
+    assert.equal(app.commands.settingsNumericRuleFor(controlId), null);
+  }
+});
+
+test("settings presentation follows the drawer hierarchy", async () => {
+  const { app } = await harness();
+  const solver = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "solver");
+  const whiteCap = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "white-cap");
+  assert.equal(solver.rows.some((row) => row.key === "luminance_base_shading_limit_fraction"), false);
+  assert.deepEqual(
+    whiteCap.rows.find((row) => row.key === "luminance_base_shading_limit_fraction"),
+    {
+      key: "luminance_base_shading_limit_fraction",
+      controlId: "cfgBaseShadingLimit",
+      label: "Shading balance",
+      format: "percent",
+      default: 0.75,
+      group: "Boundary",
+    },
+  );
+});
+
 test("neutral-field protection defaults off and round-trips through the settings UI", async () => {
   const neutralFieldSelect = fakeElement();
   neutralFieldSelect.value = "broad";
+  const neutralCutoff = fakeElement();
+  neutralCutoff.value = "0.035";
   const { app } = await harness({
-    elements: { "#cfgNeutralFieldProtection": neutralFieldSelect },
+    elements: {
+      "#cfgNeutralFieldProtection": neutralFieldSelect,
+      "#cfgNeutralFieldProtectionCutoff": neutralCutoff,
+    },
   });
   assert.equal(app.state.settings.SETTINGS_PROFILE_DEFAULTS.neutral_field_protection_mode, "off");
+  app.commands.syncSettingsPresentationMetadata();
+  assert.equal(neutralFieldSelect.dataset.settingsKey, "neutral_field_protection_mode");
+  assert.equal(neutralFieldSelect.dataset.settingsSection, "solver");
 
   global.document = {
     querySelector() { return null; },
@@ -70,11 +140,14 @@ test("neutral-field protection defaults off and round-trips through the settings
   try {
     app.commands.readConfigFromUI();
     assert.equal(app.state.settings.config.neutral_field_protection_mode, "broad");
+    assert.equal(app.state.settings.config.neutral_field_protection_cutoff, 0.035);
 
     app.commands._applySettingsProfileToConfig({
       neutral_field_protection_mode: "standard",
+      neutral_field_protection_cutoff: 0.027,
     });
     assert.equal(app.state.settings.config.neutral_field_protection_mode, "standard");
+    assert.equal(app.state.settings.config.neutral_field_protection_cutoff, 0.027);
     neutralFieldSelect.value = "standard";
     app.commands._setLoadedSettingsProfile(
       { id: "neutral", kind: "named", name: "Neutral" },
@@ -96,7 +169,7 @@ test("neutral-field protection defaults off and round-trips through the settings
       { settings: { neutral_field_protection_mode: "standard" } },
     );
     assert.equal(
-      rows.find((row) => row.label === "Neutral-field Protection").value,
+      rows.find((row) => row.label === "Neutral-field protection").value,
       "Standard",
     );
 
@@ -122,13 +195,13 @@ test("neutral-field protection defaults off and round-trips through the settings
     );
     assert.equal(
       app.commands.collectSolveRunSettingDiffs(legacyRun, explicitOffRun)
-        .some((diff) => diff.label === "Neutral-field Protection"),
+        .some((diff) => diff.label === "Neutral-field protection"),
       false,
     );
     const modeDiff = app.commands.collectSolveRunSettingDiffs(
       explicitOffRun,
       { label: "Standard", config: { neutral_field_protection_mode: "standard" } },
-    ).find((diff) => diff.label === "Neutral-field Protection");
+    ).find((diff) => diff.label === "Neutral-field protection");
     assert.deepEqual(
       { before: modeDiff.before, after: modeDiff.after, category: modeDiff.category },
       { before: "Off", after: "Standard", category: "solver" },
@@ -222,13 +295,14 @@ test("white-point rescale is basic, grouped in run settings, and summarized only
   );
   const frozen = app.commands.getFrozenSolveRunSnapshot(run);
   const rows = app.commands.buildReadOnlyRunSectionRows(solverSection, frozen);
-  assert.equal(rows.find((row) => row.label === "White-point Rescale").advanced, false);
+  assert.equal(rows.find((row) => row.label === "White-point rescale").advanced, false);
 
   app.commands.esc = (value) => String(value);
   const html = app.commands.buildReadOnlyRunSettingsHtml(run);
   assert.match(html, /class="run-settings-sections"/);
-  assert.match(html, /Color Solver · Recipe Search/);
-  const whitePointIndex = html.indexOf("White-point Rescale");
+  assert.match(html, /<h4 class="settings-group-cap run-settings-section-cap">Color Solver<\/h4>/);
+  assert.match(html, /<h5 class="run-settings-subsection-cap">Recipe Search<\/h5>/);
+  const whitePointIndex = html.indexOf("White-point rescale");
   const whitePointRowStart = html.lastIndexOf('<div class="run-settings-row', whitePointIndex);
   assert.ok(whitePointRowStart >= 0);
   assert.equal(
@@ -304,6 +378,30 @@ test("solve pitch mismatch detection distinguishes invalid, equal, and coarser p
   assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
   solvePitch.value = "0.3999995";
   assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
+});
+
+test("editing solve pitch preserves the physical smoothing radius", async () => {
+  const solvePitch = fakeElement();
+  solvePitch.value = "0.4"; // The browser updates the field before dispatching input.
+  const smoothRadius = fakeElement();
+  const { app } = await harness({ elements: {
+    "#cfgSolvePitch": solvePitch,
+    "#cfgSmoothKernel": smoothRadius,
+  } });
+  app.state.settings.config.solver_fine_pitch_mm = 0.2;
+  app.state.settings.config.image_sample_pitch_mm = 0.2;
+  app.state.settings.config.smooth_kernel = 5;
+
+  assert.equal(app.commands.applySolvePitchDraft(solvePitch.value), true);
+
+  assert.equal(smoothRadius.value, 1);
+  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.4);
+  assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.4);
+  assert.equal(app.state.settings.config.smooth_kernel, 2.5);
+  assert.equal(
+    app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel, 0.4),
+    1,
+  );
 });
 
 test("solve pitch remediation preserves smoothing radius and synchronizes the canonical setting", async () => {
@@ -434,9 +532,14 @@ test("confirmation dialog traps focus, cancels on Escape, and restores prior foc
   const resultPromise = app.commands.appConfirm("Proceed?", {
     title: "Confirm Action",
     ok: "Proceed",
+    emphasis: ["Proceed"],
   });
   await new Promise(resolve => setTimeout(resolve, 60));
   assert.equal(dialogDocument.activeElement, confirmButton);
+  assert.equal(
+    message.innerHTML,
+    '<strong class="app-dialog-emphasis">Proceed</strong>?',
+  );
 
   let tabPrevented = false;
   listeners.get("keydown")({
@@ -798,6 +901,189 @@ test("palette suggestions use solve-mode names for newly generated cards", async
   assert.equal("total_pixels" in app.state.palette.stagingDeck[0].gamut, false);
 });
 
+test("palette suggestion payload requests one exact size without retired tier fields", async () => {
+  const paletteColors = fakeElement();
+  const suggestionCount = fakeElement();
+  const suggestMode = fakeElement();
+  paletteColors.value = "6";
+  suggestionCount.value = "5";
+  suggestMode.value = "standard";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#targetSuggestCount": suggestionCount,
+    "#paletteSuggestMode": suggestMode,
+  } });
+  app.state.palette.candidateSelection = new Set(["red", "blue"]);
+
+  const payload = app.commands.buildPaletteSuggestionPayload();
+
+  assert.equal(payload.n_filaments, 6);
+  assert.equal(payload.top_k, 5);
+  assert.equal("max_swaps" in payload, false);
+  assert.equal("improvement_threshold" in payload, false);
+  assert.equal("force_all_tiers" in payload, false);
+});
+
+test("over-capacity palette values are preserved", async () => {
+  const paletteColors = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+  } });
+  app.state.session.printerConfig.ams_slots = 4;
+
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "6");
+  assert.equal(paletteColors.max, "16");
+
+  paletteColors.value = "3";
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "3");
+
+  paletteColors.value = "";
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "3");
+});
+
+test("AMS preview separates additional palette colors from physical slots", async () => {
+  const paletteColors = fakeElement();
+  const preview = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#amsPreview": preview,
+  } });
+  app.state.session.printerConfig = {
+    ams_units: 1,
+    slots_per_unit: 4,
+    ams_slots: 4,
+  };
+  app.commands.getBaseCapSlots = () => 1;
+
+  app.commands.renderAmsPreview();
+
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 3);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-slot"/g) || []).length, 3);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-pip"/g) || []).length, 3);
+  assert.match(preview.innerHTML, /Additional colors \(3\)/);
+  assert.match(preview.innerHTML, /May require filament swaps/);
+  assert.match(preview.innerHTML, /ams-preview-overflow-slots" style="--ams-preview-columns:4" aria-hidden="true"/);
+  assert.match(preview.innerHTML, /3 \/ 3 color slots/);
+  assert.match(preview.innerHTML, /--ams-preview-columns:4/);
+  assert.equal(preview.role, "img");
+  assert.match(preview["aria-label"], /3 additional colors/);
+  assert.match(preview["aria-label"], /May require filament swaps/);
+
+  paletteColors.value = "2";
+  app.commands.renderAmsPreview();
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 2);
+  assert.doesNotMatch(preview.innerHTML, /ams-preview-overflow/);
+  assert.match(preview.innerHTML, /2 \/ 3 color slots/);
+
+  paletteColors.value = "";
+  app.commands.renderAmsPreview();
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 0);
+  assert.doesNotMatch(preview.innerHTML, /ams-preview-overflow/);
+  assert.match(preview.innerHTML, /Select 2–16 palette colors/);
+  assert.match(preview["aria-label"], /Select 2 to 16 palette colors/);
+});
+
+test("AMS preview respects custom unit geometry and multiple reserved slots", async () => {
+  const paletteColors = fakeElement();
+  const preview = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#amsPreview": preview,
+  } });
+  app.state.session.printerConfig = {
+    ams_units: 2,
+    slots_per_unit: 3,
+    ams_slots: 6,
+  };
+  app.commands.getBaseCapSlots = () => 2;
+
+  app.commands.renderAmsPreview();
+
+  assert.equal((preview.innerHTML.match(/ams-preview-unit-label/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-white/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 4);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-pip"/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/--ams-preview-columns:3/g) || []).length, 3);
+  assert.match(preview["aria-label"], /2 slots are reserved for the base and cap/);
+  assert.match(preview["aria-label"], /2 additional colors/);
+  assert.match(preview["aria-label"], /May require filament swaps/);
+});
+
+test("authoritative printer changes refresh the palette capacity preview", async () => {
+  const { app } = await harness();
+  let hintUpdates = 0;
+  let previewRenders = 0;
+  app.commands.renderPrinterRail = () => {};
+  app.commands.updateDerivedParams = () => {};
+  app.commands.updateSuggestSlotHint = () => { hintUpdates += 1; };
+  app.commands.renderAmsPreview = () => { previewRenders += 1; };
+
+  app.commands.applyAuthoritativePrinterState(
+    { printers: [], active_printer_id: "custom", active_nozzle_size: 0.4 },
+    {
+      printer: {
+        id: "custom",
+        name: "Custom",
+        max_print_area: { x: 200, y: 200 },
+        ams_units: 2,
+        slots_per_ams: 3,
+      },
+      nozzle: { size: 0.4 },
+      printability: {},
+    },
+  );
+
+  assert.equal(app.state.session.printerConfig.ams_slots, 6);
+  assert.equal(hintUpdates, 1);
+  assert.equal(previewRenders, 1);
+});
+
+test("palette suggestion validation requires enough selected eligible colors", async () => {
+  const paletteColors = fakeElement();
+  paletteColors.value = "3";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+  } });
+  app.state.palette.candidateSelection = new Set(["red", "blue"]);
+  let toast = "";
+  app.commands.showToast = message => { toast = message; };
+
+  assert.equal(app.commands.validatePaletteSuggestionRequest(), false);
+  assert.match(toast, /only 2 eligible color filaments are selected/);
+
+  app.state.palette.candidateSelection.add("green");
+  assert.equal(app.commands.validatePaletteSuggestionRequest(), true);
+});
+
+test("palette result processing never stages more than Suggestions", async () => {
+  const suggestionCount = fakeElement();
+  suggestionCount.value = "5";
+  const { app } = await harness({ elements: {
+    "#targetSuggestCount": suggestionCount,
+  } });
+  app.state.palette.stagingDeck = [];
+  app.state.palette.nextDeckNum = 1;
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+
+  app.commands._processSuggestResults({
+    palette_mode: "standard",
+    candidates: Array.from({ length: 8 }, (_value, index) => ({
+      filament_ids: [`unit-${index}`],
+      mean_de: 1 + index,
+    })),
+  });
+
+  assert.equal(app.state.palette.stagingDeck.length, 5);
+});
+
 test("auto-suggest shows the reserved base/cap filament without selecting it", async () => {
   const candidateGrid = fakeElement();
   const baseFilament = fakeElement();
@@ -906,6 +1192,9 @@ test("palette variants preserve the source, slot order, and manual draft on canc
 
 test("committing a palette variant inserts an independent active card beside its source", async () => {
   const { app } = await harness();
+  const events = [];
+  app.events.subscribe("palette.variant.started", detail => events.push({ event: "started", detail }));
+  app.events.subscribe("palette.deck.updated", detail => events.push({ event: "updated", detail }));
   app.state.session.allFilaments.push({
     filament_id: "green",
     display_name: "Green",
@@ -943,6 +1232,12 @@ test("committing a palette variant inserts an independent active card beside its
   assert.deepEqual(app.state.palette.deck[0].filament_ids, ["red", "blue"]);
   assert.equal(app.state.palette.activeDeckId, variant.id);
   assert.equal(app.state.palette.manualVariantDraft, null);
+  assert.equal(events[0].event, "started");
+  assert.equal(events[0].detail.cardId, "source");
+  assert.equal(events.at(-1).event, "updated");
+  assert.equal(events.at(-1).detail.action, "added");
+  assert.equal(events.at(-1).detail.card.id, variant.id);
+  assert.equal(events.at(-1).detail.sourceCardId, "source");
 });
 
 test("committing a palette variant leaves Batch Solve membership unchanged", async () => {
@@ -1009,6 +1304,7 @@ test("deck-selected batch start sends mixed ordered palettes without suggestion 
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1072,6 +1368,7 @@ test("an accepted batch stays locked and tracked if Preview initialization fails
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1120,6 +1417,10 @@ test("batch confirmation cancellation performs no work and preserves selection",
     return { proceed: true, corrected: false };
   };
   app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => {
+    events.push("dimension preflight");
+    return { proceed: true, corrected: false };
+  };
   app.commands.appConfirm = async () => {
     events.push("batch confirmation");
     return false;
@@ -1133,6 +1434,7 @@ test("batch confirmation cancellation performs no work and preserves selection",
     "settings preflight",
     "palette validation",
     "palette validation",
+    "dimension preflight",
     "batch confirmation",
   ]);
   assert.equal(starts, 0);
@@ -1161,6 +1463,7 @@ test("a rejected batch start unlocks the deck without discarding mode or selecti
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1541,6 +1844,117 @@ test("authoritative run labels refresh open lightbox and settings surfaces", asy
   app.commands.renderSolveRunSettingsPanel();
   assert.equal(settingsPanel["aria-label"], "Settings used by Server Portrait");
   assert.equal(settingsLabel.textContent, "Server Portrait");
+  assert.equal(settingsToggle.classList.contains("is-active"), false);
+  app.state.solve.solveRunSettingsAdvancedVisible = true;
+  app.commands.renderSolveRunSettingsPanel();
+  assert.equal(settingsToggle.classList.contains("is-active"), true);
+});
+
+test("saved-run review distinguishes canonical defaults from unavailable values", async () => {
+  const { app } = await harness();
+  const run = { label: "Sparse archive", config: {} };
+  const frozen = app.commands.getFrozenSolveRunSnapshot(run);
+  const essentials = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "essentials");
+  const rows = app.commands.buildReadOnlyRunSectionRows(essentials, frozen);
+  assert.equal(rows.find((row) => row.label === "Max Total Thickness").value, "Default: 3 mm");
+  assert.equal(
+    app.commands.formatReadOnlyRunSetting({ key: "historical_unknown" }, undefined, {}),
+    "Unavailable in saved run",
+  );
+});
+
+test("saved-run review uses current preprocessing modules only", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [];
+  const run = {
+    label: "Current module run",
+    config: { preprocessing_params: { retired_filter: { strength: 0.4 } } },
+    results: {
+      solve_start_diagnostics: {
+        module_state: { retired_filter: true },
+        module_settings: { retired_filter: { strength: 0.4 } },
+      },
+    },
+  };
+  const frozen = app.commands.getFrozenSolveRunSnapshot(run);
+  assert.equal(frozen.activePreprocessing.has("retired_filter"), false);
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, frozen);
+  assert.equal(rows.some((row) => row.label === "Retired Filter"), false);
+});
+
+test("saved-run review labels missing module parameters as defaults", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [{
+    name: "demo_filter",
+    slot: "preprocessing",
+    params: {
+      strength: { name: "strength", label: "Strength", type: "number", unit: "mm", default: 0.4 },
+    },
+  }];
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, {
+    settings: { preprocessing_params: {} },
+    activePreprocessing: new Set(["demo_filter"]),
+    preprocessingStateKnown: true,
+  });
+  assert.equal(rows.find((row) => row.label === "Strength").value, "Default: 0.4 mm");
+});
+
+test("saved-run review keeps module enablement in the main preprocessing block", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [
+    { name: "demo_filter", slot: "preprocessing", params: {} },
+  ];
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, {
+    settings: {},
+    activePreprocessing: new Set(),
+    preprocessingStateKnown: true,
+  });
+  assert.equal(rows.find((row) => row.controlId === "module:demo_filter").group, "");
+});
+
+test("settings presentation rows point at real controls and omit retired fields", async () => {
+  const { app } = await harness();
+  const html = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/index.html"),
+    "utf8",
+  );
+  const rows = app.state.ui.SETTINGS_PRESENTATION.flatMap((section) => section.rows);
+  assert.ok(rows.length > 0);
+  for (const row of rows) {
+    assert.ok(row.controlId, `missing control id for ${row.key}`);
+    assert.match(html, new RegExp(`id=["']${row.controlId}["']`));
+  }
+  assert.equal(app.state.ui.SETTINGS_PRESENTATION, app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS);
+  assert.doesNotMatch(html, /cfgUseCorrections|cfgStage2BoundaryMutationPercentile|cfgStage2BoundaryMutationMinComponent/);
+  assert.ok(!rows.some((row) => [
+    "use_corrections",
+    "stage2_boundary_mutation_current_de_percentile",
+    "stage2_boundary_mutation_min_component_mm",
+  ].includes(row.key)));
+
+  const settingsCss = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/styles/settings.css"),
+    "utf8",
+  );
+  const solveCss = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/styles/solve.css"),
+    "utf8",
+  );
+  assert.match(settingsCss, /text-align-last:\s*left/);
+  assert.match(settingsCss, /-webkit-appearance:\s*textfield/);
+  assert.match(settingsCss, /input\[type="number"\]::\-webkit-inner-spin-button/);
+  assert.match(settingsCss, /\.input-with-unit\.settings-has-steppers[\s\S]*width:\s*max-content/);
+  assert.match(settingsCss, /\.settings-subsection-head[\s\S]*border-top:\s*1px solid var\(--line\)[\s\S]*border-bottom:\s*1px solid var\(--line\)/);
+  assert.match(solveCss, /\.run-settings-subsection-cap[\s\S]*border-top:\s*1px solid var\(--line\)[\s\S]*border-bottom:\s*1px solid var\(--line\)/);
+  assert.ok(settingsCss.includes(".settings-derived-footnote"));
+  assert.match(html, /style\.css\?v=2026-08-04-settings-polish-v3/);
+  for (const controlId of ["cfgDWcMin", "cfgBaseShadingLimit", "cfgDetailCapMaxLayers"]) {
+    assert.match(html, new RegExp(`<input type="text" id="${controlId}"`));
+  }
+  assert.ok(html.indexOf('id="stackDerived"') < html.indexOf('id="derivedParams"'));
 });
 
 test("solve-history clear controls stay synchronized and disable invalid actions", async () => {

@@ -314,16 +314,17 @@ function getFrozenSolveRunSnapshot(run) {
     const diagnosticPreprocessing = Array.isArray(activeDiagnostics.preprocessing)
       ? activeDiagnostics.preprocessing.map(String)
       : null;
-    const normalizedModules = app.commands._normalizeSettingsProfileModules(profileModules, settings);
     const activePreprocessing = diagnosticPreprocessing != null
-      ? diagnosticPreprocessing
+      ? diagnosticPreprocessing.filter((name) => app.commands.moduleDescriptorById(name)?.slot === "preprocessing")
       : diagnosticModuleStateKnown
         ? Object.keys(diagnosticModuleState).filter((name) => (
-          diagnosticModuleState[name] && app.commands.moduleDescriptorById(name)?.slot === "preprocessing"
+          diagnosticModuleState[name]
+          && app.commands.moduleDescriptorById(name)?.slot === "preprocessing"
         ))
         : profileModulesKnown
-          ? Object.keys(normalizedModules).filter((name) => (
-            normalizedModules[name] && app.commands.moduleDescriptorById(name)?.slot === "preprocessing"
+          ? Object.keys(profileModules).filter((name) => (
+            profileModules[name]
+            && app.commands.moduleDescriptorById(name)?.slot === "preprocessing"
           ))
           : [];
 
@@ -348,52 +349,55 @@ function getFrozenSolveRunSnapshot(run) {
     };
   }
 
-function formatReadOnlyRunSetting(row, value, settings) {
-    if (value == null || value === "") return "Not recorded";
-    if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+function formatReadOnlyRunSetting(row, value, settings, { defaultValue } = {}) {
+    const missing = value == null || value === "";
+    const resolved = missing && defaultValue !== undefined ? defaultValue : value;
+    if (resolved == null || resolved === "") return "Unavailable in saved run";
+    const prefix = missing ? "Default: " : "";
+    if (typeof resolved === "boolean") return `${prefix}${resolved ? "Enabled" : "Disabled"}`;
     if (row.format === "solve-mode") {
-      return app.commands.normalizeLuminanceMode(value) === "luminance_detail" ? "Luminance" : "Color";
+      return `${prefix}${app.commands.normalizeLuminanceMode(resolved) === "luminance_detail" ? "Luminance" : "Color"}`;
     }
     if (row.format === "filament") {
-      const fil = app.commands.filamentById(value);
-      return app.commands.railHoverFilamentLabel(fil, String(value));
+      const fil = app.commands.filamentById(resolved);
+      return `${prefix}${app.commands.railHoverFilamentLabel(fil, String(resolved))}`;
     }
     if (row.format === "appearance-model") {
-      if (value === "photo_stack_bundle") return "Color Model v2";
-      if (value === "legacy_lut") return "Color Model v1";
+      if (resolved === "photo_stack_bundle") return `${prefix}Color Model v2`;
+      if (resolved === "legacy_lut" || resolved === "historical_spline") return `${prefix}Color Model v1`;
     }
     if (row.format === "title") {
-      return String(value).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+      return `${prefix}${String(resolved).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())}`;
     }
     if (row.format === "gamut-mode") {
-      return value === "hue_preserving" ? "Preserve hue" : "Nearest reachable color";
+      return `${prefix}${resolved === "hue_preserving" ? "Preserve hue" : "Nearest reachable color"}`;
     }
     if (row.format === "region-method") {
-      const label = app.commands.formatRegionMethod(value);
-      return label.charAt(0).toUpperCase() + label.slice(1);
+      const label = app.commands.formatRegionMethod(resolved);
+      return `${prefix}${label.charAt(0).toUpperCase() + label.slice(1)}`;
     }
-    if (row.format === "region-scale") return app.commands.formatRegionPlanningScale(value);
+    if (row.format === "region-scale") return `${prefix}${app.commands.formatRegionPlanningScale(resolved)}`;
     if (row.format === "cap-mode") {
-      return value === "appearance_bounded_smooth" ? "Detail Aware" : "Smooth";
+      return `${prefix}${resolved === "appearance_bounded_smooth" ? "Detail Aware" : "Smooth"}`;
     }
     if (row.format === "percent") {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? `${Math.round(numeric * 100)}%` : String(value);
+      const numeric = Number(resolved);
+      return `${prefix}${Number.isFinite(numeric) ? `${Math.round(numeric * 100)}%` : String(resolved)}`;
     }
     if (row.format === "cap-layers") {
-      const thickness = Number(value);
+      const thickness = Number(resolved);
       const layerHeight = Number(settings.layer_height);
       return Number.isFinite(thickness) && Number.isFinite(layerHeight) && layerHeight > 0
-        ? `${Math.max(1, Math.round(thickness / layerHeight))} layers`
-        : "Not recorded";
+        ? `${prefix}${Math.max(1, Math.round(thickness / layerHeight))} layers`
+        : "Unavailable in saved run";
     }
     if (row.format === "smooth-radius") {
       const pitch = settings.solver_fine_pitch_mm ?? settings.image_sample_pitch_mm;
-      const numeric = app.commands.smoothingRadiusMmFromCells(value, pitch);
-      return `${app.commands.formatSolveSettingValue("smooth_radius_mm", numeric)} mm`;
+      const numeric = app.commands.smoothingRadiusMmFromCells(resolved, pitch);
+      return `${prefix}${app.commands.formatSolveSettingValue("smooth_radius_mm", numeric)} mm`;
     }
-    const formatted = app.commands.formatSolveSettingValue(row.key, value);
-    return row.unit && formatted !== "—" ? `${formatted} ${row.unit}` : formatted;
+    const formatted = app.commands.formatSolveSettingValue(row.key, resolved);
+    return `${prefix}${row.unit && formatted !== "—" ? `${formatted} ${row.unit}` : formatted}`;
   }
 
 function buildReadOnlyRunSectionRows(section, frozen) {
@@ -402,9 +406,10 @@ function buildReadOnlyRunSectionRows(section, frozen) {
       if ((value == null || value === "") && row.fallbackKey) value = frozen.settings[row.fallbackKey];
       return {
         label: row.label,
-        value: app.commands.formatReadOnlyRunSetting(row, value, frozen.settings),
+        value: app.commands.formatReadOnlyRunSetting(row, value, frozen.settings, { defaultValue: row.default }),
         advanced: !!row.advanced,
         group: row.group || "",
+        controlId: row.controlId || null,
       };
     });
 
@@ -414,35 +419,51 @@ function buildReadOnlyRunSectionRows(section, frozen) {
       const enabled = frozen.activePreprocessing.has(mod.name);
       rows.push({
         label: app.commands.moduleDisplayName(mod),
-        value: frozen.preprocessingStateKnown ? (enabled ? "On" : "Off") : "Not recorded",
+        value: frozen.preprocessingStateKnown ? (enabled ? "On" : "Off") : "Unavailable in saved run",
         advanced: false,
+        // Keep module enablement in the main preprocessing block. Individual
+        // module headings are reserved for the advanced parameters that need
+        // an ownership label.
         group: "",
+        controlId: `module:${mod.name}`,
       });
       if (!frozen.preprocessingStateKnown || !enabled) continue;
       const projected = app.commands.projectModuleConfigValues(mod.name, mod, frozen.settings);
-      for (const param of app.commands.getSortedModuleParams(mod)) {
-        if (!app.commands.isModuleParamVisibleInSummary(param, projected)) continue;
+      const presetSpec = app.commands.preprocessingPresetSpec(mod.name);
+      if (presetSpec) {
+        const preset = (presetSpec.presets || []).find((candidate) => (
+          candidate.values && Object.entries(candidate.values).every(([key, expected]) => {
+            const actual = projected[key];
+            return typeof expected === "number"
+              ? Number.isFinite(Number(actual)) && Math.abs(Number(actual) - expected) < 1e-9
+              : String(actual) === String(expected);
+          })
+        ));
         rows.push({
-          label: `${app.commands.moduleDisplayName(mod)} · ${param.label || app.commands.humanizeModuleName(param.name)}`,
-          value: String(app.commands.formatSolveSummaryValue(param, projected[param.name] ?? param.default)),
+          label: "Preset",
+          value: preset?.label || "Custom",
           advanced: true,
           group: app.commands.moduleDisplayName(mod),
+          controlId: `mod_${mod.name}_preset`,
         });
       }
-    }
-    const knownModuleIds = new Set(preprocessingModules.map((mod) => mod.name));
-    for (const moduleId of frozen.activePreprocessing) {
-      if (knownModuleIds.has(moduleId)) continue;
-      const label = app.commands.humanizeModuleName(moduleId).replace(/\b\w/g, (letter) => letter.toUpperCase());
-      rows.push({ label, value: "On", advanced: false, group: "" });
-      const values = frozen.settings.preprocessing_params?.[moduleId];
-      if (!values || typeof values !== "object") continue;
-      for (const [key, value] of Object.entries(values)) {
+      for (const param of app.commands.getSortedModuleParams(mod)) {
+        if (!app.commands.isModuleParamVisibleInSummary(param, projected)) continue;
+        const presetUi = app.state.ui.PREPROCESSING_PRESET_UI?.[mod.name];
+        const choiceLabels = presetUi?.choiceLabels?.[param.name] || param.choice_labels || {};
+        const parameterBlock = frozen.settings.preprocessing_params?.[mod.name];
+        const hasCapturedValue = parameterBlock
+          && Object.prototype.hasOwnProperty.call(parameterBlock, param.name)
+          && projected[param.name] != null;
+        let paramValue = hasCapturedValue ? projected[param.name] : param.default;
+        if (param.type === "choice" && choiceLabels[paramValue]) paramValue = choiceLabels[paramValue];
+        const formattedValue = String(app.commands.formatSolveSummaryValue(param, paramValue));
         rows.push({
-          label: `${label} · ${app.commands.getSolveSettingLabel(key)}`,
-          value: app.commands.formatSolveSettingValue(key, value),
+          label: presetUi?.paramLabels?.[param.name] || param.label || app.commands.humanizeModuleName(param.name),
+          value: `${hasCapturedValue ? "" : "Default: "}${formattedValue}`,
           advanced: true,
-          group: label,
+          group: app.commands.moduleDisplayName(mod),
+          controlId: `mod_${mod.name}_${param.name}`,
         });
       }
     }
@@ -451,34 +472,32 @@ function buildReadOnlyRunSectionRows(section, frozen) {
 
 function buildReadOnlyRunSettingsHtml(run) {
     const frozen = app.commands.getFrozenSolveRunSnapshot(run);
-    const sections = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.flatMap((section) => {
-      const groupedRows = [];
+    const sections = app.state.ui.SETTINGS_PRESENTATION.map((section) => {
+      const groupedRows = new Map();
       for (const row of app.commands.buildReadOnlyRunSectionRows(section, frozen)) {
         const group = row.group || "";
-        let block = groupedRows[groupedRows.length - 1];
-        if (!block || block.group !== group) {
-          block = { group, rows: [] };
-          groupedRows.push(block);
-        }
-        block.rows.push(row);
+        if (!groupedRows.has(group)) groupedRows.set(group, []);
+        groupedRows.get(group).push(row);
       }
-      return groupedRows.map((block) => {
-        const rows = block.rows
-          .map((row) => `<div class="run-settings-row${row.advanced ? " is-advanced" : ""}">
+      const blocks = Array.from(groupedRows.entries()).map(([group, blockRows]) => {
+        const advancedOnly = blockRows.length > 0 && blockRows.every((row) => row.advanced);
+        const rows = blockRows
+          .map((row) => `<div class="run-settings-row${row.advanced ? " is-advanced" : ""}"${row.controlId ? ` data-control-id="${app.commands.esc(row.controlId)}"` : ""}>
             <span class="run-settings-label">${app.commands.esc(row.label)}</span>
             <span class="run-settings-value">${app.commands.esc(row.value)}</span>
           </div>`)
           .join("");
-        const title = block.group ? `${section.title} · ${block.group}` : section.title;
-        return `<section class="run-settings-section" data-run-settings-section="${app.commands.esc(section.key)}">
-          <h4 class="settings-group-cap run-settings-section-cap">${app.commands.esc(title)}</h4>
-          <div class="run-settings-rows">${rows}</div>
-        </section>`;
-      });
+        return `${group ? `<h5 class="run-settings-subsection-cap${advancedOnly ? " is-advanced-only" : ""}">${app.commands.esc(group)}</h5>` : ""}
+          <div class="run-settings-rows${advancedOnly ? " is-advanced-only" : ""}">${rows}</div>`;
+      }).join("");
+      return `<section class="run-settings-section" data-run-settings-section="${app.commands.esc(section.key)}">
+        <h4 class="settings-group-cap run-settings-section-cap">${app.commands.esc(section.title)}</h4>
+        ${blocks}
+      </section>`;
     }).join("");
     const archiveNote = frozen.hasDiagnostics
       ? "Values captured when this solve started."
-      : "Older saved run: unavailable values are marked as not recorded.";
+      : "Older saved run: missing values are shown as product defaults or unavailable.";
     return `<div class="run-settings-note">${app.commands.esc(archiveNote)}</div><div class="run-settings-sections">${sections}</div>`;
   }
 
@@ -558,6 +577,7 @@ function hideSolveRunHoverPreview() {
   }
 
 function positionSolveRunSettingsPanel(panel, anchorEl, context) {
+    if (!panel || !anchorEl) return;
     const sidebar = anchorEl.closest(".solve-deck-sidebar") || anchorEl;
     const rect = sidebar.getBoundingClientRect();
     const panelRect = panel.getBoundingClientRect();
@@ -568,7 +588,7 @@ function positionSolveRunSettingsPanel(panel, anchorEl, context) {
     if (!fitsPreferred) {
       const alternate = context === "preview" ? rect.right + gap : rect.left - panelRect.width - gap;
       if (alternate >= pad && alternate + panelRect.width <= window.innerWidth - pad) left = alternate;
-      else left = Math.max(pad, Math.min((window.innerWidth - panelRect.width) / 2, window.innerWidth - panelRect.width - pad));
+      else left = Math.max(pad, Math.min(left, window.innerWidth - panelRect.width - pad));
     }
     const top = Math.max(pad, Math.min(rect.top, window.innerHeight - panelRect.height - pad));
     panel.style.left = `${Math.round(left)}px`;
@@ -589,6 +609,7 @@ function renderSolveRunSettingsPanel() {
     const toggle = app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-advanced-toggle");
     if (toggle) {
       toggle.textContent = `Advanced: ${app.state.solve.solveRunSettingsAdvancedVisible ? "On" : "Off"}`;
+      toggle.classList.toggle("is-active", app.state.solve.solveRunSettingsAdvancedVisible);
       toggle.setAttribute("aria-pressed", app.state.solve.solveRunSettingsAdvancedVisible ? "true" : "false");
     }
     const body = app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-body");
@@ -614,7 +635,7 @@ function showSolveRunSettingsPanel(runId, context, anchorEl) {
         </div>
         <div class="window-header__actions surface-header-actions">
           <button class="ghost-button window-header__button surface-header-button run-settings-load-btn" type="button" title="Use these captured settings as a temporary Settings Profile">Use These Settings</button>
-          <button class="view-option-toggle run-settings-advanced-toggle" type="button" aria-pressed="false">Advanced: Off</button>
+          <button class="view-option-toggle settings-advanced-header-toggle run-settings-advanced-toggle" type="button" aria-pressed="false">Advanced: Off</button>
           <div class="surface-window-controls">
             <button class="close-button window-header__button surface-header-button surface-close run-settings-close" type="button" aria-label="Close run settings" title="Close run settings">${app.commands.xIconSvg()}</button>
           </div>
@@ -622,6 +643,13 @@ function showSolveRunSettingsPanel(runId, context, anchorEl) {
       </div>
       <div class="surface-body run-settings-body"></div>`;
     document.body.appendChild(app.state.solve.solveRunSettingsPanelEl);
+    const reposition = () => requestAnimationFrame(() => app.commands.positionSolveRunSettingsPanel(
+      app.state.solve.solveRunSettingsPanelEl,
+      anchorEl,
+      context,
+    ));
+    app.state.solve.solveRunSettingsPanelReposition = reposition;
+    window.addEventListener("resize", reposition);
     app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-close")?.addEventListener("click", app.commands.hideSolveRunSettingsPanel);
     app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-load-btn")?.addEventListener("click", async () => {
       try {
@@ -630,7 +658,13 @@ function showSolveRunSettingsPanel(runId, context, anchorEl) {
           run_id: run.id,
           label: run.label,
         });
-        if (loaded) app.commands.hideSolveRunSettingsPanel();
+        if (loaded) {
+          app.commands.hideSolveRunSettingsPanel();
+          app.events.emit("settings.temp-profile.loaded", {
+            profileId: app.state.settings.loadedProfileRef?.id,
+            source: app.state.settings.temporarySettingsProfile?.source,
+          });
+        }
       } catch (error) {
         app.commands.showToast(`Settings could not be loaded: ${error.message}`, "error");
       }
@@ -638,13 +672,18 @@ function showSolveRunSettingsPanel(runId, context, anchorEl) {
     app.state.solve.solveRunSettingsPanelEl.querySelector(".run-settings-advanced-toggle")?.addEventListener("click", () => {
       app.state.solve.solveRunSettingsAdvancedVisible = !app.state.solve.solveRunSettingsAdvancedVisible;
       app.commands.renderSolveRunSettingsPanel();
-      app.commands.positionSolveRunSettingsPanel(app.state.solve.solveRunSettingsPanelEl, anchorEl, context);
+      reposition();
     });
     app.commands.renderSolveRunSettingsPanel();
-    app.commands.positionSolveRunSettingsPanel(app.state.solve.solveRunSettingsPanelEl, anchorEl, context);
+    reposition();
+    app.events.emit("solve.run-settings.opened", { runId });
   }
 
 function hideSolveRunSettingsPanel() {
+    if (app.state.solve.solveRunSettingsPanelReposition) {
+      window.removeEventListener("resize", app.state.solve.solveRunSettingsPanelReposition);
+      app.state.solve.solveRunSettingsPanelReposition = null;
+    }
     app.state.solve.solveRunSettingsPanelEl?.remove();
     app.state.solve.solveRunSettingsPanelEl = null;
     app.state.solve.solveRunSettingsPanelRunId = null;

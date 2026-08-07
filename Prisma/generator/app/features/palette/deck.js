@@ -267,6 +267,7 @@ async function beginPaletteVariant(cardId) {
     if (existingDraft?.sourceCardId === card.id) {
       app.commands.switchTab("creation");
       app.commands.toggleCreationMode("manual");
+      app.events.emit("palette.variant.started", { cardId: card.id });
       return true;
     }
     if (existingDraft || app.state.palette.manualSlots.length > 0) {
@@ -291,6 +292,7 @@ async function beginPaletteVariant(cardId) {
     };
     app.commands.switchTab("creation");
     app.commands.toggleCreationMode("manual");
+    app.events.emit("palette.variant.started", { cardId: card.id });
     return true;
   }
 
@@ -329,6 +331,11 @@ async function commitPaletteVariant() {
     app.commands.updateRail();
     await app.commands.syncConfigToServer();
     app.commands.showToast(`Added "${card.name}" to the deck`, "success");
+    app.events.emit("palette.deck.updated", {
+      action: "added",
+      card,
+      sourceCardId: draft.sourceCardId,
+    });
     return card;
   }
 
@@ -596,9 +603,37 @@ function handleStagingClearClick() {
     }
     app.commands.resetStagingClearConfirm({ sync: false });
     app.state.palette.stagingDeck = [];
-    app.state.palette.suggestCapacityNote = "";
     app.commands.renderCreationTab();
     app.commands.syncStagingClearButton();
+  }
+
+async function clearPaletteDeck({ force = false } = {}) {
+    if (app.state.solve.batchDeckLocked && !force) {
+      app.commands.showToast("The Palette Deck cannot be cleared while a batch is running.", "warn");
+      return false;
+    }
+    if (!app.state.palette.deck.length) return false;
+    const previousDeck = app.commands._cloneValue(app.state.palette.deck);
+    const previousActiveId = app.state.palette.activeDeckId;
+    const previousBatchSelection = new Set(app.state.solve.batchSelectedDeckIds);
+    app.state.palette.deck = [];
+    app.state.palette.activeDeckId = null;
+    app.state.solve.batchSelectedDeckIds.clear();
+    app.commands.renderDeckCards();
+    app.commands.updateRail();
+    try {
+      await app.commands.syncConfigToServer({ throwOnError: true });
+      if (!force) app.events.emit("palette.deck.cleared", { cardIds: previousDeck.map(card => card.id) });
+      return true;
+    } catch (error) {
+      app.state.palette.deck = previousDeck;
+      app.state.palette.activeDeckId = previousActiveId;
+      app.state.solve.batchSelectedDeckIds = previousBatchSelection;
+      app.commands.renderDeckCards();
+      app.commands.updateRail();
+      if (!force) app.commands.showToast(`Clear failed: ${error.message}`, "error");
+      return false;
+    }
   }
 
 async function saveDeckCard(cardId) {
@@ -606,26 +641,50 @@ async function saveDeckCard(cardId) {
     if (!card) return;
     const alias = await app.commands.showPaletteSaveModal(card.name);
     if (alias === null) return; // cancelled
-    card.name = alias || card.name;
-    card.saved = true;
-
-    // Persist to server
-    if (!app.state.palette.savedPalettesData) app.state.palette.savedPalettesData = { palettes: [] };
-    // Update or add
-    const existing = app.state.palette.savedPalettesData.palettes.findIndex(p => p.id === card.id);
-    const entry = { id: card.id, name: card.name, filament_ids: card.filament_ids };
+    const name = alias || card.name;
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("palette.saved.create", {
+      deck_card_id: card.id,
+      palette_signature: [...card.filament_ids],
+      name,
+    })) return;
+    const current = app.state.palette.savedPalettesData || { palettes: [] };
+    const proposed = app.commands._cloneValue(current);
+    const existing = proposed.palettes.findIndex(p => p.id === card.id);
+    const entry = { id: card.id, name, filament_ids: [...card.filament_ids] };
     if (existing >= 0) {
-      app.state.palette.savedPalettesData.palettes[existing] = entry;
+      proposed.palettes[existing] = entry;
     } else {
-      app.state.palette.savedPalettesData.palettes.push(entry);
+      proposed.palettes.push(entry);
     }
     try {
-      await app.api.savePalettesToServer(app.state.palette.savedPalettesData);
+      const persist = () => app.api.savePalettesToServer(proposed);
+      if (app.commands.performGuideDurableMutation) {
+        await app.commands.performGuideDurableMutation({
+          direction: "create",
+          operationId: "saving-loading-palette",
+          kind: "palette",
+          id: entry.id,
+          name,
+          fingerprint: [...entry.filament_ids],
+        }, persist);
+      } else {
+        await persist();
+      }
+      app.state.palette.savedPalettesData = proposed;
+      card.name = name;
+      card.saved = true;
+      card.saved_source_id = entry.id;
       app.commands.showToast(`Saved "${card.name}"`, "success");
+      app.commands.renderDeckCards();
+      app.events.emit("palette.saved.created", {
+        deckCardId: card.id,
+        savedRecordId: entry.id,
+        name,
+        filamentIds: [...entry.filament_ids],
+      });
     } catch (err) {
       app.commands.showToast(`Save failed: ${err.message}`, "error");
     }
-    app.commands.renderDeckCards();
   }
 
 async function loadSavedPalettes() {
@@ -672,10 +731,10 @@ function showLoadPaletteMenu(anchorBtn = null) {
           const fil = app.commands.filamentById(fid);
           return `<span class="color-chip" style="background:${fil?.hex || '#ccc'};width:8px;height:12px;border-radius:2px;display:inline-block"></span>`;
         }).join("");
-        return `<div class="load-palette-item surface-menu-item" data-index="${i}">
+        return `<div class="load-palette-item surface-menu-item" data-index="${i}" data-saved-id="${app.commands.esc(p.id)}">
           <span class="load-palette-name">${app.commands.esc(p.name)}</span>
           <span class="load-palette-chips">${chips}</span>
-          <span class="load-palette-delete" data-index="${i}" title="Delete saved palette" aria-label="Delete saved palette">${app.commands.xIconSvg()}</span>
+          <span class="load-palette-delete" data-saved-id="${app.commands.esc(p.id)}" title="Delete saved palette" aria-label="Delete saved palette">${app.commands.xIconSvg()}</span>
         </div>`;
       }).join("");
       bindPopoverItems();
@@ -694,12 +753,42 @@ function showLoadPaletteMenu(anchorBtn = null) {
         delBtn.addEventListener("click", async (e) => {
           e.stopPropagation();
           if (confirmPending) {
-            const idx = parseInt(delBtn.dataset.index);
-            const name = app.state.palette.savedPalettesData.palettes[idx]?.name;
-            app.state.palette.savedPalettesData.palettes.splice(idx, 1);
-            try { await app.api.savePalettesToServer(app.state.palette.savedPalettesData); } catch { /* ignore */ }
-            app.commands.showToast(`Deleted "${name}"`, "success");
-            renderPopoverItems();
+            const savedId = delBtn.dataset.savedId;
+            const record = app.state.palette.savedPalettesData.palettes.find(item => item.id === savedId);
+            if (!record) return;
+            if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("palette.saved.delete", {
+              saved_record_id: record.id,
+            })) return;
+            const proposed = app.commands._cloneValue(app.state.palette.savedPalettesData);
+            proposed.palettes = proposed.palettes.filter(item => item.id !== record.id);
+            try {
+              const persist = () => app.api.savePalettesToServer(proposed);
+              if (app.commands.performGuideDurableMutation) {
+                await app.commands.performGuideDurableMutation({
+                  direction: "delete",
+                  operationId: "saving-loading-palette",
+                  kind: "palette",
+                  id: record.id,
+                  name: record.name,
+                  fingerprint: [...record.filament_ids],
+                }, persist);
+              } else {
+                await persist();
+              }
+              app.state.palette.savedPalettesData = proposed;
+              for (const card of app.state.palette.deck) {
+                if (card.saved_source_id === record.id || card.id === record.id) {
+                  card.saved_source_id = null;
+                  card.saved = false;
+                }
+              }
+              app.commands.renderDeckCards();
+              app.commands.showToast(`Deleted "${record.name}"`, "success");
+              app.events.emit("palette.saved.deleted", { savedRecordId: record.id, name: record.name });
+              renderPopoverItems();
+            } catch (error) {
+              app.commands.showToast(`Delete failed: ${error.message}`, "error");
+            }
             return;
           }
           confirmPending = true;
@@ -744,12 +833,29 @@ function loadPaletteByIndex(idx, { forceActive = true, sync = true, silent = fal
       filamentIds: saved.filament_ids,
       saved: true,
     });
+    card.saved_source_id = saved.id;
+    const previousActiveId = app.state.palette.activeDeckId;
     app.state.palette.deck.push(card);
     if (forceActive || app.state.palette.deck.length === 1) app.state.palette.activeDeckId = card.id;
     app.commands.renderCreationTab();
     app.commands.updateRail();
-    if (sync) app.commands.syncConfigToServer();
-    if (!silent) app.commands.showToast(`Loaded "${card.name}"`, "success");
+    const emitLoaded = () => app.events.emit("palette.saved.loaded", {
+      savedRecordId: saved.id,
+      deckCardId: card.id,
+      name: card.name,
+    });
+    const finishLoaded = () => {
+      emitLoaded();
+      if (!silent) app.commands.showToast(`Loaded "${card.name}"`, "success");
+    };
+    if (sync) void app.commands.syncConfigToServer({ throwOnError: true }).then(finishLoaded).catch(error => {
+      app.state.palette.deck = app.state.palette.deck.filter(item => item.id !== card.id);
+      if (app.state.palette.activeDeckId === card.id) app.state.palette.activeDeckId = previousActiveId;
+      app.commands.renderCreationTab();
+      app.commands.updateRail();
+      app.commands.showToast(`Load failed: ${error.message}`, "error");
+    });
+    else finishLoaded();
     return card;
   }
 
@@ -1194,6 +1300,7 @@ function hideRailDeckHoverPreview() {
     armStagingClearConfirm,
     handleStagingClearClick,
     saveDeckCard,
+    clearPaletteDeck,
     loadSavedPalettes,
     showLoadPaletteMenu,
     loadPaletteByIndex,
