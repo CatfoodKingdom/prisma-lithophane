@@ -2,6 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const {
   createFeatureHarness,
   fakeElement,
@@ -21,19 +23,36 @@ async function harness(options = {}) {
   return createFeatureHarness({ filaments, ...options });
 }
 
-test("profile application overwrites owned values and drops retired aliases", async () => {
+function printerWithWidth(name, multiplier = 2) {
+  return {
+    id: "printer-a",
+    name,
+    max_print_area: { x: 180, y: 180 },
+    nozzle_profiles: [{
+      id: "nozzle-200",
+      diameter_um: 200,
+      min_layer_height_um: 50,
+      max_layer_height_um: 150,
+      max_extrusion_width_um: 250,
+      minimum_line_length_multiplier: multiplier,
+    }],
+  };
+}
+
+test("profile application overwrites the multiplier and ignores derived pitch fields", async () => {
   const { app } = await harness();
-  app.state.settings.config.solver_fine_pitch_mm = 0.8;
-  app.state.settings.config.image_sample_pitch_mm = 0.7;
+  app.state.settings.config.solve_pitch_extrusion_width_multiplier = 3;
   app.commands._applySettingsProfileToConfig({
+    solve_pitch_extrusion_width_multiplier: 2,
     solver_fine_pitch_mm: 0.4,
     image_sample_pitch_mm: 0.3,
     gamut_mode: "chroma",
     guided_surface_enabled: true,
     tv_weight: 99,
   });
-  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.4);
-  assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.3);
+  assert.equal(app.state.settings.config.solve_pitch_extrusion_width_multiplier, 2);
+  assert.notEqual(app.state.settings.config.solver_fine_pitch_mm, 0.4);
+  assert.notEqual(app.state.settings.config.image_sample_pitch_mm, 0.3);
   assert.equal(app.state.settings.config.gamut_mode, "hue_preserving");
   assert.equal("guided_surface_enabled" in app.state.settings.config, false);
   assert.equal("tv_weight" in app.state.settings.config, false);
@@ -45,23 +64,426 @@ test("profile keys own current controls but not mandatory product safety", async
   assert.ok(keys.includes("luminance_mode"));
   assert.ok(keys.includes("detail_cap_max_layers"));
   assert.ok(keys.includes("color_region_target_mm"));
-  assert.ok(keys.includes("neutral_field_protection_mode"));
+  assert.ok(keys.includes("neutral_field_protection_enabled"));
+  assert.ok(keys.includes("neutral_field_protection_cutoff"));
+  assert.ok(!keys.includes("use_corrections"));
+  assert.ok(!keys.includes("stage2_boundary_mutation_current_de_percentile"));
+  assert.ok(!keys.includes("stage2_boundary_mutation_min_component_mm"));
   assert.ok(!keys.includes("enforce_printability"));
   assert.ok(!keys.includes("cap_continuity_cleanup"));
   assert.ok(!keys.includes("printability_minimum_extrusion_width_mm"));
   assert.ok(!keys.includes("printability_minimum_line_length_mm"));
-  assert.ok(!keys.includes("min_line_length_multiplier"));
+  assert.ok(keys.includes("solve_pitch_extrusion_width_multiplier"));
   assert.equal(app.state.settings.config.enforce_printability, true);
   assert.equal(app.state.settings.config.cap_continuity_cleanup, true);
 });
 
-test("neutral-field protection defaults off and round-trips through the settings UI", async () => {
-  const neutralFieldSelect = fakeElement();
-  neutralFieldSelect.value = "broad";
-  const { app } = await harness({
-    elements: { "#cfgNeutralFieldProtection": neutralFieldSelect },
+test("settings numeric display values are rounded without inventing precision", async () => {
+  const { app } = await harness();
+  assert.equal(app.commands.formatSettingsInputNumber(0.7999999999999999), "0.8");
+  assert.equal(app.commands.formatSettingsInputNumber(0.004000000000000001), "0.004");
+  assert.equal(app.commands.formatSettingsInputNumber(75), "75");
+  assert.equal(app.commands.formatSettingsInputNumber(""), "");
+});
+
+test("settings wheel direction increases on upward gestures", async () => {
+  const { app } = await harness();
+  assert.equal(app.commands.settingsWheelMultiplier(-1), 1);
+  assert.equal(app.commands.settingsWheelMultiplier(1), -1);
+  assert.equal(app.commands.settingsWheelMultiplier(0), 0);
+});
+
+test("settings range wheel stepping reuses input and change behavior", async () => {
+  const { app } = await harness();
+  const input = fakeElement();
+  const events = [];
+  input.value = "0";
+  input.min = "-3";
+  input.max = "3";
+  input.step = "0.25";
+  input.dispatchEvent = (event) => events.push(event.type);
+
+  assert.equal(app.commands.stepSettingsRangeInput(input, 1), true);
+  assert.equal(input.value, "0.25");
+  assert.deepEqual(events, ["input", "change"]);
+
+  input.value = "3";
+  events.length = 0;
+  assert.equal(app.commands.stepSettingsRangeInput(input, 1), false);
+  assert.deepEqual(events, []);
+});
+
+test("settings steppers do not treat a missing maximum as zero", async () => {
+  const { app } = await harness();
+  const input = fakeElement();
+  input.min = "0";
+  input.max = "";
+  input.step = "1";
+
+  assert.equal(app.commands.parseSettingsNumericAttribute(input, "min"), 0);
+  assert.equal(app.commands.parseSettingsNumericAttribute(input, "max"), null);
+  assert.equal(app.commands.parseSettingsNumericAttribute(input, "step"), 1);
+});
+
+test("settings steppers are limited to genuinely quantized controls", async () => {
+  const { app } = await harness();
+  for (const controlId of [
+    "cfgDWcMin",
+    "cfgKMax",
+    "cfgStage1Coarsening",
+    "cfgStage2BoundaryMutationMaxPasses",
+    "cfgBaseShadingLimit",
+    "cfgDetailCapMaxLayers",
+  ]) {
+    assert.equal(app.commands.settingsNumericRuleFor(controlId).quantized, true);
+  }
+  for (const controlId of [
+    "cfgDeThreshold",
+    "cfgColorRegionTarget",
+    "cfgStage2BoundaryMutationMinGain",
+    "cfgBoundaryCapDeBudget",
+    "cfgSmoothKernel",
+  ]) {
+    assert.equal(app.commands.settingsNumericRuleFor(controlId), null);
+  }
+});
+
+test("settings presentation follows the drawer hierarchy", async () => {
+  const { app } = await harness();
+  assert.equal(app.state.ui.SETTINGS_PRESENTATION_VERSION, 5);
+  const essentials = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "essentials");
+  const preprocessing = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "preprocessing");
+  const solver = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "solver");
+  const whiteCap = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "white-cap");
+  const solverRow = (key) => solver.rows.find((row) => row.key === key);
+  assert.equal(solverRow("gamut_mode").group, "Color Matching");
+  assert.equal(solverRow("de_threshold").group, "Color Matching");
+  assert.equal(solverRow("chroma_weight").group, "Color Matching");
+  assert.equal(solverRow("cell_mode").group, "Region Planning");
+  assert.equal(solverRow("stage1_coarsening_factor").group, "Region Planning");
+  assert.equal(solverRow("color_region_target_mm").group, "Region Planning");
+  assert.equal(solverRow("neutral_field_protection_enabled").group, "Region Refinement");
+  assert.equal(solverRow("stage2_boundary_mutation_enabled").group, "Region Refinement");
+  assert.equal(solver.rows.some((row) => row.key === "luminance_base_shading_limit_fraction"), false);
+  assert.deepEqual(essentials.rows.map((row) => [row.key, row.label]), [
+    ["luminance_mode", "Solve Mode"],
+    ["solve_pitch_extrusion_width_multiplier", "Solve Pitch"],
+    ["layer_height", "Layer Height"],
+    ["t_max", "Max Thickness"],
+    ["d_wb", "Base Thickness"],
+    ["min_cap_layers", "Min Cap Layers"],
+    ["base_filament", "Base/Cap Filament"],
+  ]);
+  assert.equal(preprocessing.title, "Preprocessing");
+  assert.equal(whiteCap.rows.some((row) => row.key === "min_cap_layers"), false);
+  assert.equal(whiteCap.rows.find((row) => row.key === "detail_cap_max_layers").group, "Detail Cap");
+  assert.equal(whiteCap.rows.find((row) => row.key === "detail_cap_max_layers").label, "Max Detail Layers");
+  assert.equal(whiteCap.rows.find((row) => row.key === "cap_mode").label, "Boundary cap style");
+  assert.deepEqual(
+    whiteCap.rows.find((row) => row.key === "luminance_base_shading_limit_fraction"),
+    {
+      key: "luminance_base_shading_limit_fraction",
+      controlId: "cfgBaseShadingLimit",
+      label: "Shading balance",
+      format: "percent",
+      group: "Boundary Cap",
+    },
+  );
+});
+
+test("settings evaluation rejects stale generations and changed contexts", async () => {
+  const { app } = await harness();
+  const older = app.commands.beginSettingsEvaluationRequest();
+  const newest = app.commands.beginSettingsEvaluationRequest();
+  assert.equal(app.state.settings.settingsEvaluationPresentationCurrent, false);
+  const response = {
+    settings_evaluation: {
+      context_fingerprint: "current",
+      context: {
+        printer_id: null,
+        nozzle_size_mm: null,
+        extrusion_width_mm: null,
+        module_state: {},
+        source_identity: { image_path: null, image_source_ref: null, frame: null },
+        appearance_identity: {
+          provider: app.state.settings.config.appearance_model_provider,
+          base_filament: app.state.settings.config.base_filament,
+        },
+      },
+      values: {},
+      modules: {},
+      issues: [],
+    },
+  };
+
+  assert.equal(app.commands.applySettingsEvaluationResponse(response, older), false);
+  assert.equal(app.commands.applySettingsEvaluationResponse(response, newest), true);
+  assert.equal(app.state.settings.settingsEvaluationFingerprint, "current");
+  assert.equal(app.state.settings.settingsEvaluationPresentationCurrent, true);
+
+  const changed = app.commands.beginSettingsEvaluationRequest();
+  assert.equal(app.state.settings.settingsEvaluationPresentationCurrent, false);
+  app.state.settings.moduleState.example = true;
+  assert.equal(app.commands.applySettingsEvaluationResponse(response, changed), false);
+  assert.equal(app.state.settings.settingsEvaluationPresentationCurrent, false);
+});
+
+test("pending settings evaluation clears stale presentation without dropping operation blockers", async () => {
+  const planningSummary = fakeElement();
+  let planningSummaryText = "";
+  Object.defineProperty(planningSummary, "textContent", {
+    configurable: true,
+    get: () => planningSummaryText,
+    set: (value) => {
+      planningSummaryText = value;
+      if (value === "") planningSummary.children.length = 0;
+    },
   });
-  assert.equal(app.state.settings.SETTINGS_PROFILE_DEFAULTS.neutral_field_protection_mode, "off");
+  const recommendation = fakeElement();
+  const { app } = await harness({ elements: {
+    "#regionPlanningSummary": planningSummary,
+    "#baseThicknessRecommendation": recommendation,
+  } });
+  const firstCell = fakeElement();
+  const row = fakeElement();
+  let statusBadge = null;
+  row.querySelector = (selector) => {
+    if (selector === ".settings-row-status") return statusBadge;
+    if (selector === "td:first-child") return firstCell;
+    return null;
+  };
+  firstCell.appendChild = (child) => {
+    statusBadge = child;
+    child.remove = () => { statusBadge = null; };
+    return child;
+  };
+  const originalOne = app.state.ui.$;
+  const originalMany = app.state.ui.$$;
+  app.state.ui.$ = (selector) => selector === '[data-setting-key="luminance_base_shading_limit_fraction"]'
+    ? row
+    : originalOne(selector);
+  app.state.ui.$$ = (selector) => selector === "[data-setting-key]" ? [row] : originalMany(selector);
+  app.state.settings.settingsEvaluation = {
+    context: { nozzle_size_mm: 0.2 },
+    values: {
+      luminance_base_shading_limit_fraction: { status: "inactive" },
+      stage1_coarsening_factor: {
+        derived: { pitch_mm: 0.4, cells: { width: 250, height: 200 } },
+      },
+      d_wb: { recommendation: { minimum: 0.12, maximum: 0.15 } },
+    },
+    modules: {},
+    issues: [{ blocked_operations: ["solve"] }],
+  };
+  app.state.settings.settingsEvaluationPresentationCurrent = true;
+
+  const previousDocument = global.document;
+  global.document = { createElement: () => fakeElement() };
+  try {
+    app.commands.renderSettingsEvaluation();
+    assert.equal(statusBadge?.textContent, "Inactive");
+    assert.equal(
+      planningSummary.children[0]?.textContent,
+      "Planning spacing: 0.4 mm · 250 × 200 cells",
+    );
+    assert.equal(
+      recommendation.textContent,
+      "Base thickness: 0.12–0.15 mm recommended for 0.2 mm nozzle",
+    );
+
+    app.commands.beginSettingsEvaluationRequest();
+    assert.equal(statusBadge, null);
+    assert.equal(row.classList.contains("is-setting-inactive"), false);
+    assert.equal(
+      planningSummary.children[0]?.textContent,
+      "Planning spacing: 0.4 mm · 250 × 200 cells",
+    );
+    assert.equal(
+      recommendation.textContent,
+      "Base thickness: 0.12–0.15 mm recommended for 0.2 mm nozzle",
+    );
+    assert.equal(app.commands.settingsBlocksOperation("solve"), true);
+  } finally {
+    if (previousDocument === undefined) delete global.document;
+    else global.document = previousDocument;
+  }
+});
+
+test("local and authoritative stack summaries preserve each other's content", async () => {
+  const layerHeight = fakeElement();
+  layerHeight.value = "0.08";
+  const baseThickness = fakeElement();
+  baseThickness.value = "0.2";
+  const minCapLayers = fakeElement();
+  minCapLayers.value = "2";
+  const maxThickness = fakeElement();
+  maxThickness.value = "3";
+  const localSummary = fakeElement();
+  localSummary.innerHTML = "local summary";
+  const recommendation = fakeElement();
+  const derivedWarnings = fakeElement();
+  const { app } = await harness({ elements: {
+    "#cfgLayerHeight": layerHeight,
+    "#cfgDWb": baseThickness,
+    "#cfgDWcMin": minCapLayers,
+    "#cfgTMax": maxThickness,
+    "#stackColorLayerSummary": localSummary,
+    "#baseThicknessRecommendation": recommendation,
+    "#derivedParams": derivedWarnings,
+  } });
+  app.state.settings.settingsEvaluation = {
+    context: { nozzle_size_mm: 0.2 },
+    values: { d_wb: { recommendation: { value: 0.2 } } },
+    modules: {},
+  };
+  app.state.settings.settingsEvaluationPresentationCurrent = true;
+
+  app.commands.renderSettingsEvaluation();
+  assert.equal(localSummary.innerHTML, "local summary");
+  assert.equal(recommendation.textContent, "Base thickness: 0.2 mm recommended for 0.2 mm nozzle");
+  assert.equal(recommendation.hidden, false);
+
+  global.document = { querySelectorAll: () => [] };
+  try {
+    app.commands.updateDerivedParams();
+  } finally {
+    delete global.document;
+  }
+  assert.match(localSummary.innerHTML, /Color layers:/);
+  assert.equal(recommendation.textContent, "Base thickness: 0.2 mm recommended for 0.2 mm nozzle");
+});
+
+test("preprocessing presets come from module descriptors", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [{
+    name: "example",
+    preset_ui: {
+      control_label: "Example strength",
+      default_preset: "medium",
+      presets: [{ key: "medium", label: "Medium", values: { strength: 0.4 } }],
+    },
+    params: { strength: { name: "strength", default: 0.4 } },
+  }];
+
+  assert.deepEqual(app.commands.preprocessingPresetSpec("example"), {
+    controlLabel: "Example strength",
+    defaultPreset: "medium",
+    presets: [{ key: "medium", label: "Medium", values: { strength: 0.4 } }],
+  });
+});
+
+test("preprocessing raw parameters use the standard child-control ownership class", () => {
+  const moduleController = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/features/settings/modules.js"),
+    "utf8",
+  );
+  assert.match(
+    moduleController,
+    /if \(presetSpec\)[\s\S]*?tr\.classList\.add\([\s\S]*?"module-advanced-param-row",[\s\S]*?"settings-child-row"/,
+  );
+});
+
+test("preprocessing enablement uses ordinary setting rows with right-side Enabled controls", () => {
+  const moduleController = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/features/settings/modules.js"),
+    "utf8",
+  );
+  assert.match(moduleController, /table\.className = "settings-table module-toggle-table"/);
+  assert.match(moduleController, /const row = document\.createElement\("tr"\)/);
+  assert.match(moduleController, /const tdLabel = document\.createElement\("td"\)/);
+  assert.match(moduleController, /const tdValue = document\.createElement\("td"\)/);
+  assert.match(moduleController, /enabledLabel\.className = "stg-check"/);
+  assert.match(moduleController, /document\.createTextNode\(" Enabled"\)/);
+  assert.doesNotMatch(moduleController, /row\.className = "module-toggle-row"[\s\S]*?row\.appendChild\(cb\)/);
+});
+
+test("authoritative settings annotate existing drawer rows without changing control ids", async () => {
+  const row = fakeElement();
+  const control = fakeElement();
+  control.id = "cfgDWcMin";
+  control.closest = (selector) => selector === "tr" ? row : null;
+  await harness({ elements: { "#cfgDWcMin": control } });
+
+  assert.equal(row.dataset.settingKey, "min_cap_layers");
+  assert.equal(control.id, "cfgDWcMin");
+});
+
+test("a missing settings contract leaves the existing drawer visible but read-only", async () => {
+  const input = fakeElement();
+  const dependentInput = fakeElement();
+  dependentInput.disabled = true;
+  const close = fakeElement();
+  close.id = "settingsDrawerClose";
+  const host = fakeElement();
+  host.querySelector = () => null;
+  host.querySelectorAll = () => [input, dependentInput, close];
+  const { app } = await harness({ elements: { "#settingsDrawerBody": host } });
+  global.document = { createElement: () => fakeElement() };
+  try {
+    app.commands.setSettingsContractDisconnected(true);
+
+    assert.equal(app.state.settings.settingsContractAvailable, false);
+    assert.equal(input.disabled, true);
+    assert.equal(dependentInput.disabled, true);
+    assert.equal(close.disabled, false);
+    app.commands.setSettingsContractDisconnected(false);
+    assert.equal(input.disabled, false);
+    assert.equal(dependentInput.disabled, true);
+  } finally {
+    delete global.document;
+  }
+});
+
+test("contract constraints respect presentation transforms without rendering range labels", async () => {
+  const shading = fakeElement();
+
+  const chroma = fakeElement();
+  chroma.min = "-3";
+  chroma.max = "3";
+
+  const minCap = fakeElement();
+
+  await harness({ elements: {
+    "#cfgBaseShadingLimit": shading,
+    "#cfgChromaWeight": chroma,
+    "#cfgDWcMin": minCap,
+  } });
+
+  assert.equal(shading.min, "0");
+  assert.equal(shading.max, "100");
+  assert.equal(chroma.min, "-3");
+  assert.equal(chroma.max, "3");
+  assert.equal(chroma.dataset.contractMin, "0.125");
+  assert.equal(chroma.dataset.contractMax, "8");
+  assert.equal(minCap.min, "1");
+
+  const settingsMarkup = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/index.html"),
+    "utf8",
+  );
+  const moduleController = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/features/settings/modules.js"),
+    "utf8",
+  );
+  assert.doesNotMatch(settingsMarkup, /class="stg-range"/);
+  assert.doesNotMatch(moduleController, /className = "stg-range"/);
+});
+
+test("neutral-field protection keeps enablement and cutoff as the only persisted state", async () => {
+  const neutralFieldEnabled = fakeElement();
+  neutralFieldEnabled.checked = true;
+  const neutralCutoff = fakeElement();
+  neutralCutoff.value = "0.035";
+  const { app } = await harness({
+    elements: {
+      "#cfgNeutralFieldProtectionEnabled": neutralFieldEnabled,
+      "#cfgNeutralFieldProtectionCutoff": neutralCutoff,
+    },
+  });
+  assert.equal(app.state.settings.SETTINGS_PROFILE_DEFAULTS.neutral_field_protection_enabled, false);
+  app.commands.syncSettingsPresentationMetadata();
+  assert.equal(neutralFieldEnabled.dataset.settingsKey, "neutral_field_protection_enabled");
+  assert.equal(neutralFieldEnabled.dataset.settingsSection, "solver");
 
   global.document = {
     querySelector() { return null; },
@@ -69,13 +491,15 @@ test("neutral-field protection defaults off and round-trips through the settings
   };
   try {
     app.commands.readConfigFromUI();
-    assert.equal(app.state.settings.config.neutral_field_protection_mode, "broad");
+    assert.equal(app.state.settings.config.neutral_field_protection_enabled, true);
+    assert.equal(app.state.settings.config.neutral_field_protection_cutoff, 0.035);
 
     app.commands._applySettingsProfileToConfig({
-      neutral_field_protection_mode: "standard",
+      neutral_field_protection_enabled: true,
+      neutral_field_protection_cutoff: 0.027,
     });
-    assert.equal(app.state.settings.config.neutral_field_protection_mode, "standard");
-    neutralFieldSelect.value = "standard";
+    assert.equal(app.state.settings.config.neutral_field_protection_enabled, true);
+    assert.equal(app.state.settings.config.neutral_field_protection_cutoff, 0.027);
     app.commands._setLoadedSettingsProfile(
       { id: "neutral", kind: "named", name: "Neutral" },
       {
@@ -84,58 +508,34 @@ test("neutral-field protection defaults off and round-trips through the settings
       },
     );
     assert.equal(app.commands.isSettingsProfileModified(), false);
-    neutralFieldSelect.value = "broad";
+    neutralFieldEnabled.checked = false;
     assert.equal(app.commands.isSettingsProfileModified(), true);
-    neutralFieldSelect.value = "standard";
-    app.state.settings.config.neutral_field_protection_mode = "standard";
+    neutralFieldEnabled.checked = true;
+    app.state.settings.config.neutral_field_protection_enabled = true;
     const solverSection = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS.find(
       (section) => section.key === "solver",
     );
     const rows = app.commands.buildReadOnlyRunSectionRows(
       solverSection,
-      { settings: { neutral_field_protection_mode: "standard" } },
+      { settings: { neutral_field_protection_enabled: true } },
     );
     assert.equal(
-      rows.find((row) => row.label === "Neutral-field Protection").value,
-      "Standard",
+      rows.find((row) => row.label === "Neutral-field protection").value,
+      "Enabled",
     );
 
-    const legacyRun = { label: "Legacy", config: {} };
-    const explicitOffRun = {
-      label: "Explicit Off",
-      config: { neutral_field_protection_mode: "off" },
-    };
-    assert.equal(
-      app.commands.getSolveRunSettingsSnapshot(legacyRun).neutral_field_protection_mode,
-      "off",
-    );
-    assert.equal(
-      app.commands.getSolveRunSettingsSnapshot({
-        config: { neutral_field_protection_mode: "standard" },
-        recipe_snapshot: { profile_snapshot: { settings: {} } },
-      }).neutral_field_protection_mode,
-      "standard",
-    );
-    assert.equal(
-      app.commands.getFrozenSolveRunSnapshot(legacyRun).settings.neutral_field_protection_mode,
-      "off",
-    );
-    assert.equal(
-      app.commands.collectSolveRunSettingDiffs(legacyRun, explicitOffRun)
-        .some((diff) => diff.label === "Neutral-field Protection"),
-      false,
-    );
-    const modeDiff = app.commands.collectSolveRunSettingDiffs(
-      explicitOffRun,
-      { label: "Standard", config: { neutral_field_protection_mode: "standard" } },
-    ).find((diff) => diff.label === "Neutral-field Protection");
+    const disabledRun = { label: "Disabled", config: { neutral_field_protection_enabled: false } };
+    const enabledDiff = app.commands.collectSolveRunSettingDiffs(
+      disabledRun,
+      { label: "Enabled", config: { neutral_field_protection_enabled: true } },
+    ).find((diff) => diff.label === "Neutral-field protection");
     assert.deepEqual(
-      { before: modeDiff.before, after: modeDiff.after, category: modeDiff.category },
-      { before: "Off", after: "Standard", category: "solver" },
+      { before: enabledDiff.before, after: enabledDiff.after, category: enabledDiff.category },
+      { before: "off", after: "on", category: "solver" },
     );
 
     app.commands._applySettingsProfileToConfig({});
-    assert.equal(app.state.settings.config.neutral_field_protection_mode, "off");
+    assert.equal(app.state.settings.config.neutral_field_protection_enabled, false);
   } finally {
     delete global.document;
   }
@@ -169,18 +569,18 @@ test("temporary settings profiles prefer durable run snapshots", async () => {
     config: { t_max: 9 },
     recipe_snapshot: {
       profile_snapshot: {
-        settings: { t_max: 3, solver_fine_pitch_mm: 0.4 },
+        settings: { t_max: 3, solve_pitch_extrusion_width_multiplier: 2 },
         modules: { denoise: true },
       },
     },
   }, { label: "Loaded run" });
   assert.equal(profile.kind, "temporary");
   assert.equal(profile.settings.t_max, 3);
-  assert.equal(profile.settings.solver_fine_pitch_mm, 0.4);
+  assert.equal(profile.settings.solve_pitch_extrusion_width_multiplier, 2);
   assert.deepEqual(profile.modules, { denoise: true });
 });
 
-test("white-point rescale is basic, grouped in run settings, and summarized only when enabled", async () => {
+test("white-point rescale is basic in run settings and summarized only when enabled", async () => {
   const { app } = await harness();
   const run = {
     id: "run-1",
@@ -193,8 +593,8 @@ test("white-point rescale is basic, grouped in run settings, and summarized only
       layer_height: 0.08,
       base_filament: "white",
       d_wb: 0.2,
-      d_wc_min: 0.16,
-      smooth_kernel: 2.5,
+      min_cap_layers: 2,
+      boundary_cap_smoothing_radius_mm: 1,
       detail_cap_max_layers: 5,
       appearance_model_provider: "photo_stack_bundle",
       use_corrections: true,
@@ -222,13 +622,14 @@ test("white-point rescale is basic, grouped in run settings, and summarized only
   );
   const frozen = app.commands.getFrozenSolveRunSnapshot(run);
   const rows = app.commands.buildReadOnlyRunSectionRows(solverSection, frozen);
-  assert.equal(rows.find((row) => row.label === "White-point Rescale").advanced, false);
+  assert.equal(rows.find((row) => row.label === "White-point rescale").advanced, false);
 
   app.commands.esc = (value) => String(value);
   const html = app.commands.buildReadOnlyRunSettingsHtml(run);
   assert.match(html, /class="run-settings-sections"/);
-  assert.match(html, /Color Solver · Recipe Search/);
-  const whitePointIndex = html.indexOf("White-point Rescale");
+  assert.match(html, /<h4 class="settings-group-cap run-settings-section-cap">Color Solver<\/h4>/);
+  assert.match(html, /<h5 class="run-settings-subsection-cap(?: is-advanced-only)?">Color Matching<\/h5>/);
+  const whitePointIndex = html.indexOf("White-point rescale");
   const whitePointRowStart = html.lastIndexOf('<div class="run-settings-row', whitePointIndex);
   assert.ok(whitePointRowStart >= 0);
   assert.equal(
@@ -250,6 +651,205 @@ test("settings columns preserve order while balancing subsection flow units", as
   assert.deepEqual(
     app.commands.partitionSettingsItems(items, heights, 3, 1000),
     [items],
+  );
+
+  const atomicItems = Array.from({ length: 3 }, (_, index) => ({ index }));
+  assert.deepEqual(
+    app.commands.partitionSettingsItems(atomicItems, [350, 350, 350], 3, 600),
+    [[atomicItems[0]], [atomicItems[1]], [atomicItems[2]]],
+  );
+});
+
+test("settings subsection flow units split and restore canonical section content", async () => {
+  const { app } = await harness();
+  const makeNode = (...initialClasses) => {
+    const classes = new Set(initialClasses);
+    const node = {
+      id: "",
+      dataset: {},
+      children: [],
+      parentElement: null,
+      classList: {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        contains(name) { return classes.has(name); },
+      },
+      appendChild(child) {
+        child.remove?.();
+        this.children.push(child);
+        child.parentElement = this;
+        return child;
+      },
+      after(sibling) {
+        const parent = this.parentElement;
+        sibling.remove?.();
+        const index = parent.children.indexOf(this);
+        parent.children.splice(index + 1, 0, sibling);
+        sibling.parentElement = parent;
+      },
+      before(sibling) {
+        const parent = this.parentElement;
+        sibling.remove?.();
+        const index = parent.children.indexOf(this);
+        parent.children.splice(index, 0, sibling);
+        sibling.parentElement = parent;
+      },
+      remove() {
+        if (!this.parentElement) return;
+        const index = this.parentElement.children.indexOf(this);
+        if (index >= 0) this.parentElement.children.splice(index, 1);
+        this.parentElement = null;
+      },
+      removeAttribute(name) {
+        if (!name.startsWith("data-")) return;
+        const key = name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        delete this.dataset[key];
+      },
+      querySelectorAll(selector) {
+        const matches = [];
+        const visit = (element) => {
+          element.children.forEach((child) => {
+            if (selector === "[data-settings-flow-owner]"
+                && child.dataset.settingsFlowOwner !== undefined) matches.push(child);
+            visit(child);
+          });
+        };
+        visit(this);
+        return matches;
+      },
+    };
+    Object.defineProperty(node, "className", {
+      get() { return [...classes].join(" "); },
+      set(value) {
+        classes.clear();
+        String(value || "").split(/\s+/).filter(Boolean).forEach((name) => classes.add(name));
+      },
+    });
+    Object.defineProperty(node, "nextElementSibling", {
+      get() {
+        if (!this.parentElement) return null;
+        const index = this.parentElement.children.indexOf(this);
+        return this.parentElement.children[index + 1] || null;
+      },
+    });
+    Object.defineProperty(node, "firstChild", {
+      get() { return this.children[0] || null; },
+    });
+    return node;
+  };
+
+  const grid = makeNode("settings-grid");
+  const solver = makeNode("settings-group");
+  solver.dataset.settingsGroup = "solver";
+  solver.dataset.bucket = "solver";
+  const solverNodes = [
+    makeNode("settings-section-head"),
+    makeNode("settings-table"),
+    makeNode("settings-subsection-head"),
+    makeNode("settings-table"),
+    makeNode("settings-subsection-head"),
+    makeNode("settings-table"),
+  ];
+  solverNodes.forEach((node) => solver.appendChild(node));
+  grid.appendChild(solver);
+
+  const whiteCap = makeNode("settings-group");
+  whiteCap.dataset.settingsGroup = "white-cap";
+  whiteCap.dataset.bucket = "white-cap";
+  const whiteCapNodes = [
+    makeNode("settings-section-head"),
+    makeNode("settings-subsection-head"),
+    makeNode("settings-table"),
+    makeNode("settings-subsection-head"),
+    makeNode("settings-table"),
+  ];
+  whiteCapNodes.forEach((node) => whiteCap.appendChild(node));
+  grid.appendChild(whiteCap);
+
+  const findById = (root, id) => {
+    if (root.id === id) return root;
+    for (const child of root.children) {
+      const match = findById(child, id);
+      if (match) return match;
+    }
+    return null;
+  };
+  global.document = {
+    createElement() { return makeNode(); },
+    getElementById(id) { return findById(grid, id); },
+  };
+  try {
+    app.commands.extractSettingsSubsectionFlowUnits(grid);
+    assert.equal(grid.children.length, 5);
+    assert.equal(grid.children[0], solver);
+    assert.deepEqual(grid.children.slice(1, 3).map((unit) => unit.dataset.settingsFlowGroup), ["solver", "solver"]);
+    assert.equal(solver.children.length, 2);
+    assert.equal(grid.children[3].children[0], whiteCap);
+    assert.equal(grid.children[3].dataset.settingsFlowGroup, "white-cap");
+
+    app.commands.restoreSettingsFlowUnits(grid);
+    assert.equal(grid.children.length, 2);
+    assert.equal(grid.children[0], solver);
+    assert.equal(grid.children[1], whiteCap);
+    assert.deepEqual(solver.children.map((node) => solverNodes.indexOf(node)), [0, 1, 2, 3, 4, 5]);
+    assert.deepEqual(whiteCap.children.map((node) => whiteCapNodes.indexOf(node)), [0, 1, 2, 3, 4]);
+
+    const preprocessing = makeNode("settings-group");
+    preprocessing.dataset.settingsGroup = "preprocessing";
+    const moduleOwner = makeNode("module-settings-slot");
+    moduleOwner.id = "preprocessingSettingsContainer";
+    preprocessing.appendChild(moduleOwner);
+    const firstModule = makeNode("module-settings-section");
+    firstModule.dataset.settingsFlowOrder = "0";
+    const secondModule = makeNode("module-settings-section");
+    secondModule.dataset.settingsFlowOrder = "1";
+    moduleOwner.appendChild(firstModule);
+    moduleOwner.appendChild(secondModule);
+    grid.appendChild(preprocessing);
+
+    app.commands.extractPreprocessingFlowUnits(grid);
+    assert.deepEqual(grid.children.slice(-3), [preprocessing, firstModule, secondModule]);
+    assert.equal(firstModule.dataset.settingsFlowOwner, moduleOwner.id);
+    assert.equal(firstModule.dataset.settingsFlowGroup, "preprocessing");
+    assert.equal(firstModule.classList.contains("preprocessing-flow-unit"), true);
+    assert.equal(moduleOwner.children.length, 0);
+
+    app.commands.restoreSettingsFlowUnits(grid);
+    assert.deepEqual(grid.children.slice(-1), [preprocessing]);
+    assert.deepEqual(moduleOwner.children, [firstModule, secondModule]);
+    assert.equal(firstModule.dataset.settingsFlowOwner, undefined);
+    assert.equal(firstModule.dataset.settingsFlowGroup, undefined);
+    assert.equal(firstModule.classList.contains("preprocessing-flow-unit"), false);
+  } finally {
+    delete global.document;
+  }
+});
+
+test("settings guide target follows every distributed solver subsection", async () => {
+  const { app } = await harness();
+  const preprocessing = fakeElement();
+  const denoise = fakeElement();
+  const smoothing = fakeElement();
+  const solver = fakeElement();
+  const colorMatching = fakeElement();
+  const regionConstruction = fakeElement();
+  const regionRefinements = fakeElement();
+  app.state.ui.$$ = (selector) => {
+    if (selector === '[data-settings-group="preprocessing"], [data-settings-flow-group="preprocessing"]') {
+      return [preprocessing, denoise, smoothing];
+    }
+    if (selector === '[data-settings-group="solver"], [data-settings-flow-group="solver"]') {
+      return [solver, colorMatching, regionConstruction, regionRefinements];
+    }
+    return [];
+  };
+
+  assert.deepEqual(
+    app.commands.resolveGuideTargetRegions("settings.preprocessing-solver"),
+    [
+      [preprocessing, denoise, smoothing],
+      [solver, colorMatching, regionConstruction, regionRefinements],
+    ],
   );
 });
 
@@ -277,115 +877,106 @@ test("luminance mode expands to authoritative backend flags", async () => {
   assert.equal(app.state.settings.config.luminance_detail_authoring_printability, "off");
 });
 
-test("solve preflight math reports layer alignment and nozzle constraints", async () => {
+test("solve preflight math reports layer alignment constraints", async () => {
   const { app } = await harness();
   const aligned = app.commands.calculateStackLayerAlignment(0.08, 0.2, 0.08, 2.28);
   assert.equal(aligned.remainderMm, 0);
+  const insufficient = app.commands.calculateStackLayerAlignment(0.08, 0.2, 0.16, 0.439);
+  assert.equal(insufficient.maxLayers, 0);
+  assert.equal(insufficient.upperTotalMm, 0.44);
+  const oneColorLayer = app.commands.calculateStackLayerAlignment(0.08, 0.2, 0.16, 0.44);
+  assert.equal(oneColorLayer.maxLayers, 1);
   const misaligned = app.commands.calculateStackLayerAlignment(0.08, 0.2, 0.08, 2.3);
   assert.ok(misaligned.remainderMm > 0);
-  assert.match(app.commands.buildStackLayerAlignmentIssue(misaligned), /whole Layer Height steps/);
-  assert.match(app.commands.buildSolvePitchNozzleIssue(0.2, 0.4), /cannot be smaller/);
+  assert.equal(
+    app.commands.buildStackLayerAlignmentIssue(misaligned),
+    "Max Thickness must align with a layer. Use 2.28 mm or 2.36 mm.",
+  );
 });
 
-test("solve pitch mismatch detection distinguishes invalid, equal, and coarser pitches", async () => {
-  const solvePitch = fakeElement();
-  solvePitch.value = "0.2";
-  const { app } = await harness({ elements: { "#cfgSolvePitch": solvePitch } });
-  app.state.session.activeNozzle = { size: 0.4 };
-
-  assert.deepEqual(app.commands.getSolvePitchNozzleMismatch(), {
-    pitch: 0.2,
-    nozzleSize: 0.4,
-    message: app.commands.buildSolvePitchNozzleIssue(0.2, 0.4),
-  });
-  solvePitch.value = "0.4";
-  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
-  solvePitch.value = "0.6";
-  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
-  solvePitch.value = "0.3999995";
-  assert.equal(app.commands.getSolvePitchNozzleMismatch(), null);
-});
-
-test("solve pitch remediation preserves smoothing radius and synchronizes the canonical setting", async () => {
-  const solvePitch = fakeElement();
-  solvePitch.value = "0.2";
-  const layerHeight = fakeElement();
-  layerHeight.value = "0.08";
+test("border height starts at the base and advances in whole layer-height steps", async () => {
+  const borderEnabled = fakeElement();
+  borderEnabled.checked = true;
+  const borderWidth = fakeElement();
+  borderWidth.value = "3";
+  const borderHeight = fakeElement();
+  borderHeight.value = "0.37";
   const baseThickness = fakeElement();
   baseThickness.value = "0.2";
-  const capLayers = fakeElement();
-  capLayers.value = "2";
-  const maxThickness = fakeElement();
-  maxThickness.value = "3";
-  const smoothRadius = fakeElement();
+  const layerHeight = fakeElement();
+  layerHeight.value = "0.1";
+  const warning = fakeElement();
+  warning.classList.add("is-hidden");
+  const marker = fakeElement();
   const { app } = await harness({ elements: {
-    "#cfgSolvePitch": solvePitch,
-    "#cfgLayerHeight": layerHeight,
+    "#cfgBorder": borderEnabled,
+    "#cfgBorderWidth": borderWidth,
+    "#cfgBorderHeight": borderHeight,
     "#cfgDWb": baseThickness,
-    "#cfgDWcMin": capLayers,
-    "#cfgTMax": maxThickness,
-    "#cfgSmoothKernel": smoothRadius,
+    "#cfgLayerHeight": layerHeight,
+    "#borderHeightWarning": warning,
+    "#borderHeightWarningMarker": marker,
   } });
-  app.state.session.activeNozzle = {
-    size: 0.4,
-    min_layer_height: 0.04,
-    max_layer_height: 0.2,
-  };
-  app.state.settings.config.solver_fine_pitch_mm = 0.2;
-  app.state.settings.config.image_sample_pitch_mm = 0.2;
-  app.state.settings.config.smooth_kernel = 5;
-  const initialRadius = app.commands.smoothingRadiusMmFromCells(5, 0.2);
-  let dialogOptions = null;
-  let syncs = 0;
-  app.commands.appConfirm = async (_message, options) => {
-    dialogOptions = options;
-    return true;
-  };
-  app.commands.updateDerivedParams = () => {};
-  app.commands.syncConfigToServer = async () => { syncs += 1; };
 
-  const result = await app.commands.syncSolveSettingsWithPitchRemediation({ intent: "single" });
-
-  assert.deepEqual(result, { proceed: true, corrected: true });
-  assert.equal(dialogOptions.title, "Solve Pitch Is Too Small");
-  assert.equal(dialogOptions.ok, "Use 0.4 mm and Solve");
-  assert.equal(solvePitch.value, "0.4");
-  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.4);
-  assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.4);
   assert.equal(
-    app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel, 0.4),
-    initialRadius,
+    app.commands.renderBorderHeightWarning(),
+    "Border Height must align with a layer. Use 0.30 mm or 0.40 mm.",
   );
-  assert.equal(syncs, 1);
+  assert.equal(warning.textContent, "⚠ Border Height must align with a layer. Use 0.30 mm or 0.40 mm.");
+  assert.equal(warning.classList.contains("is-hidden"), false);
+  assert.equal(marker.classList.contains("is-visible"), true);
+  assert.equal(borderHeight.getAttribute("aria-invalid"), "true");
+
+  borderHeight.value = "0.4";
+  assert.equal(app.commands.renderBorderHeightWarning(), null);
+  assert.equal(warning.classList.contains("is-hidden"), true);
+
+  borderHeight.value = "0.19";
+  assert.equal(
+    app.commands.renderBorderHeightWarning(),
+    "Border Height must be at least 0.20 mm.",
+  );
+  assert.deepEqual(
+    app.commands.getSolveSettingsPreflightIssues().slice(-1),
+    ["Border Height must be at least 0.20 mm."],
+  );
 });
 
-test("solve pitch remediation cancels without mutation and uses Continue when other errors remain", async () => {
-  const solvePitch = fakeElement();
-  solvePitch.value = "0.2";
-  const { app } = await harness({ elements: { "#cfgSolvePitch": solvePitch } });
-  app.state.session.activeNozzle = { size: 0.4 };
-  app.state.settings.config.solver_fine_pitch_mm = 0.2;
-  app.state.settings.config.image_sample_pitch_mm = 0.2;
-  let dialogOptions = null;
-  let syncs = 0;
-  const mismatchMessage = app.commands.buildSolvePitchNozzleIssue(0.2, 0.4);
-  app.commands.getSolveSettingsPreflightIssues = () => [
-    mismatchMessage,
-    "Max Total Thickness is not aligned",
-  ];
-  app.commands.appConfirm = async (_message, options) => {
-    dialogOptions = options;
-    return false;
+test("neutral-field protection derives named presets and custom from the raw cutoff", async () => {
+  const { app } = await harness();
+  assert.deepEqual(
+    app.commands.neutralFieldProtectionPresets(),
+    [
+      { id: "narrow", value: 0.010 },
+      { id: "standard", value: 0.020 },
+      { id: "broad", value: 0.035 },
+    ],
+  );
+  assert.equal(app.commands.neutralFieldProtectionPresetForCutoff("0.010"), "narrow");
+  assert.equal(app.commands.neutralFieldProtectionPresetForCutoff(0.0200004), "standard");
+  assert.equal(app.commands.neutralFieldProtectionPresetForCutoff("0.035"), "broad");
+  assert.equal(app.commands.neutralFieldProtectionPresetForCutoff("0.023"), "custom");
+});
+
+test("solve pitch stepper changes only the canonical multiplier and derived pitch", async () => {
+  const { app } = await harness();
+  app.state.session.activeExtrusionWidth = { width_um: 400 };
+  app.state.session.resolvedPrintSetup = {
+    solve_pitch_extrusion_width_multiplier: 1,
+    effective_solve_pitch_mm: 0.4,
+    max_solve_pitch_extrusion_width_multiplier: 4,
   };
-  app.commands.syncConfigToServer = async () => { syncs += 1; };
+  app.state.settings.config.solve_pitch_extrusion_width_multiplier = 1;
+  app.state.settings.config.boundary_cap_smoothing_radius_mm = 1;
 
-  const result = await app.commands.syncSolveSettingsWithPitchRemediation({ intent: "single" });
-
-  assert.deepEqual(result, { proceed: false, corrected: false });
-  assert.equal(dialogOptions.ok, "Use 0.4 mm and Continue");
-  assert.equal(solvePitch.value, "0.2");
-  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.2);
-  assert.equal(syncs, 0);
+  assert.equal(app.commands.stepSolvePitchMultiplier(1), true);
+  assert.equal(app.state.settings.config.solve_pitch_extrusion_width_multiplier, 2);
+  assert.equal(app.state.settings.config.solver_fine_pitch_mm, 0.8);
+  assert.equal(app.state.settings.config.image_sample_pitch_mm, 0.8);
+  assert.equal(app.state.settings.config.boundary_cap_smoothing_radius_mm, 1);
+  assert.equal(app.commands.stepSolvePitchMultiplier(-1), true);
+  assert.equal(app.state.settings.config.solve_pitch_extrusion_width_multiplier, 1);
+  assert.equal(app.commands.stepSolvePitchMultiplier(-1), false);
 });
 
 test("confirmation dialog traps focus, cancels on Escape, and restores prior focus", async () => {
@@ -434,9 +1025,14 @@ test("confirmation dialog traps focus, cancels on Escape, and restores prior foc
   const resultPromise = app.commands.appConfirm("Proceed?", {
     title: "Confirm Action",
     ok: "Proceed",
+    emphasis: ["Proceed"],
   });
   await new Promise(resolve => setTimeout(resolve, 60));
   assert.equal(dialogDocument.activeElement, confirmButton);
+  assert.equal(
+    message.innerHTML,
+    '<strong class="app-dialog-emphasis">Proceed</strong>?',
+  );
 
   let tabPrevented = false;
   listeners.get("keydown")({
@@ -460,66 +1056,166 @@ test("confirmation dialog traps focus, cancels on Escape, and restores prior foc
   assert.equal(listeners.has("keydown"), false);
 });
 
-test("printer printability uses bounded whole-nozzle length multipliers", async () => {
+test("printer printability validates nozzle-owned whole-width length multipliers", async () => {
   const { app } = await harness();
-  assert.deepEqual(app.commands.defaultNozzleLineWidths(0.2), {
-    line_width: 0.22,
-    max_line_width: 0.25,
-    min_line_length_multiplier: 2,
-  });
-  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.2, 2), "0.4");
-  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.4, 10), "4");
-  assert.equal(app.commands.formatNozzleDerivedLengthMm(0.3333333, 3), "0.999999");
-
-  const normalized = app.commands.normalizeNozzleProfile({
-    size: 0.4,
-    min_layer_height: 0.08,
-    max_layer_height: 0.32,
-    line_width: 0.2,
-    max_line_width: 0.3,
-    min_line_length_multiplier: 3,
-  });
-  assert.equal(normalized.line_width, 0.4);
-  assert.equal(normalized.max_line_width, 0.4);
-  assert.equal(normalized.min_line_length_multiplier, 3);
-  assert.equal("min_line_width" in normalized, false);
-  assert.equal("min_line_length" in normalized, false);
-
-  const sizeInput = fakeElement();
-  sizeInput.value = "0.2";
-  sizeInput.setCustomValidity = message => { sizeInput.validationMessage = message; };
+  const diameterInput = fakeElement(); diameterInput.value = "0.4";
+  const minimumLayerInput = fakeElement(); minimumLayerInput.value = "0.08";
+  const maximumLayerInput = fakeElement(); maximumLayerInput.value = "0.32";
+  const maximumWidthInput = fakeElement(); maximumWidthInput.value = "0.5";
   const multiplierInput = fakeElement();
   multiplierInput.value = "1";
-  multiplierInput.setCustomValidity = message => { multiplierInput.validationMessage = message; };
-  const output = fakeElement();
   const row = fakeElement();
   row.querySelector = selector => ({
-    ".nz-size": sizeInput,
+    ".nz-diameter": diameterInput,
+    ".nz-min-lh": minimumLayerInput,
+    ".nz-max-lh": maximumLayerInput,
+    ".nz-max-ew": maximumWidthInput,
     ".nz-min-ll-mult": multiplierInput,
-    ".nz-min-ll-derived": output,
   }[selector] || null);
+  row.parentElement = { querySelectorAll: () => [row] };
   assert.equal(app.commands.validateNozzleRow(row), false);
-  assert.match(multiplierInput.validationMessage, /whole number from 2 through 10/);
+  assert.match(multiplierInput.dataset.validationMessage, /whole number from 2 through 10/);
+  assert.equal(multiplierInput.getAttribute("aria-invalid"), "true");
   assert.equal(row.classList.contains("is-invalid"), true);
 
   multiplierInput.value = "3";
-  app.commands.syncNozzleDerivedLength(row);
-  assert.equal(output.textContent, "× nozzle = 0.6 mm");
   assert.equal(app.commands.validateNozzleRow(row), true);
-  assert.equal(multiplierInput.validationMessage, "");
+  assert.equal(multiplierInput.getAttribute("aria-invalid"), "false");
   assert.equal(row.classList.contains("is-invalid"), false);
+});
+
+test("printer integer steppers move by whole units and respect bounds", async () => {
+  const { app } = await harness();
+  const input = fakeElement();
+  input.value = "2";
+  input.min = "2";
+  input.max = "4";
+  input.step = "1";
+
+  assert.equal(app.commands.stepPrinterIntegerInput(input, 1), 3);
+  assert.equal(input.value, "3");
+  assert.equal(app.commands.stepPrinterIntegerInput(input, 1), 4);
+  assert.equal(input.value, "4");
+  assert.equal(app.commands.stepPrinterIntegerInput(input, 1), 4);
+  assert.equal(input.value, "4");
+  assert.equal(app.commands.stepPrinterIntegerInput(input, -1), 3);
+  assert.equal(input.value, "3");
+});
+
+test("printer nozzle diameter keeps the derived minimum width synchronized and disabled", async () => {
+  const diameterInput = fakeElement();
+  diameterInput.value = "0.25";
+  const minimumWidthInput = fakeElement();
+  minimumWidthInput.value = "0.20";
+  minimumWidthInput.disabled = false;
+  const title = fakeElement();
+  const row = fakeElement();
+  row.querySelector = selector => ({
+    ".nz-diameter": diameterInput,
+    ".nz-min-ew": minimumWidthInput,
+    ".pc-nozzle-title": title,
+  }[selector] || null);
+  const { app } = await harness();
+
+  app.commands.syncNozzleDerivedMinimum(row);
+
+  assert.equal(minimumWidthInput.value, "0.25");
+  assert.equal(minimumWidthInput.disabled, true);
+  assert.equal(title.textContent, "0.25 mm Nozzle");
+  assert.equal(row.getAttribute("aria-label"), "0.25 mm Nozzle Profile");
+});
+
+test("the printer editor protects the last nozzle profile", async () => {
+  const deleteButton = fakeElement();
+  const tbody = fakeElement();
+  tbody.querySelectorAll = selector => {
+    if (selector === ".nz-delete") return [deleteButton];
+    if (selector === "tr") return [];
+    return [];
+  };
+  const { app } = await harness({ elements: { "#pcNozzleBody": tbody } });
+  const printer = {
+    id: "printer-a",
+    name: "Printer A",
+    max_print_area: { x: 256, y: 256 },
+    ams_units: 1,
+    slots_per_ams: 4,
+    nozzle_profiles: [{ id: "nozzle-200", diameter_um: 200, min_layer_height_um: 50, max_layer_height_um: 150, max_extrusion_width_um: 250, minimum_line_length_multiplier: 2 }],
+  };
+  app.state.session.printersData = {
+    schema_version: 3,
+    revision: 1,
+    printers: [printer],
+    active_printer_id: "printer-a",
+    printer_setup_state: {
+      "printer-a": { active_nozzle_id: "nozzle-200", nozzle_width_state: { "nozzle-200": { current_width_um: 200, saved_widths_um: [200] } } },
+    },
+  };
+  app.state.session.printerConfigEditingId = "printer-a";
+  app.commands.esc = value => String(value);
+
+  app.commands.renderPrinterConfigPage();
+  assert.equal(deleteButton.disabled, true);
+  assert.equal(deleteButton.hidden, true);
+  assert.match(tbody.innerHTML, /class="pc-number-input pc-derived-bound nz-min-ew" value="0\.2" disabled/);
+
+  printer.nozzle_profiles.push(
+    { id: "nozzle-400", diameter_um: 400, min_layer_height_um: 80, max_layer_height_um: 320, max_extrusion_width_um: 500, minimum_line_length_multiplier: 2 },
+  );
+  app.commands.renderPrinterConfigPage();
+  assert.equal(deleteButton.disabled, false);
+  assert.equal(deleteButton.hidden, false);
+});
+
+test("new printers start with standard 0.2 and 0.4 nozzle profiles", async () => {
+  const { app } = await harness();
+  const created = app.commands.createDefaultPrinterProfile("printer-new");
+  assert.deepEqual(created.nozzle_profiles.map(profile => profile.diameter_um), [200, 400]);
+  assert.deepEqual(created.nozzle_profiles.map(profile => profile.minimum_line_length_multiplier), [2, 2]);
+  const setup = app.commands.createDefaultPrinterSetup(created);
+  assert.deepEqual(Object.values(setup.nozzle_width_state).map(state => state.current_width_um), [200, 400]);
+  assert.equal(setup.active_nozzle_id, created.nozzle_profiles[0].id);
+});
+
+test("printer capability fields use scoped inline validation", async () => {
+  const areaX = fakeElement();
+  const areaY = fakeElement();
+  const amsUnits = fakeElement();
+  const slotsPerAms = fakeElement();
+  areaX.value = "49";
+  areaY.value = "256";
+  amsUnits.value = "1";
+  slotsPerAms.value = "4";
+  const validation = fakeElement();
+  const { app } = await harness({
+    elements: {
+      "#pcAreaX": areaX,
+      "#pcAreaY": areaY,
+      "#pcAmsUnits": amsUnits,
+      "#pcSlotsPerAms": slotsPerAms,
+      "#pcValidationMessage": validation,
+    },
+  });
+  app.commands.showToast = () => {};
+
+  assert.equal(app.commands.readPrinterCapabilityFields(), null);
+  assert.equal(areaX.getAttribute("aria-invalid"), "true");
+  assert.match(validation.textContent, /Print Area X.*50 through 500/);
+
+  areaX.value = "310";
+  const values = app.commands.readPrinterCapabilityFields();
+  assert.equal(values.areaX.value, 310);
+  assert.equal(areaX.getAttribute("aria-invalid"), "false");
 });
 
 test("live config uses server-authoritative active printer thresholds", async () => {
   const { app } = await harness();
-  app.state.session.activeNozzle = {
-    size: 0.4,
-    min_line_length_multiplier: 2,
-  };
+  app.state.session.activeNozzle = { id: "nozzle-400", diameter_um: 400 };
+  app.state.session.activeExtrusionWidth = { width_um: 450 };
   app.state.session.activePrintability = {
-    minimum_extrusion_width_mm: 0.4,
-    minimum_line_length_mm: 0.8,
-    minimum_component_area_mm2: 0.32,
+    extrusion_width_mm: 0.45,
+    minimum_line_length_mm: 0.9,
+    minimum_component_area_mm2: 0.405,
   };
   global.document = {
     querySelector() { return null; },
@@ -527,8 +1223,8 @@ test("live config uses server-authoritative active printer thresholds", async ()
   };
   try {
     app.commands.readConfigFromUI();
-    assert.equal(app.state.settings.config.printability_minimum_extrusion_width_mm, 0.4);
-    assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.8);
+    assert.equal(app.state.settings.config.printability_extrusion_width_mm, 0.45);
+    assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.9);
   } finally {
     delete global.document;
   }
@@ -598,13 +1294,8 @@ test("switching adjustment tabs emits its semantic event after state and control
 test("printer editor stays open with its draft after a failed save", async () => {
   const printerPage = fakeElement();
   const draft = {
-    printers: [{
-      id: "printer-a",
-      name: "Unsaved draft",
-      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
-    }],
+    printers: [printerWithWidth("Unsaved draft", 3)],
     active_printer_id: "printer-a",
-    active_nozzle_size: 0.2,
   };
   const { app } = await harness({
     api: {
@@ -627,35 +1318,63 @@ test("printer editor stays open with its draft after a failed save", async () =>
   }
   assert.equal(printerPage.classList.contains("is-hidden"), false);
   assert.equal(app.state.session.printersData.printers[0].name, "Unsaved draft");
-  assert.equal(app.state.session.printersData.printers[0].nozzle_profiles[0].min_line_length_multiplier, 3);
+  assert.equal(app.state.session.printersData.printers[0].nozzle_profiles[0].minimum_line_length_multiplier, 3);
   assert.deepEqual(closeEvents, []);
+});
+
+test("stale printer configuration saves reconcile to the latest authoritative draft", async () => {
+  const printerPage = fakeElement();
+  const stale = {
+    schema_version: 3,
+    revision: 4,
+    printers: [printerWithWidth("Stale draft", 2)],
+    active_printer_id: "printer-a",
+  };
+  const latest = {
+    ...structuredClone(stale),
+    revision: 5,
+    printers: [printerWithWidth("Saved elsewhere", 3)],
+  };
+  const conflict = Object.assign(new Error("conflict"), {
+    status: 409,
+    body: { detail: { error: "printer_revision_conflict", printers_data: latest } },
+  });
+  const { app } = await harness({
+    api: { savePrinters: async () => { throw conflict; } },
+    elements: { "#printerConfigPage": printerPage },
+  });
+  app.state.session.printersData = stale;
+  app.state.session.printerConfigEditingId = "printer-a";
+  app.commands._readPrinterFromConfigPage = () => stale.printers[0];
+  app.commands.loadPrinters = async () => { app.state.session.printersData = latest; };
+  app.commands.renderPrinterConfigPage = () => {};
+  const toasts = [];
+  app.commands.showToast = (message, level) => toasts.push({ message, level });
+
+  assert.equal(await app.commands.hidePrinterConfigPage("image"), false);
+  assert.equal(app.state.session.printerConfigDraft.revision, 5);
+  assert.equal(app.state.session.printerConfigDraft.printers[0].name, "Saved elsewhere");
+  assert.equal(printerPage.classList.contains("is-hidden"), false);
+  assert.match(toasts.at(-1).message, /latest saved values/);
+  assert.equal(toasts.at(-1).level, "warning");
 });
 
 test("successful printer saves reconcile active printability from the server", async () => {
   const printerPage = fakeElement();
   const draft = {
-    printers: [{
-      id: "printer-a",
-      name: "Draft name",
-      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
-    }],
+    printers: [printerWithWidth("Draft name", 3)],
     active_printer_id: "printer-a",
-    active_nozzle_size: 0.2,
   };
   const authoritative = {
     ok: true,
-    printers: [{
-      id: "printer-a",
-      name: "Canonical name",
-      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 3 }],
-    }],
+    printers: [printerWithWidth("Canonical name", 3)],
     active_printer_id: "printer-a",
-    active_nozzle_size: 0.2,
     active: {
-      printer: { id: "printer-a", name: "Canonical name", max_print_area: { x: 180, y: 180 } },
-      nozzle: { size: 0.2, min_line_length_multiplier: 3 },
+      printer: printerWithWidth("Canonical name", 3),
+      nozzle: { id: "nozzle-200", diameter_um: 200 },
+      extrusion_width: { width_um: 200 },
       printability: {
-        minimum_extrusion_width_mm: 0.2,
+        extrusion_width_mm: 0.2,
         minimum_line_length_mm: 0.6,
         minimum_component_area_mm2: 0.12,
       },
@@ -696,27 +1415,18 @@ test("successful printer saves reconcile active printability from the server", a
 test("a post-save render failure never rolls back authoritative printer state", async () => {
   const printerPage = fakeElement();
   const draft = {
-    printers: [{
-      id: "printer-a",
-      name: "Draft",
-      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 2 }],
-    }],
+    printers: [printerWithWidth("Draft")],
     active_printer_id: "printer-a",
-    active_nozzle_size: 0.2,
   };
   const authoritative = {
-    printers: [{
-      id: "printer-a",
-      name: "Saved",
-      nozzle_profiles: [{ size: 0.2, min_line_length_multiplier: 4 }],
-    }],
+    printers: [printerWithWidth("Saved", 4)],
     active_printer_id: "printer-a",
-    active_nozzle_size: 0.2,
     active: {
-      printer: { id: "printer-a", name: "Saved" },
-      nozzle: { size: 0.2, min_line_length_multiplier: 4 },
+      printer: printerWithWidth("Saved", 4),
+      nozzle: { id: "nozzle-200", diameter_um: 200 },
+      extrusion_width: { width_um: 200 },
       printability: {
-        minimum_extrusion_width_mm: 0.2,
+        extrusion_width_mm: 0.2,
         minimum_line_length_mm: 0.8,
         minimum_component_area_mm2: 0.16,
       },
@@ -796,6 +1506,372 @@ test("palette suggestions use solve-mode names for newly generated cards", async
   assert.equal(app.state.palette.stagingDeck[1].name, "Luminance suggested 2");
   assert.equal("n_out_of_gamut" in app.state.palette.stagingDeck[0].gamut, false);
   assert.equal("total_pixels" in app.state.palette.stagingDeck[0].gamut, false);
+});
+
+test("palette suggestion payload requests one exact size without retired tier fields", async () => {
+  const paletteColors = fakeElement();
+  const suggestionCount = fakeElement();
+  const suggestMode = fakeElement();
+  paletteColors.value = "6";
+  suggestionCount.value = "5";
+  suggestMode.value = "standard";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#targetSuggestCount": suggestionCount,
+    "#paletteSuggestMode": suggestMode,
+  } });
+  app.state.palette.candidateSelection = new Set(["red", "blue"]);
+
+  const payload = app.commands.buildPaletteSuggestionPayload();
+
+  assert.equal(payload.n_filaments, 6);
+  assert.equal(payload.top_k, 5);
+  assert.equal("max_swaps" in payload, false);
+  assert.equal("improvement_threshold" in payload, false);
+  assert.equal("force_all_tiers" in payload, false);
+});
+
+test("over-capacity palette values are preserved", async () => {
+  const paletteColors = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+  } });
+  app.state.session.printerConfig.ams_slots = 4;
+
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "6");
+  assert.equal(paletteColors.max, "16");
+
+  paletteColors.value = "3";
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "3");
+
+  paletteColors.value = "";
+  app.commands.updateSuggestSlotHint();
+  assert.equal(paletteColors.value, "3");
+});
+
+test("AMS preview separates additional palette colors from physical slots", async () => {
+  const paletteColors = fakeElement();
+  const preview = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#amsPreview": preview,
+  } });
+  app.state.session.printerConfig = {
+    ams_units: 1,
+    slots_per_unit: 4,
+    ams_slots: 4,
+  };
+  app.commands.getBaseCapSlots = () => 1;
+
+  app.commands.renderAmsPreview();
+
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 3);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-slot"/g) || []).length, 3);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-pip"/g) || []).length, 3);
+  assert.match(preview.innerHTML, /Additional colors \(3\)/);
+  assert.match(preview.innerHTML, /May require filament swaps/);
+  assert.match(preview.innerHTML, /ams-preview-overflow-slots" style="--ams-preview-columns:4" aria-hidden="true"/);
+  assert.match(preview.innerHTML, /3 \/ 3 color slots/);
+  assert.match(preview.innerHTML, /--ams-preview-columns:4/);
+  assert.equal(preview.role, "img");
+  assert.match(preview["aria-label"], /3 additional colors/);
+  assert.match(preview["aria-label"], /May require filament swaps/);
+
+  paletteColors.value = "2";
+  app.commands.renderAmsPreview();
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 2);
+  assert.doesNotMatch(preview.innerHTML, /ams-preview-overflow/);
+  assert.match(preview.innerHTML, /2 \/ 3 color slots/);
+
+  paletteColors.value = "";
+  app.commands.renderAmsPreview();
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 0);
+  assert.doesNotMatch(preview.innerHTML, /ams-preview-overflow/);
+  assert.match(preview.innerHTML, /Select 2–16 palette colors/);
+  assert.match(preview["aria-label"], /Select 2 to 16 palette colors/);
+});
+
+test("AMS preview respects custom unit geometry and multiple reserved slots", async () => {
+  const paletteColors = fakeElement();
+  const preview = fakeElement();
+  paletteColors.value = "6";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+    "#amsPreview": preview,
+  } });
+  app.state.session.printerConfig = {
+    ams_units: 2,
+    slots_per_unit: 3,
+    ams_slots: 6,
+  };
+  app.commands.getBaseCapSlots = () => 2;
+
+  app.commands.renderAmsPreview();
+
+  assert.equal((preview.innerHTML.match(/ams-preview-unit-label/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-white/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/ams-preview-slot is-filled/g) || []).length, 4);
+  assert.equal((preview.innerHTML.match(/class="ams-preview-overflow-pip"/g) || []).length, 2);
+  assert.equal((preview.innerHTML.match(/--ams-preview-columns:3/g) || []).length, 3);
+  assert.match(preview["aria-label"], /2 slots are reserved for the base and cap/);
+  assert.match(preview["aria-label"], /2 additional colors/);
+  assert.match(preview["aria-label"], /May require filament swaps/);
+});
+
+test("authoritative printer changes refresh the palette capacity preview", async () => {
+  const { app } = await harness();
+  let hintUpdates = 0;
+  let previewRenders = 0;
+  app.commands.renderPrinterRail = () => {};
+  app.commands.updateDerivedParams = () => {};
+  app.commands.updateSuggestSlotHint = () => { hintUpdates += 1; };
+  app.commands.renderAmsPreview = () => { previewRenders += 1; };
+
+  app.commands.applyAuthoritativePrinterState(
+    { printers: [], active_printer_id: "custom" },
+    {
+      printer: {
+        id: "custom",
+        name: "Custom",
+        max_print_area: { x: 200, y: 200 },
+        ams_units: 2,
+        slots_per_ams: 3,
+      },
+      nozzle: { id: "nozzle-400", diameter_um: 400 },
+      extrusion_width: { width_um: 400 },
+      printability: {},
+    },
+  );
+
+  assert.equal(app.state.session.printerConfig.ams_slots, 6);
+  assert.equal(hintUpdates, 1);
+  assert.equal(previewRenders, 1);
+});
+
+test("authoritative Extrusion Width changes refresh Solve Pitch and Image size validation without a post-change toast", async () => {
+  const pitchOutput = fakeElement();
+  const minus = fakeElement();
+  const plus = fakeElement();
+  const { app } = await harness({ elements: {
+    "#cfgSolvePitch": pitchOutput,
+    "#cfgSolvePitchMinus": minus,
+    "#cfgSolvePitchPlus": plus,
+  } });
+  app.commands.renderPrinterRail = () => {};
+  app.commands.updateDerivedParams = () => {};
+  let imageValidationUpdates = 0;
+  app.commands.updateInfoGrid = () => { imageValidationUpdates += 1; };
+  app.state.session.activeExtrusionWidth = { width_um: 400 };
+  app.state.settings.config.solver_fine_pitch_mm = 0.4;
+  app.commands.getCurrentSolvePitch = () => app.state.settings.config.solver_fine_pitch_mm;
+  const notices = [];
+  app.commands.showToast = (message, kind) => notices.push({ message, kind });
+
+  const active = {
+    printer: { id: "custom", name: "Custom", max_print_area: { x: 200, y: 200 } },
+    nozzle: { id: "nozzle-200", diameter_um: 200 },
+    extrusion_width: { width_um: 200 },
+    printability: { extrusion_width_mm: 0.2, minimum_line_length_mm: 0.4 },
+    resolved_print_setup: {
+      effective_solve_pitch_mm: 0.2,
+      max_solve_pitch_extrusion_width_multiplier: 1500,
+    },
+    config: {
+      solve_pitch_extrusion_width_multiplier: 1,
+      image_sample_pitch_mm: 0.2,
+      solver_fine_pitch_mm: 0.2,
+    },
+  };
+  app.commands.applyAuthoritativePrinterState(
+    { printers: [active.printer], active_printer_id: "custom" },
+    active,
+    active,
+  );
+
+  assert.equal(pitchOutput.textContent, "0.2");
+  assert.equal(minus.disabled, true);
+  assert.equal(plus.disabled, false);
+  assert.equal(imageValidationUpdates, 1);
+  assert.deepEqual(notices, []);
+});
+
+test("print-setup selection flushes config and accepts one structured review", async () => {
+  const { app } = await harness();
+  app.state.session.printersData = { revision: 7 };
+  app.commands.esc2 = value => String(value);
+  const sequence = [];
+  app.commands.syncConfigToServer = async options => {
+    sequence.push(["sync", options]);
+  };
+  app.commands.appConfirm = async (message, options) => {
+    sequence.push(["review", message, options]);
+    assert.equal(options.title, "Review Extrusion Width Change");
+    assert.match(options.detailHtml, /You requested/);
+    assert.match(options.detailHtml, /Solve Pitch/);
+    assert.match(options.detailHtml, /Needs attention/);
+    assert.match(options.detailHtml, /whole number of layers/);
+    return true;
+  };
+  const requests = [];
+  app.api.setActivePrinter = async payload => {
+    requests.push(payload);
+    if (!payload.acceptance_token) {
+      return {
+        status: "review_required",
+        acceptance_token: "accept-exact-proposal",
+        review: {
+          schema_version: 1,
+          intent: { kind: "select_extrusion_width" },
+          requested_changes: [{
+            field: "extrusion_width",
+            before: { width_um: 200 },
+            after: { width_um: 220 },
+          }],
+          dependent_changes: [],
+          derived_consequences: [{ field: "solve_pitch", before_mm: 0.2, after_mm: 0.22 }],
+          attention_items: [{
+            code: "image_dimensions_not_solve_pitch_aligned",
+            affected: ["width"],
+            pitch_mm: 0.22,
+            requested: { width_mm: 100, height_mm: 100 },
+            resolved: { width_mm: 100.1, height_mm: 100.1 },
+          }, {
+            code: "settings_context_requires_attention",
+            issues: [{ code: "thickness_not_whole_layers" }],
+          }],
+        },
+      };
+    }
+    return { status: "applied", printers_data: { revision: 8 } };
+  };
+
+  const result = await app.commands.selectActivePrintSetup({
+    intent_kind: "select_extrusion_width",
+    active_printer_id: "printer-a",
+    active_nozzle_id: "nozzle-a",
+    current_width_um: 220,
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(sequence[0][0], "sync");
+  assert.equal(sequence[1][0], "review");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].expected_revision, 7);
+  assert.equal(requests[0].mutation_id, requests[1].mutation_id);
+  assert.equal(requests[1].acceptance_token, "accept-exact-proposal");
+});
+
+test("an exact guide-owned print-setup change silently accepts the server review", async () => {
+  const { app } = await harness();
+  app.state.session.printersData = { revision: 3 };
+  app.commands.syncConfigToServer = async () => {};
+  app.commands.appConfirm = async () => {
+    throw new Error("guide-owned review must not open a dialog");
+  };
+  const requests = [];
+  app.api.setActivePrinter = async payload => {
+    requests.push(payload);
+    if (!payload.acceptance_token) {
+      return {
+        status: "review_required",
+        acceptance_token: "guide-proposal-token",
+        review: {
+          schema_version: 1,
+          intent: { kind: "select_printer" },
+          requested_changes: [],
+          dependent_changes: [{ field: "extrusion_width" }],
+          derived_consequences: [{ field: "solve_pitch" }],
+          attention_items: [],
+        },
+      };
+    }
+    return { status: "applied", printers_data: { revision: 3 } };
+  };
+
+  const result = await app.commands.selectActivePrintSetup({
+    intent_kind: "select_printer",
+    active_printer_id: "tutorial-printer",
+    review_policy: "guide_authorized",
+  });
+
+  assert.equal(result.status, "applied");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].review_policy, undefined);
+  assert.equal(requests[1].acceptance_token, "guide-proposal-token");
+  assert.equal(requests[0].mutation_id, requests[1].mutation_id);
+});
+
+test("print-setup review rejects an unknown schema before asking for consent", async () => {
+  const { app } = await harness();
+  app.state.session.printersData = { revision: 3 };
+  app.commands.syncConfigToServer = async () => {};
+  let confirmCalls = 0;
+  app.commands.appConfirm = async () => { confirmCalls += 1; return true; };
+  app.api.setActivePrinter = async () => ({
+    status: "review_required",
+    acceptance_token: "unknown-schema-token",
+    review: {
+      schema_version: 2,
+      intent: { kind: "select_nozzle" },
+      requested_changes: [],
+      dependent_changes: [],
+      derived_consequences: [],
+      attention_items: [],
+    },
+  });
+
+  await assert.rejects(
+    app.commands.selectActivePrintSetup({
+      intent_kind: "select_nozzle",
+      active_nozzle_id: "nozzle-400",
+    }),
+    /Unsupported print-setup review schema/,
+  );
+  assert.equal(confirmCalls, 0);
+});
+
+test("palette suggestion validation requires enough selected eligible colors", async () => {
+  const paletteColors = fakeElement();
+  paletteColors.value = "3";
+  const { app } = await harness({ elements: {
+    "#targetFilamentCount": paletteColors,
+  } });
+  app.state.palette.candidateSelection = new Set(["red", "blue"]);
+  let toast = "";
+  app.commands.showToast = message => { toast = message; };
+
+  assert.equal(app.commands.validatePaletteSuggestionRequest(), false);
+  assert.match(toast, /only 2 eligible color filaments are selected/);
+
+  app.state.palette.candidateSelection.add("green");
+  assert.equal(app.commands.validatePaletteSuggestionRequest(), true);
+});
+
+test("palette result processing never stages more than Suggestions", async () => {
+  const suggestionCount = fakeElement();
+  suggestionCount.value = "5";
+  const { app } = await harness({ elements: {
+    "#targetSuggestCount": suggestionCount,
+  } });
+  app.state.palette.stagingDeck = [];
+  app.state.palette.nextDeckNum = 1;
+  app.commands.renderCreationTab = () => {};
+  app.commands.updateRail = () => {};
+  app.commands.showToast = () => {};
+
+  app.commands._processSuggestResults({
+    palette_mode: "standard",
+    candidates: Array.from({ length: 8 }, (_value, index) => ({
+      filament_ids: [`unit-${index}`],
+      mean_de: 1 + index,
+    })),
+  });
+
+  assert.equal(app.state.palette.stagingDeck.length, 5);
 });
 
 test("auto-suggest shows the reserved base/cap filament without selecting it", async () => {
@@ -906,6 +1982,9 @@ test("palette variants preserve the source, slot order, and manual draft on canc
 
 test("committing a palette variant inserts an independent active card beside its source", async () => {
   const { app } = await harness();
+  const events = [];
+  app.events.subscribe("palette.variant.started", detail => events.push({ event: "started", detail }));
+  app.events.subscribe("palette.deck.updated", detail => events.push({ event: "updated", detail }));
   app.state.session.allFilaments.push({
     filament_id: "green",
     display_name: "Green",
@@ -943,6 +2022,12 @@ test("committing a palette variant inserts an independent active card beside its
   assert.deepEqual(app.state.palette.deck[0].filament_ids, ["red", "blue"]);
   assert.equal(app.state.palette.activeDeckId, variant.id);
   assert.equal(app.state.palette.manualVariantDraft, null);
+  assert.equal(events[0].event, "started");
+  assert.equal(events[0].detail.cardId, "source");
+  assert.equal(events.at(-1).event, "updated");
+  assert.equal(events.at(-1).detail.action, "added");
+  assert.equal(events.at(-1).detail.card.id, variant.id);
+  assert.equal(events.at(-1).detail.sourceCardId, "source");
 });
 
 test("committing a palette variant leaves Batch Solve membership unchanged", async () => {
@@ -1009,6 +2094,7 @@ test("deck-selected batch start sends mixed ordered palettes without suggestion 
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1072,6 +2158,7 @@ test("an accepted batch stays locked and tracked if Preview initialization fails
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1115,11 +2202,15 @@ test("batch confirmation cancellation performs no work and preserves selection",
   ];
   app.state.solve.batchSelectedDeckIds = new Set(["deck-1", "deck-2"]);
   app.state.solve.solveMode = "batch";
-  app.commands.syncSolveSettingsWithPitchRemediation = async () => {
+  app.commands.syncSolveSettings = async () => {
     events.push("settings preflight");
     return { proceed: true, corrected: false };
   };
   app.commands.getSolveSettingsPreflightIssues = () => [];
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => {
+    events.push("dimension preflight");
+    return { proceed: true, corrected: false };
+  };
   app.commands.appConfirm = async () => {
     events.push("batch confirmation");
     return false;
@@ -1133,6 +2224,7 @@ test("batch confirmation cancellation performs no work and preserves selection",
     "settings preflight",
     "palette validation",
     "palette validation",
+    "dimension preflight",
     "batch confirmation",
   ]);
   assert.equal(starts, 0);
@@ -1161,6 +2253,7 @@ test("a rejected batch start unlocks the deck without discarding mode or selecti
   app.state.solve.solveMode = "batch";
   app.commands.appConfirm = async () => true;
   app.commands.syncConfigToServer = async () => {};
+  app.commands.syncSolveDimensionsWithGridRemediation = async () => ({ proceed: true, corrected: false });
   app.commands.getSolveSettingsPreflightIssues = () => [];
   app.commands.getPaletteGatingIssues = () => ({ missing: [], unavailable: [], disabled: [] });
   app.commands.paletteGatingIssueCount = () => 0;
@@ -1541,6 +2634,165 @@ test("authoritative run labels refresh open lightbox and settings surfaces", asy
   app.commands.renderSolveRunSettingsPanel();
   assert.equal(settingsPanel["aria-label"], "Settings used by Server Portrait");
   assert.equal(settingsLabel.textContent, "Server Portrait");
+  assert.equal(settingsToggle.classList.contains("is-active"), false);
+  app.state.solve.solveRunSettingsAdvancedVisible = true;
+  app.commands.renderSolveRunSettingsPanel();
+  assert.equal(settingsToggle.classList.contains("is-active"), true);
+});
+
+test("saved-run review distinguishes canonical defaults from unavailable values", async () => {
+  const { app } = await harness();
+  const run = { label: "Sparse archive", config: {} };
+  const frozen = app.commands.getFrozenSolveRunSnapshot(run);
+  const essentials = app.state.ui.SETTINGS_PRESENTATION.find((section) => section.key === "essentials");
+  const rows = app.commands.buildReadOnlyRunSectionRows(essentials, frozen);
+  assert.equal(rows.find((row) => row.label === "Max Thickness").value, "Default: 3 mm");
+  assert.equal(
+    app.commands.formatReadOnlyRunSetting({ key: "historical_unknown" }, undefined, {}),
+    "Unavailable in saved run",
+  );
+});
+
+test("saved-run review uses current preprocessing modules only", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [];
+  const run = {
+    label: "Current module run",
+    config: { preprocessing_params: { retired_filter: { strength: 0.4 } } },
+    results: {
+      solve_start_diagnostics: {
+        module_state: { retired_filter: true },
+        module_settings: { retired_filter: { strength: 0.4 } },
+      },
+    },
+  };
+  const frozen = app.commands.getFrozenSolveRunSnapshot(run);
+  assert.equal(frozen.activePreprocessing.has("retired_filter"), false);
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, frozen);
+  assert.equal(rows.some((row) => row.label === "Retired Filter"), false);
+});
+
+test("saved-run review labels missing module parameters as defaults", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [{
+    name: "demo_filter",
+    slot: "preprocessing",
+    params: {
+      strength: { name: "strength", label: "Strength", type: "number", unit: "mm", default: 0.4 },
+    },
+  }];
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, {
+    settings: { preprocessing_params: {} },
+    activePreprocessing: new Set(["demo_filter"]),
+    preprocessingStateKnown: true,
+  });
+  assert.equal(rows.find((row) => row.label === "Strength").value, "Default: 0.4 mm");
+});
+
+test("saved-run review keeps module enablement in the main preprocessing block", async () => {
+  const { app } = await harness();
+  app.state.settings.moduleData = [
+    { name: "demo_filter", slot: "preprocessing", params: {} },
+  ];
+  const section = app.state.ui.SETTINGS_PRESENTATION.find((entry) => entry.key === "preprocessing");
+  const rows = app.commands.buildReadOnlyRunSectionRows(section, {
+    settings: {},
+    activePreprocessing: new Set(),
+    preprocessingStateKnown: true,
+  });
+  assert.equal(rows.find((row) => row.controlId === "module:demo_filter").group, "");
+});
+
+test("settings presentation rows point at real controls and omit retired fields", async () => {
+  const { app } = await harness();
+  const html = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/index.html"),
+    "utf8",
+  );
+  const rows = app.state.ui.SETTINGS_PRESENTATION.flatMap((section) => section.rows);
+  assert.ok(rows.length > 0);
+  for (const row of rows) {
+    assert.ok(row.controlId, `missing control id for ${row.key}`);
+    assert.match(html, new RegExp(`id=["']${row.controlId}["']`));
+  }
+  assert.equal(app.state.ui.SETTINGS_PRESENTATION, app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS);
+  assert.doesNotMatch(html, /cfgUseCorrections|cfgStage2BoundaryMutationPercentile|cfgStage2BoundaryMutationMinComponent/);
+  assert.ok(!rows.some((row) => [
+    "use_corrections",
+    "stage2_boundary_mutation_current_de_percentile",
+    "stage2_boundary_mutation_min_component_mm",
+  ].includes(row.key)));
+
+  const settingsCss = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/styles/settings.css"),
+    "utf8",
+  );
+  const solveCss = fs.readFileSync(
+    path.join(__dirname, "../../Prisma/generator/app/styles/solve.css"),
+    "utf8",
+  );
+  assert.match(settingsCss, /text-align-last:\s*left/);
+  assert.match(settingsCss, /-webkit-appearance:\s*textfield/);
+  assert.match(settingsCss, /input\[type="number"\]::\-webkit-inner-spin-button/);
+  assert.match(settingsCss, /\.input-with-unit\.settings-has-steppers[\s\S]*width:\s*max-content/);
+  assert.match(settingsCss, /\.settings-section-head\s*{[^}]*font-size:\s*12px;[^}]*margin:\s*0 0 4px;[^}]*padding:\s*5px 0;[^}]*border-top:\s*1px solid var\(--line-strong\);[^}]*border-bottom:\s*1px solid var\(--line-strong\);/);
+  assert.match(settingsCss, /\.settings-subsection-head[\s\S]*border-top:\s*1px solid var\(--line\)[\s\S]*border-bottom:\s*1px solid var\(--line\)/);
+  assert.match(settingsCss, /\.settings-subsection-head\s*{[^}]*margin:\s*14px 0 2px;[^}]*font-size:\s*11px;[^}]*padding:\s*4px 0 3px 8px;/);
+  assert.match(settingsCss, /\.settings-table td:first-child\s*{[^}]*padding-left:\s*8px/);
+  assert.match(settingsCss, /\.settings-table \.settings-child-row > td:first-child[\s\S]*padding-left:\s*20px/);
+  assert.match(settingsCss, /\.settings-subsection-table td:first-child\s*{[^}]*padding-left:\s*20px/);
+  assert.match(settingsCss, /\.settings-subsection-table \.settings-child-row > td:first-child\s*{[^}]*padding-left:\s*32px/);
+  assert.match(html, /class="settings-table settings-subsection-table" data-guide-target-part="settings\.solver\.color-matching"/);
+  assert.match(html, /class="settings-table settings-subsection-table" data-guide-target-part="settings\.white-cap\.boundary"/);
+  assert.match(solveCss, /\.run-settings-subsection-cap[\s\S]*border-top:\s*1px solid var\(--line\)[\s\S]*border-bottom:\s*1px solid var\(--line\)/);
+  assert.ok(settingsCss.includes(".settings-derived-footnote"));
+  assert.match(html, /style\.css\?v=2026-08-12-workspace-lock-surface-v1/);
+  assert.match(html, /<h4 class="settings-section-head settings-profile-section-title">Profile<\/h4>/);
+  assert.match(html, /id="settingsProfileBrowseBtn">Load<\/button>/);
+  assert.match(settingsCss, /\.settings-grid\.in-drawer \.settings-table > tbody > tr,[\s\S]*display:\s*flex;[\s\S]*width:\s*100%;/);
+  assert.match(settingsCss, /\.settings-grid\.in-drawer \.settings-table td:first-child\s*{[^}]*flex:\s*1 1 auto;/);
+  assert.match(settingsCss, /\.settings-grid\.in-drawer \.settings-table td:last-child\s*{[^}]*flex:\s*0 1 auto;[^}]*margin-left:\s*auto;/);
+  assert.match(settingsCss, /\.settings-context-summary[\s\S]*text-align:\s*left/);
+  assert.doesNotMatch(settingsCss, /\.settings-context-note/);
+  assert.match(html, /id="regionPlanningSummary"/);
+  assert.match(html, /id="boundaryCapSummary"/);
+  assert.ok(html.indexOf('id="cfgChromaWeightReadout"') < html.indexOf('id="cfgChromaWeight"'));
+  for (const controlId of ["cfgDWcMin", "cfgBaseShadingLimit", "cfgDetailCapMaxLayers"]) {
+    assert.match(html, new RegExp(`<input type="text" id="${controlId}"`));
+  }
+  assert.ok(html.indexOf('id="stackDerived"') < html.indexOf('id="derivedParams"'));
+  assert.match(html, /class="input-with-unit stg-iwu settings-has-steppers solve-pitch-control"[^>]*><output id="cfgSolvePitch" class="unit-input solve-pitch-value" tabindex="0"/);
+  assert.match(html, /id="cfgSolvePitchPlus" class="settings-number-step settings-number-step-up"/);
+  assert.match(html, /id="cfgSolvePitchMinus" class="settings-number-step settings-number-step-down"/);
+  assert.doesNotMatch(settingsCss, /\.solve-pitch-stepper|\.solve-pitch-step\s*{/);
+  assert.match(settingsCss, /\.settings-grid \.input-with-unit\.settings-has-steppers\.solve-pitch-control\s*{[^}]*width:\s*72px/);
+  assert.match(settingsCss, /\.settings-grid \.solve-pitch-control \.settings-number-steppers\s*{[^}]*position:\s*absolute[^}]*right:\s*0/);
+  assert.ok(html.indexOf('id="stackColorLayerSummary"') < html.indexOf('id="baseThicknessRecommendation"'));
+  for (const controlId of ["cfgDWcMin", "cfgKMax", "cfgDetailCapMaxLayers"]) {
+    assert.match(html, new RegExp(`class="input-with-unit stg-iwu settings-compact-integer-control"><input type="text" id="${controlId}" class="unit-input"`));
+  }
+  assert.match(settingsCss, /\.settings-grid \.input-with-unit\.settings-has-steppers\.settings-compact-integer-control\s*{[^}]*width:\s*72px[^}]*padding-right:\s*12px[^}]*justify-content:\s*flex-end/);
+  assert.match(settingsCss, /\.settings-grid \.settings-compact-integer-control \.unit-input\s*{[^}]*width:\s*26px/);
+  assert.match(settingsCss, /\.settings-grid \.settings-compact-integer-control \.settings-number-steppers\s*{[^}]*position:\s*absolute[^}]*right:\s*0/);
+  assert.match(settingsCss, /\.settings-grid \.settings-number-steppers\s*{[^}]*margin-left:\s*auto/);
+  assert.ok(html.indexOf('id="cfgNeutralFieldProtectionEnabled"') < html.indexOf('id="cfgNeutralFieldProtectionCutoff"'));
+  assert.ok(html.indexOf('id="cfgNeutralFieldProtectionCutoff"') < html.indexOf('id="cfgStage2FineOverride"'));
+  assert.ok(html.indexOf('id="cfgStage2BoundaryMutation"') < html.indexOf('id="cfgStage2BoundaryMutationMaxPasses"'));
+  assert.ok(html.indexOf('id="cfgStage2BoundaryMutationMaxPasses"') < html.indexOf('id="cfgStage2BoundaryMutationMinGain"'));
+  const essentialsControlOrder = [
+    "cfgLuminanceMode",
+    "cfgSolvePitch",
+    "cfgLayerHeight",
+    "cfgTMax",
+    "cfgDWb",
+    "cfgDWcMin",
+    "cfgBaseFilament",
+  ].map((controlId) => html.indexOf(`id="${controlId}"`));
+  assert.ok(essentialsControlOrder.every((offset) => offset >= 0));
+  assert.deepEqual(essentialsControlOrder, [...essentialsControlOrder].sort((left, right) => left - right));
+  assert.ok(html.indexOf('id="cfgDWcMin"') < html.indexOf('>Boundary Cap<'));
 });
 
 test("solve-history clear controls stay synchronized and disable invalid actions", async () => {
@@ -1716,7 +2968,7 @@ test("failed loaded-run synchronization rolls back all staged client state", asy
 test("loaded result keeps historical printability while re-solve state uses active printer", async () => {
   const { app } = await harness();
   app.state.session.activePrintability = {
-    minimum_extrusion_width_mm: 0.4,
+    extrusion_width_mm: 0.4,
     minimum_line_length_mm: 0.8,
     minimum_component_area_mm2: 0.32,
   };
@@ -1727,8 +2979,8 @@ test("loaded result keeps historical printability while re-solve state uses acti
   app.commands.updateRail = () => {};
   app.commands.restoreLoadedRunPaletteToDeck = async () => {};
   app.commands.syncConfigToServer = async () => {
-    app.state.settings.config.printability_minimum_extrusion_width_mm =
-      app.state.session.activePrintability.minimum_extrusion_width_mm;
+    app.state.settings.config.printability_extrusion_width_mm =
+      app.state.session.activePrintability.extrusion_width_mm;
     app.state.settings.config.printability_minimum_line_length_mm =
       app.state.session.activePrintability.minimum_line_length_mm;
   };
@@ -1739,16 +2991,16 @@ test("loaded result keeps historical printability while re-solve state uses acti
     config: {
       palette: ["red"],
       white_base: "white",
-      printability_minimum_extrusion_width_mm: 0.16,
+      printability_extrusion_width_mm: 0.16,
       printability_minimum_line_length_mm: 0.4,
     },
     result: {},
   });
 
   const loadedCard = app.state.solve.solveRuns[0];
-  assert.equal(loadedCard.config.printability_minimum_extrusion_width_mm, 0.16);
+  assert.equal(loadedCard.config.printability_extrusion_width_mm, 0.16);
   assert.equal(loadedCard.config.printability_minimum_line_length_mm, 0.4);
-  assert.equal(app.state.settings.config.printability_minimum_extrusion_width_mm, 0.4);
+  assert.equal(app.state.settings.config.printability_extrusion_width_mm, 0.4);
   assert.equal(app.state.settings.config.printability_minimum_line_length_mm, 0.8);
 });
 
@@ -1881,7 +3133,7 @@ test("solve start stops cleanly when solve-pitch remediation is cancelled", asyn
   app.state.session.apiConnected = true;
   app.state.image.selectedImage = { filename: "image.png", source_ref: null };
   app.commands.updateSolveReadiness = () => {};
-  app.commands.syncSolveSettingsWithPitchRemediation = async () => {
+  app.commands.syncSolveSettings = async () => {
     remediationCalls += 1;
     return { proceed: false, corrected: false };
   };

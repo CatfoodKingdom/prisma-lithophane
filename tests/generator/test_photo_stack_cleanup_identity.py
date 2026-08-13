@@ -170,9 +170,9 @@ def test_photo_stack_small_lut_query_outputs_are_frozen(tmp_path: Path) -> None:
     delta = delta_array[0]
 
     assert [(entry.filaments, len(entry.oklab)) for entry in luts] == [
-        ((TRANS_CYAN,), 10),
-        ((TRANS_GRAY,), 10),
-        ((TRANS_CYAN, TRANS_GRAY), 21),
+        ((TRANS_CYAN,), 11),
+        ((TRANS_GRAY,), 11),
+        ((TRANS_CYAN, TRANS_GRAY), 24),
     ]
     assert thicknesses == {
         TRANS_CYAN: np.float32(0.2),

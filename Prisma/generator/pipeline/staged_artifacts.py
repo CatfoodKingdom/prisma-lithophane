@@ -480,7 +480,7 @@ class BlueprintPrintabilityComponentFacts:
 class BlueprintPrintabilityDiagnostic:
     """Read-only layered-blueprint physical printability diagnostic."""
 
-    minimum_extrusion_width_mm: float
+    extrusion_width_mm: float
     minimum_line_length_mm: float
     pitch_mm: float
     layer_height_mm: float

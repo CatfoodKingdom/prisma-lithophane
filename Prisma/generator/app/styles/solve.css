@@ -279,7 +279,10 @@
   padding-top: 4px;
 }
 /* Saved Runs browser (Stage 9b) */
-.saved-runs-modal { max-width: 660px; }
+.saved-runs-modal {
+  max-width: 660px;
+  background: var(--bg);
+}
 .saved-run-upload-button {
   height: 24px;
   min-height: 24px;
@@ -829,6 +832,7 @@
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+  contain: layout paint;
 }
 .run-settings-header {
   flex: 0 0 auto;
@@ -845,15 +849,6 @@
   color: var(--muted);
   font-size: 11px;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.run-settings-advanced-toggle {
-  height: var(--window-header-control-height);
-  min-height: var(--window-header-control-height);
-  padding: 0 14px;
-  font-size: 13px;
-  line-height: 1;
-  box-sizing: border-box;
   white-space: nowrap;
 }
 .run-settings-load-btn {
@@ -887,7 +882,29 @@
   margin-top: 0;
 }
 .run-settings-section-cap {
-  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+}
+.run-settings-subsection-cap {
+  margin: 8px 2px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.35px;
+  line-height: 1.2;
+  padding: 4px 2px 3px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.run-settings-panel:not(.show-advanced-settings) .run-settings-subsection-cap.is-advanced-only,
+.run-settings-panel:not(.show-advanced-settings) .run-settings-rows.is-advanced-only {
+  display: none;
 }
 .run-settings-rows {
   overflow: hidden;

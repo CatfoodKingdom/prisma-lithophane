@@ -23,6 +23,7 @@ if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
 import data_paths
+from config.layer_budget import floor_layer_steps
 from model import to_oklab, predict_transmission
 from appearance_model import StackRequest
 from progress import ProgressReporter
@@ -58,7 +59,8 @@ def _emit_build_progress(progress, label: str, pct: float) -> None:
 
 CACHE_DIR = data_paths.LUT_CACHE_DIR
 data_paths.LUT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-_SPLINE_LUT_BUILDER_VERSION = "spline_joint_canonical_order_v1"
+_SPLINE_LUT_BUILDER_VERSION = "spline_joint_canonical_order_v2_integer_budget"
+_GENERIC_PROVIDER_LUT_BUILDER_VERSION = "provider_generic_v2_integer_budget"
 _BANDED_SPLINE_LUT_BUILDER_VERSION = "banded_spline_lut_v1"
 _BANDED_PROVIDER_LUT_BUILDER_VERSION = "banded_photo_stack_lut_v1_commutative_fill"
 _BANDED_LUT_MAX_PREPRUNE_ENTRIES = 50_000_000
@@ -221,10 +223,11 @@ def _cache_key(
     k_max: int, t_max: float,
     corrections: Optional[dict] = None,
     chroma_weight: float = 1.0,
+    builder_version: str = _SPLINE_LUT_BUILDER_VERSION,
 ) -> str:
     """Compute a deterministic cache key from all LUT parameters + profile data."""
     h = hashlib.sha256()
-    h.update(_SPLINE_LUT_BUILDER_VERSION.encode())
+    h.update(str(builder_version).encode())
     h.update(json.dumps(list(filament_ids)).encode())
     h.update(f"{layer_height},{max_layers},{d_wb},{d_wc_min},{d_wc_max},{k_max},{t_max},{chroma_weight}".encode())
     for fid in sorted(filament_ids):
@@ -393,6 +396,7 @@ def build_luts(
     corrections: Optional[dict] = None,
     chroma_weight: float = 1.0,
     progress=None,
+    budget_steps: Optional[int] = None,
 ) -> List[LUTEntry]:
     """
     Build joint LUT entries (cap + color, one per filament subset, size 1..k_max).
@@ -428,7 +432,8 @@ def build_luts(
     # Total budget: everything after the white base
     if t_max is None:
         t_max = d_wc_max + max_layers * layer_height
-    budget_mm = t_max
+    if budget_steps is None:
+        budget_steps = floor_layer_steps(t_max, layer_height)
 
     # ── Cache check ──────────────────────────────────────────────────────────
     filament_ids = list(color_profiles.keys())
@@ -501,10 +506,14 @@ def build_luts(
             all_caps = []
             all_T = []
 
-            for cap_idx, (d_wc, T_wc_val) in enumerate(zip(cap_steps_d, T_wc_cache)):
+            for cap_idx, (cap_steps, d_wc, T_wc_val) in enumerate(
+                zip(cap_steps_n, cap_steps_d, T_wc_cache)
+            ):
                 # Remaining budget for color layers
-                remaining_mm = budget_mm - d_wc
-                remaining_steps = max(0, min(max_layers, int(remaining_mm / layer_height)))
+                remaining_steps = max(
+                    0,
+                    min(max_layers, int(budget_steps) - int(cap_steps)),
+                )
 
                 # Enumerate color combos within remaining budget
                 combos = _enumerate_combos_budget(k, remaining_steps)
@@ -739,6 +748,7 @@ def _banded_cache_key(
         layer_height, sum(band_layers), d_wb, d_wc_min, d_wc_max,
         len(filament_ids), t_max,
         corrections, chroma_weight,
+        builder_version="spline_joint_canonical_order_v1",
     ).encode())
     h.update(json.dumps(groups, separators=(",", ":")).encode())
     h.update(json.dumps(band_layers).encode())
@@ -1275,6 +1285,7 @@ def build_luts_with_provider(
     d_wc_max: float,
     k_max: int = 3,
     t_max: Optional[float] = None,
+    budget_steps: Optional[int] = None,
     verbose: bool = True,
     use_cache: bool = True,
     chroma_weight: float = 1.0,
@@ -1291,6 +1302,8 @@ def build_luts_with_provider(
     if t_max is None:
         t_max = d_wc_max + max_layers * layer_height
     budget_mm = float(t_max)
+    if budget_steps is None:
+        budget_steps = floor_layer_steps(t_max, layer_height)
     fingerprint = provider.fingerprint()
     cache_path = None
     if diagnostics is not None:
@@ -1309,7 +1322,7 @@ def build_luts_with_provider(
 
     _emit_build_progress(progress, "Checking photo-stack LUT cache...", 2)
     if use_cache:
-        builder_version = "provider_generic"
+        builder_version = _GENERIC_PROVIDER_LUT_BUILDER_VERSION
         if getattr(provider, "model_kind", "") == "photo_stack_bundle":
             from photo_stack_lut import PHOTO_STACK_LUT_BUILDER_VERSION
 
@@ -1344,6 +1357,7 @@ def build_luts_with_provider(
             "d_wc_max": float(d_wc_max),
             "k_max": int(k_max),
             "t_max": float(budget_mm),
+            "budget_steps": int(budget_steps),
             "chroma_weight": float(chroma_weight),
         }
         if diagnostics is not None:
@@ -1396,6 +1410,7 @@ def build_luts_with_provider(
             d_wc_max=d_wc_max,
             k_max=k_max,
             t_max=budget_mm,
+            budget_steps=int(budget_steps),
             verbose=verbose,
         ), start=1):
             _emit_build_progress(
@@ -1455,7 +1470,8 @@ def build_luts_with_provider(
     t_build = time.time()
     n_wc_min = max(1, round(d_wc_min / layer_height))
     n_wc_max = max(n_wc_min, round(d_wc_max / layer_height))
-    cap_steps_d = (np.arange(n_wc_min, n_wc_max + 1) * layer_height).round(6)
+    cap_steps_n = np.arange(n_wc_min, n_wc_max + 1)
+    cap_steps_d = (cap_steps_n * layer_height).round(6)
     luts: List[LUTEntry] = []
 
     subset_total = sum(
@@ -1475,9 +1491,11 @@ def build_luts_with_provider(
             all_thicknesses = []
             all_caps = []
             all_requests = []
-            for d_wc in cap_steps_d:
-                remaining_mm = budget_mm - float(d_wc)
-                remaining_steps = max(0, min(max_layers, int(remaining_mm / layer_height)))
+            for cap_steps, d_wc in zip(cap_steps_n, cap_steps_d):
+                remaining_steps = max(
+                    0,
+                    min(max_layers, int(budget_steps) - int(cap_steps)),
+                )
                 combos = _enumerate_combos_budget(k, remaining_steps)
                 if len(combos) == 0:
                     continue

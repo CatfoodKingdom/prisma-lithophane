@@ -800,7 +800,11 @@ def run_pipeline(
             stage_index=reporter.stage_offset + index,
         )
 
-    state = PipelineState(image=image, config=config)
+    state = PipelineState(
+        image=image,
+        config=config,
+        resolved_layer_budget=config.resolved_layer_budget(),
+    )
     H, W = image.shape[:2]
     max_layers = config.effective_max_layers()
     state.diagnostics["__solve_identity__"] = {
@@ -1113,6 +1117,7 @@ def run_pipeline(
                 d_wc_max=config.effective_boundary_d_wc_max(),
                 k_max=config.k_max,
                 t_max=budget_mm,
+                budget_steps=state.resolved_layer_budget.post_base_steps,
                 verbose=False,
                 corrections=config.corrections if config.use_corrections else None,
                 chroma_weight=config.chroma_weight,
@@ -1163,6 +1168,7 @@ def run_pipeline(
                 d_wc_max=provider_lut_d_wc_max,
                 k_max=config.k_max,
                 t_max=budget_mm,
+                budget_steps=state.resolved_layer_budget.post_base_steps,
                 verbose=False,
                 chroma_weight=config.chroma_weight,
                 diagnostics=state.diagnostics.setdefault("__provider_lut_cache__", {}),

@@ -96,18 +96,13 @@ function bindEvents() {
     // scraping.
     [
       ["cfgLayerHeight", (raw) => {
-        const ok = app.commands.applyDraftNumberField("layer_height", raw, { isValid: (v) => v > 0 });
-        if (ok) {
-          const capLayers = Math.max(1, parseInt(app.state.ui.$("#cfgDWcMin")?.value, 10) || app.commands.minCapLayersFromThickness(app.state.settings.config.d_wc_min, app.state.settings.config.layer_height));
-          app.state.settings.config.d_wc_min = app.commands.minCapThicknessFromLayers(capLayers, app.state.settings.config.layer_height);
-        }
-        return ok;
+        return app.commands.applyDraftNumberField("layer_height", raw, { isValid: (v) => v > 0 });
       }],
       ["cfgDWb", (raw) => app.commands.applyDraftNumberField("d_wb", raw, { isValid: (v) => v > 0 })],
       ["cfgDWcMin", (raw) => {
         const layers = parseInt(raw, 10);
         if (!Number.isFinite(layers) || layers < 1) return false;
-        app.state.settings.config.d_wc_min = app.commands.minCapThicknessFromLayers(layers, app.state.settings.config.layer_height);
+        app.state.settings.config.min_cap_layers = layers;
         return true;
       }],
       ["cfgTMax", (raw) => app.commands.applyDraftNumberField("t_max", raw, { isValid: (v) => v > 0 })],
@@ -116,7 +111,7 @@ function bindEvents() {
       ["cfgSmoothKernel", (raw) => {
         const radiusMm = parseFloat(raw);
         if (!Number.isFinite(radiusMm) || radiusMm < 0) return false;
-        app.state.settings.config.smooth_kernel = app.commands.smoothingCellsFromRadiusMm(radiusMm, app.commands.getCurrentSolvePitch());
+        app.state.settings.config.boundary_cap_smoothing_radius_mm = radiusMm;
         return true;
       }],
       ["cfgBoundaryCapDeBudget", (raw) => app.commands.applyDraftNumberField("boundary_cap_de_budget", raw, { isValid: (v) => v >= 0 })],
@@ -136,14 +131,40 @@ function bindEvents() {
       }
     });
 
-    // Solve Pitch control (Settings tab)
-    const spInput = app.state.ui.$("#cfgSolvePitch");
-    if (spInput) app.lifecycle.listen(spInput, "input", () => {
-      app.commands.applySolvePitchDraft(spInput.value);
-    });
-    if (spInput) app.lifecycle.listen(spInput, "change", () => {
-      if (app.commands.applySolvePitchDraft(spInput.value)) app.commands.syncConfigToServer();
-    });
+    // Solve Pitch is a display-only whole-Extrusion-Width stepper.
+    const stepSolvePitch = async delta => {
+      if (!app.commands.stepSolvePitchMultiplier(delta)) return;
+      app.commands.renderSettingsTab({ preservePendingUi: true });
+      app.commands.updateDerivedParams();
+      app.commands.updateInfoGrid();
+      app.commands.renderPreview();
+      app.commands.checkPresetModified();
+      await app.commands.syncConfigToServer();
+    };
+    const spValue = app.state.ui.$("#cfgSolvePitch");
+    const spMinus = app.state.ui.$("#cfgSolvePitchMinus");
+    const spPlus = app.state.ui.$("#cfgSolvePitchPlus");
+    if (spMinus) app.lifecycle.listen(spMinus, "click", () => stepSolvePitch(-1));
+    if (spPlus) app.lifecycle.listen(spPlus, "click", () => stepSolvePitch(1));
+    if (spValue) {
+      const spControl = spValue.closest(".solve-pitch-control") || spValue;
+      app.lifecycle.listen(spControl, "click", (event) => {
+        if (event.target?.closest?.("button")) return;
+        spValue.focus();
+      });
+      app.lifecycle.listen(spValue, "keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        void stepSolvePitch(event.key === "ArrowUp" ? 1 : -1);
+      });
+      app.lifecycle.listen(spControl, "wheel", (event) => {
+        const multiplier = app.commands.settingsWheelMultiplier(event.deltaY);
+        if (!multiplier) return;
+        event.preventDefault();
+        spValue.focus();
+        void stepSolvePitch(multiplier);
+      }, { passive: false });
+    }
 
     app.state.ui.$$("#cfgLuminanceMode .segmented-btn").forEach((btn) => {
       app.lifecycle.listen(btn, "click", () => {
@@ -450,6 +471,7 @@ function bindEvents() {
       app.commands.renderFrameCanvas();
       app.commands.updateInfoGrid();
       app.commands.syncConfigToServer();
+      app.events.emit("image.controls-reset", { source: "adjustments-reset" });
     });
 
     // Generic binder for image adjustment sliders
@@ -517,6 +539,7 @@ function bindEvents() {
       app.lifecycle.listen(borderToggle, "click", () => {
         borderCheck.checked = !borderCheck.checked;
         app.commands.updateBorderVisibility();
+        app.commands.renderBorderHeightWarning();
         app.commands.readConfigFromUI();
         app.commands.updateInfoGrid();
         app.commands.renderFrameCanvas();
@@ -528,7 +551,8 @@ function bindEvents() {
     if (borderW) app.lifecycle.listen(borderW, "input", () => { app.commands.readConfigFromUI(); app.commands.updateInfoGrid(); app.commands.renderPreview(); });
     if (borderW) app.lifecycle.listen(borderW, "change", () => { app.commands.readConfigFromUI(); app.commands.updateInfoGrid(); app.commands.renderFrameCanvas(); app.commands.syncConfigToServer(); });
     const borderH = app.state.ui.$("#cfgBorderHeight");
-    if (borderH) app.lifecycle.listen(borderH, "change", () => { app.commands.readConfigFromUI(); app.commands.renderFrameCanvas(); app.commands.syncConfigToServer(); });
+    if (borderH) app.lifecycle.listen(borderH, "input", app.commands.renderBorderHeightWarning);
+    if (borderH) app.lifecycle.listen(borderH, "change", () => { app.commands.readConfigFromUI(); app.commands.renderBorderHeightWarning(); app.commands.renderFrameCanvas(); app.commands.syncConfigToServer(); });
 
     // Leading-zero normalization for border numeric inputs
     for (const id of ["cfgBorderWidth", "cfgBorderHeight"]) {
@@ -539,7 +563,7 @@ function bindEvents() {
       });
     }
 
-    // White base/cap filament dropdown
+    // Base/cap filament dropdown
     const bcHandler = () => {
       app.commands.readConfigFromUI();
       app.commands.readPrinterConfig();
@@ -561,9 +585,12 @@ function bindEvents() {
     const candNone = app.state.ui.$("#candidateSelectNone");
     if (candNone) app.lifecycle.listen(candNone, "click", () => { app.state.palette.candidateSelection.clear(); app.commands.renderCreationTab(); });
 
-    // Max colors input → update AMS preview
-    const maxColorsInput = app.state.ui.$("#targetFilamentCount");
-    if (maxColorsInput) app.lifecycle.listen(maxColorsInput, "change", () => app.commands.renderAmsPreview());
+    // Exact palette-size input → update physical capacity context live.
+    const paletteColorsInput = app.state.ui.$("#targetFilamentCount");
+    if (paletteColorsInput) {
+      app.lifecycle.listen(paletteColorsInput, "input", () => app.commands.renderAmsPreview());
+      app.lifecycle.listen(paletteColorsInput, "change", () => app.commands.renderAmsPreview());
+    }
 
     // Palette — manual builder actions
     const mintBtn = app.state.ui.$("#mintPaletteBtn");
@@ -612,12 +639,7 @@ function bindEvents() {
           railClearDeckBtn.classList.remove("confirm-pending");
           railClearDeckBtn.title = "No palettes to clear";
           railClearDeckBtn.setAttribute("aria-label", "No palettes to clear");
-          app.state.palette.deck = [];
-          app.state.palette.activeDeckId = null;
-          app.state.solve.batchSelectedDeckIds.clear();
-          app.commands.renderDeckCards();
-          app.commands.updateRail();
-          app.commands.syncConfigToServer();
+          void app.commands.clearPaletteDeck();
         }
       });
     }
@@ -643,18 +665,6 @@ function bindEvents() {
     }
     const luminanceGuessBtn = app.state.ui.$("#cfgBaseShadingLimitSuggest");
     if (luminanceGuessBtn) app.lifecycle.listen(luminanceGuessBtn, "click", app.commands.handleSuggestBaseShadingLimit);
-    app.state.ui.DECK_GENERATION_FIELD_MAP.forEach(({ paletteId }) => {
-      const el = app.state.ui.$(`#${paletteId}`);
-      if (!el) return;
-      const eventName = el.type === "checkbox" ? "change" : "input";
-      app.lifecycle.listen(el, eventName, () => app.commands.syncDeckGenerationSettingsUI("palette"));
-      app.lifecycle.listen(el, "change", () => {
-        app.commands.syncDeckGenerationSettingsUI("palette");
-        app.commands.readConfigFromUI();
-        app.commands.syncConfigToServer();
-      });
-    });
-
     // Library filter (modal)
     const railLibBtn = app.state.ui.$("#railLibraryBtn");
     if (railLibBtn) app.lifecycle.listen(railLibBtn, "click", app.commands.openLibraryModal);
@@ -702,6 +712,13 @@ function bindEvents() {
     const advancedToggle = app.state.ui.$("#settingsAdvancedToggle");
     if (advancedToggle) {
       app.lifecycle.listen(advancedToggle, "click", () => {
+        if (
+          app.state.settings.settingsAdvancedVisible
+          && app.commands.guidePresentationLocked?.("settings-advanced-on")
+        ) {
+          app.commands.showToast?.("Advanced settings stay on during this guide.", "info");
+          return;
+        }
         app.state.settings.settingsAdvancedVisible = !app.state.settings.settingsAdvancedVisible;
         app.commands.saveSettingsAdvancedVisible(app.state.settings.settingsAdvancedVisible);
         app.commands.updateAdvancedSettingsVisibility();
@@ -783,6 +800,11 @@ function bindEvents() {
     const savedRunDeleteBtn = app.state.ui.$("#savedRunDeleteBtn");
     if (savedRunDeleteBtn) app.lifecycle.listen(savedRunDeleteBtn, "click", app.commands.deleteSelectedSavedRun);
     const savedRunUpload = app.state.ui.$("#savedRunUpload");
+    if (savedRunUpload) app.lifecycle.listen(savedRunUpload, "click", (event) => {
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("solve.saved-run.upload", {})) {
+        event.preventDefault();
+      }
+    });
     if (savedRunUpload) app.lifecycle.listen(savedRunUpload, "change", async (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
@@ -971,19 +993,12 @@ function bindEvents() {
       if (!app.commands._readPrinterFromConfigPage()) return;
       app.commands.resetPrinterDeleteConfirm();
       const id = "printer-" + Date.now();
-      app.state.session.printersData.printers.push({
-        id,
-        name: "New Printer",
-        max_print_area: { x: 256, y: 256 },
-        ams_units: 1,
-        slots_per_ams: 4,
-        nozzle_profiles: [
-          { size: 0.4, min_layer_height: 0.08, max_layer_height: 0.32, ...app.commands.defaultNozzleLineWidths(0.4) },
-        ],
-      });
+      const draft = app.commands.printerConfigData();
+      const printer = app.commands.createDefaultPrinterProfile(id);
+      draft.printers.push(printer);
+      draft.printer_setup_state[id] = app.commands.createDefaultPrinterSetup(printer);
       app.state.session.printerConfigEditingId = id;
-      app.state.session.printersData.active_printer_id = id;
-      app.state.session.printersData.active_nozzle_size = 0.4;
+      draft.active_printer_id = id;
       app.commands.renderPrinterConfigPage();
       // Focus the name field for immediate editing
       const nameField = app.state.ui.$("#pcName");
@@ -991,7 +1006,7 @@ function bindEvents() {
     });
 
     const pcDelete = app.state.ui.$("#pcDeletePrinterBtn");
-    if (pcDelete) app.lifecycle.listen(pcDelete, "click", async () => {
+    if (pcDelete) app.lifecycle.listen(pcDelete, "click", () => {
       const delId = app.commands.currentPrinterConfigId();
       if (!delId) return;
       if (!app.state.session.printerDeleteConfirmPending) {
@@ -1003,49 +1018,26 @@ function bindEvents() {
         return;
       }
       app.commands.resetPrinterDeleteConfirm();
-      const previousPrintersData = structuredClone(app.state.session.printersData);
-      const previousEditingId = app.state.session.printerConfigEditingId;
-      app.state.session.printersData.printers = app.state.session.printersData.printers.filter(p => p.id !== delId);
-      app.state.session.printerConfigEditingId = app.state.session.printersData.printers[0]?.id || null;
-      app.state.session.printersData.active_printer_id = app.state.session.printerConfigEditingId;
-      app.commands.syncPrinterConfigActiveNozzle();
-      let saved;
-      try {
-        saved = await app.api.savePrinters(app.state.session.printersData);
-      } catch (e) {
-        app.state.session.printersData = previousPrintersData;
-        app.state.session.printerConfigEditingId = previousEditingId;
-        app.commands.renderPrinterConfigPage();
-        app.commands.showToast("Delete failed: " + e.message, "error");
-        return;
-      }
-      try {
-        app.commands.applyAuthoritativePrinterState({
-          printers: saved.printers || [],
-          active_printer_id: saved.active_printer_id,
-          active_nozzle_size: saved.active_nozzle_size,
-        }, saved.active);
-        app.state.session.printerConfigEditingId = app.state.session.printersData?.active_printer_id || app.state.session.printersData?.printers?.[0]?.id || null;
-        app.commands.renderPrinterConfigPage();
-        app.commands.showToast("Printer deleted", "success");
-      } catch (e) {
-        console.error("[printers] deleted state could not be rendered:", e);
-        app.commands.showToast(
-          "Printer was deleted, but the display could not refresh. Reload Prisma.",
-          "error",
-        );
-      }
+      const draft = app.commands.printerConfigData();
+      draft.printers = draft.printers.filter(p => p.id !== delId);
+      delete draft.printer_setup_state?.[delId];
+      app.state.session.printerConfigEditingId = draft.printers[0]?.id || null;
+      draft.active_printer_id = app.state.session.printerConfigEditingId;
+      app.commands.syncPrinterConfigSetupState(draft);
+      app.commands.renderPrinterConfigPage();
     });
 
     const pcAddNozzle = app.state.ui.$("#pcAddNozzleBtn");
     if (pcAddNozzle) app.lifecycle.listen(pcAddNozzle, "click", () => {
-      const printer = app.state.session.printersData.printers.find(p => p.id === app.commands.currentPrinterConfigId());
+      const printer = app.commands.printerConfigData()?.printers?.find(p => p.id === app.commands.currentPrinterConfigId());
       if (!printer) return;
-      // Read current table state before adding
       if (!app.commands._readPrinterFromConfigPage()) return;
-      printer.nozzle_profiles.push({ size: 0.4, min_layer_height: 0.08, max_layer_height: 0.32, ...app.commands.defaultNozzleLineWidths(0.4) });
+      app.commands.addNozzleProfileToDraft(printer);
       app.commands.renderPrinterConfigPage();
     });
+
+    const pcDiscard = app.state.ui.$("#pcDiscardBtn");
+    if (pcDiscard) app.lifecycle.listen(pcDiscard, "click", app.commands.discardPrinterConfigDraft);
 
     // Keyboard: Escape closes drawers/modals/config page
     app.lifecycle.listen(document, "keydown", (e) => {
@@ -1077,6 +1069,15 @@ function bindEvents() {
         const libModal = app.state.ui.$("#libraryModalBackdrop");
         if (libModal && !libModal.classList.contains("is-hidden")) {
           app.commands.closeLibraryModal();
+          return;
+        }
+        const renameSavedRunModal = app.state.ui.$("#renameSavedRunModal");
+        if (renameSavedRunModal && !renameSavedRunModal.classList.contains("is-hidden")) {
+          return;
+        }
+        const savedRunsModal = app.state.ui.$("#savedRunsModal");
+        if (savedRunsModal && !savedRunsModal.classList.contains("is-hidden")) {
+          app.commands._setSavedRunsModalOpen(false);
           return;
         }
         const profileModal = app.state.ui.$("#settingsProfileModal");

@@ -25,7 +25,7 @@ _COMPONENT_GEOMETRY_CACHE_MAX_ENTRIES = 16_384
 class BlueprintPrintabilitySettings:
     """Resolved physical printability thresholds for one solve grid."""
 
-    minimum_extrusion_width_mm: float
+    extrusion_width_mm: float
     minimum_line_length_mm: float
     pitch_mm: float
     layer_height_mm: float
@@ -80,16 +80,21 @@ def resolve_blueprint_printability_settings(
     """Resolve user/printer physical thresholds for blueprint diagnostics."""
 
     width = _first_positive(
-        getattr(config, "printability_minimum_extrusion_width_mm", None),
-        getattr(config, "printer_min_line_width_mm", None),
-        0.40,
+        getattr(config, "printability_extrusion_width_mm", None),
     )
-    assert width is not None
+    if width is None:
+        raise ValueError(
+            "printability_extrusion_width_mm must be resolved from "
+            "the active Extrusion Width before blueprint processing"
+        )
     minimum_line = _first_positive(
         getattr(config, "printability_minimum_line_length_mm", None),
     )
     if minimum_line is None:
-        minimum_line = max(0.40, float(width) + 0.10)
+        raise ValueError(
+            "printability_minimum_line_length_mm must be resolved from the "
+            "active Extrusion Width before blueprint processing"
+        )
     pitch = _first_positive(
         pitch_mm,
         getattr(config, "solver_fine_pitch_mm", None),
@@ -100,7 +105,7 @@ def resolve_blueprint_printability_settings(
     assert pitch is not None
     assert layer_height is not None
     return BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=float(width),
+        extrusion_width_mm=float(width),
         minimum_line_length_mm=float(minimum_line),
         pitch_mm=float(pitch),
         layer_height_mm=float(layer_height),
@@ -277,14 +282,14 @@ def grade_blueprint_component(
     width_mm = float(min(height_px, width_px)) * pitch
     length_mm = float(max(height_px, width_px)) * pitch
     min_area = (
-        float(settings.minimum_extrusion_width_mm)
+        float(settings.extrusion_width_mm)
         * float(settings.minimum_line_length_mm)
     )
     eps = 1e-9
     reasons: list[str] = []
     if area_mm2 + eps < min_area:
         reasons.append("tiny_component")
-    if width_mm + eps < float(settings.minimum_extrusion_width_mm):
+    if width_mm + eps < float(settings.extrusion_width_mm):
         reasons.append("narrow_width")
     if length_mm + eps < float(settings.minimum_line_length_mm):
         reasons.append("short_length")
@@ -295,7 +300,7 @@ def grade_blueprint_component(
 
 def _minimum_width_px(settings: BlueprintPrintabilitySettings) -> int:
     pitch = max(float(settings.pitch_mm), 1e-9)
-    width = max(float(settings.minimum_extrusion_width_mm), pitch)
+    width = max(float(settings.extrusion_width_mm), pitch)
     return max(1, int(np.ceil((width / pitch) - 1e-9)))
 
 
@@ -774,7 +779,7 @@ def run_blueprint_printability_diagnostic(
 
     runtime_s = time.perf_counter() - start
     return BlueprintPrintabilityDiagnostic(
-        minimum_extrusion_width_mm=float(settings.minimum_extrusion_width_mm),
+        extrusion_width_mm=float(settings.extrusion_width_mm),
         minimum_line_length_mm=float(settings.minimum_line_length_mm),
         pitch_mm=float(settings.pitch_mm),
         layer_height_mm=float(settings.layer_height_mm),

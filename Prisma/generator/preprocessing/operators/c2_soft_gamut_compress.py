@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from pipeline.base import ParamDef, PreprocessingModule
+from pipeline.base import ParamDef, PresetDef, PreprocessingModule
 from pipeline.registry import register_preprocessing
 from preprocessing.color_convert import (
     oklab_f32_to_srgb_f32,
@@ -321,6 +321,17 @@ class C2SoftGamutCompress(PreprocessingModule):
         "Hue-preserving soft-knee chroma compression toward the palette's "
         "per-hue chroma bound."
     )
+    display_label = "Palette Saturation Fit"
+    display_tooltip = "Softly reduces colors the selected palette cannot reproduce while preserving hue."
+    preset_control_label = "Palette saturation fit"
+    default_preset = "medium"
+    presets = (
+        PresetDef("off", "Off", enabled=False),
+        PresetDef("light", "Light", {"knee_start_ratio": 0.98, "knee_softness": 0.50}),
+        PresetDef("medium", "Medium", {"knee_start_ratio": 0.85, "knee_softness": 0.50}),
+        PresetDef("strong", "Strong", {"knee_start_ratio": 0.75, "knee_softness": 0.30}),
+        PresetDef("custom", "Custom", custom=True),
+    )
     default_enabled = False
     input_domain = "srgb_f32"
     output_domain = "srgb_f32"
@@ -329,7 +340,7 @@ class C2SoftGamutCompress(PreprocessingModule):
     params = {
         "knee_start_ratio": ParamDef(
             name="knee_start_ratio",
-            label="Knee Start Ratio",
+            label="Compression start",
             type="float",
             default=0.85,
             min=0.50,
@@ -338,11 +349,12 @@ class C2SoftGamutCompress(PreprocessingModule):
                 "Fraction of the hue-local chroma bound at which soft "
                 "compression begins."
             ),
+            tooltip="Lower values begin compressing saturation earlier and affect more pixels.",
             order=10,
         ),
         "knee_softness": ParamDef(
             name="knee_softness",
-            label="Knee Softness",
+            label="Compression softness",
             type="float",
             default=0.50,
             min=0.05,
@@ -351,6 +363,7 @@ class C2SoftGamutCompress(PreprocessingModule):
                 "Soft-knee curvature. Higher values spread the transition "
                 "across a wider input-chroma range."
             ),
+            tooltip="Controls the shape of the soft-knee transition.",
             order=20,
         ),
     }

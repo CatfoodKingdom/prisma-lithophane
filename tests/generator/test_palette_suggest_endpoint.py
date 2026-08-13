@@ -27,7 +27,7 @@ import server  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 import palette.suggest as palette_suggest_module  # noqa: E402
-from palette.suggest import PaletteCandidate  # noqa: E402
+from palette.suggest import PaletteCandidate, PaletteSuggestionResult  # noqa: E402
 
 
 @pytest.fixture()
@@ -42,9 +42,9 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
     # Fake only the expensive search; everything upstream (payload parsing,
     # image loading, solve-config, shared signature path) runs for real.
     def _fake_suggest_palettes(sig, *, n_filaments, top_k, **kwargs):
-        return [
+        return PaletteSuggestionResult(candidates=[
             PaletteCandidate(
-                filament_ids=["unit-a", "unit-b"],
+                filament_ids=[f"unit-{idx}" for idx in range(n_filaments)],
                 mean_de=0.0123,
                 max_de=0.05,
                 pct_above_threshold=10.0,
@@ -53,9 +53,9 @@ def client(tmp_path: Path, monkeypatch) -> TestClient:
                 rank_score=0.015,
                 rank_mode="robust",
             )
-        ]
+        ], model_metadata={"estimated_with_three_color_rescore": True})
 
-    monkeypatch.setattr(palette_suggest_module, "suggest_palettes", _fake_suggest_palettes)
+    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_detailed", _fake_suggest_palettes)
 
     # Stub the gamut backend build (provider=None routes the white-rescale
     # provider through the cheap create path).
@@ -118,9 +118,9 @@ def test_suggest_progress_is_monotonic_and_reaches_100_only_at_completion(
         progress("search late", 0.8)
         progress("stale child update", 0.3)
         progress("search complete", 1.0)
-        return [
+        return PaletteSuggestionResult(candidates=[
             PaletteCandidate(
-                filament_ids=["unit-a", "unit-b"],
+                filament_ids=[f"unit-{idx}" for idx in range(n_filaments)],
                 mean_de=0.0123,
                 max_de=0.05,
                 pct_above_threshold=10.0,
@@ -129,10 +129,10 @@ def test_suggest_progress_is_monotonic_and_reaches_100_only_at_completion(
                 rank_score=0.015,
                 rank_mode="robust",
             )
-        ]
+        ], model_metadata={"estimated_with_three_color_rescore": True})
 
     monkeypatch.setattr(server, "_update_suggest_job", recording_update)
-    monkeypatch.setattr(palette_suggest_module, "suggest_palettes", fake_suggest)
+    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_detailed", fake_suggest)
 
     started = client.post(
         "/api/palette/suggest",
@@ -275,131 +275,208 @@ def test_suggest_thread_start_failure_does_not_leave_running_job(
     assert "simulated start failure" in status["progress"]
 
 
-def test_suggest_tier_path_uses_active_printer_capacity_and_returns_ladder_shape(client: TestClient, monkeypatch) -> None:
+def test_suggest_exact_path_returns_only_requested_size_and_count(
+    client: TestClient,
+    monkeypatch,
+) -> None:
     captured = {}
-    monkeypatch.setattr(
-        server,
-        "get_active_printer",
-        lambda: {"printer": {"ams_units": 2, "slots_per_ams": 4}, "nozzle": None},
-    )
 
-    def _fake_swap_aware(sig, *, max_colors_per_load, slots_per_ams, n_ams_units, reserved_white, max_swaps, top_k, **kwargs):
-        captured.update({
-            "max_colors_per_load": max_colors_per_load,
-            "slots_per_ams": slots_per_ams,
-            "n_ams_units": n_ams_units,
-            "reserved_white": reserved_white,
-            "max_swaps": max_swaps,
-            "top_k": top_k,
-        })
-        recommended = PaletteCandidate(
-            filament_ids=["unit-a", "unit-b", "unit-c", "unit-d", "unit-e"],
-            mean_de=0.01,
-            max_de=0.04,
-            pct_above_threshold=8.0,
-            gamut_points=5,
-        )
-        alternate = PaletteCandidate(
-            filament_ids=["unit-a", "unit-b", "unit-c", "unit-d", "unit-f"],
-            mean_de=0.012,
-            max_de=0.05,
-            pct_above_threshold=9.0,
-            gamut_points=5,
-        )
-        tier = SimpleNamespace(
-            swap_count=0,
-            n_filaments=5,
-            candidates=[recommended],
-            best_mean_de=recommended.mean_de,
-            best_coverage_pct=92.0,
-            improvement_over_prev=None,
-        )
-        return SimpleNamespace(
-            tiers=[tier],
-            alternatives=[recommended, alternate],
-            recommended={"swap_count": 0, "n_filaments": 5, "filament_ids": recommended.filament_ids},
-            model_metadata={"estimated_with_three_color_rescore": True},
+    def fake_exact(sig, *, n_filaments, top_k, **kwargs):
+        captured.update({"n_filaments": n_filaments, "top_k": top_k})
+        candidates = [
+            PaletteCandidate(
+                filament_ids=[f"unit-{candidate_idx}-{color_idx}" for color_idx in range(n_filaments)],
+                mean_de=0.01 + candidate_idx * 0.001,
+                max_de=0.04,
+                pct_above_threshold=8.0,
+                gamut_points=n_filaments,
+            )
+            for candidate_idx in range(top_k)
+        ]
+        return PaletteSuggestionResult(
+            candidates=candidates,
+            model_metadata={
+                "estimated_with_three_color_rescore": True,
+                "three_color_rescore_finalists": top_k,
+            },
         )
 
-    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_swap_aware", _fake_swap_aware)
+    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_detailed", fake_exact)
 
     resp = client.post(
         "/api/palette/suggest",
-        json={"image_path": "tiny.png", "n_filaments": 5, "top_k": 2, "max_swaps": 0},
+        json={"image_path": "tiny.png", "n_filaments": 5, "top_k": 2},
     )
 
     assert resp.status_code == 200, resp.text
     status = _poll_suggest_result(client)
     assert status["status"] == "complete", status
-    assert captured == {
-        "max_colors_per_load": 5,
-        "slots_per_ams": 4,
-        "n_ams_units": 2,
-        "reserved_white": 1,
-        "max_swaps": 0,
-        "top_k": 2,
-    }
+    assert captured == {"n_filaments": 5, "top_k": 2}
     result = status["result"]
-    assert result["recommended"] == {
-        "swap_count": 0,
-        "n_filaments": 5,
-        "filament_ids": ["unit-a", "unit-b", "unit-c", "unit-d", "unit-e"],
-    }
-    assert len(result["alternatives"]) == 2
-    assert len(result["tiers"]) == 1
-    assert len(result["tiers"][0]["candidates"]) == 1
-    assert len(result["tiers"][0]["candidates"][0]["filament_ids"]) == 5
-    assert result["model_metadata"]["estimated_with_three_color_rescore"] is True
+    assert len(result["candidates"]) == 2
+    assert all(len(candidate["filament_ids"]) == 5 for candidate in result["candidates"])
+    assert "tiers" not in result
+    assert "alternatives" not in result
+    assert "recommended" not in result
+    assert "per_load_capped" not in result
+    assert result["model_metadata"]["three_color_rescore_finalists"] == 2
 
 
-def test_palette_suggestion_capacity_falls_back_to_session_when_printer_lacks_ams_fields(monkeypatch) -> None:
+def test_suggest_exact_size_is_not_clamped_to_printer_capacity(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def fake_exact(sig, *, n_filaments, top_k, **kwargs):
+        captured["n_filaments"] = n_filaments
+        return PaletteSuggestionResult(
+            candidates=[
+                PaletteCandidate(
+                    filament_ids=[f"unit-{idx}" for idx in range(n_filaments)],
+                    mean_de=0.01,
+                    max_de=0.04,
+                    pct_above_threshold=8.0,
+                    gamut_points=n_filaments,
+                )
+            ],
+            model_metadata={},
+        )
+
+    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_detailed", fake_exact)
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {"printer": {"id": "bare"}, "nozzle": None},
+        lambda: {
+            "printer": {"id": "printer-a", "ams_units": 1, "slots_per_ams": 4},
+                "nozzle": {"id": "nozzle-200", "diameter_um": 200, "min_layer_height_um": 40, "max_layer_height_um": 200, "minimum_line_length_multiplier": 2},
+            "extrusion_width": {"width_um": 200},
+            "printability": {"extrusion_width_mm": 0.2, "minimum_line_length_mm": 0.4},
+        },
     )
 
-    assert server._palette_suggestion_ams_capacity({"ams_slots": 10, "n_ams_units": 2}) == (5, 2)
-
-
-def test_tier_response_emits_per_load_capped_only_when_clamped() -> None:
-    candidate = PaletteCandidate(
-        filament_ids=["unit-a", "unit-b", "unit-c"],
-        mean_de=0.01,
-        max_de=0.04,
-        pct_above_threshold=8.0,
-        gamut_points=3,
+    resp = client.post(
+        "/api/palette/suggest",
+        json={"image_path": "tiny.png", "n_filaments": 8, "top_k": 1},
     )
-    tier = SimpleNamespace(
-        swap_count=0,
-        n_filaments=3,
-        candidates=[candidate],
-        best_mean_de=candidate.mean_de,
-        best_coverage_pct=92.0,
-        improvement_over_prev=None,
+    assert resp.status_code == 200, resp.text
+    status = _poll_suggest_result(client)
+    assert status["status"] == "complete", status
+    assert captured["n_filaments"] == 8
+    assert len(status["result"]["candidates"][0]["filament_ids"]) == 8
+
+
+def test_suggest_default_pool_excludes_reserved_base_and_cap(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_exact(sig, *, n_filaments, top_k, exclude_filament_ids, **kwargs):
+        captured["excluded"] = set(exclude_filament_ids)
+        return PaletteSuggestionResult(candidates=[], model_metadata={})
+
+    monkeypatch.setattr(palette_suggest_module, "suggest_palettes_detailed", fake_exact)
+    monkeypatch.setattr(server, "_white_ids", lambda _cfg=None: ["base-white", "cap-white"])
+
+    resp = client.post(
+        "/api/palette/suggest",
+        json={"image_path": "tiny.png", "n_filaments": 3, "top_k": 1},
     )
+    assert resp.status_code == 200, resp.text
+    status = _poll_suggest_result(client)
+    assert status["status"] == "complete", status
+    assert {"base-white", "cap-white"}.issubset(captured["excluded"])
 
-    clamped = server._format_tier_response(SimpleNamespace(
-        tiers=[tier],
-        alternatives=[candidate],
-        recommended=None,
-        per_load_capped={"requested": 5, "capacity": 3},
-    ))
-    assert clamped["per_load_capped"] == {"requested": 5, "capacity": 3}
 
-    unclamped = server._format_tier_response(SimpleNamespace(
-        tiers=[tier],
-        alternatives=[candidate],
-        recommended=None,
-    ))
-    assert "per_load_capped" not in unclamped
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("n_filaments", 1),
+        ("n_filaments", 17),
+        ("top_k", 0),
+        ("top_k", 11),
+    ],
+)
+def test_suggest_exact_numeric_bounds_are_enforced(
+    client: TestClient,
+    field: str,
+    value: int,
+) -> None:
+    response = client.post(
+        "/api/palette/suggest",
+        json={"image_path": "tiny.png", field: value},
+    )
+    assert response.status_code == 422, response.text
+
+
+def test_suggest_rejects_duplicate_explicit_candidate_ids(client: TestClient) -> None:
+    response = client.post(
+        "/api/palette/suggest",
+        json={
+            "image_path": "tiny.png",
+            "n_filaments": 2,
+            "filament_ids": ["unit-a", "unit-a"],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "must not contain duplicates" in response.text
+
+
+def test_suggest_rejects_reserved_base_as_color_candidate(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "_cfg",
+        lambda: {"white_base": "reserved-white", "d_wb": 0.2},
+    )
+    monkeypatch.setattr(server, "_load_registry", lambda: {})
+    response = client.post(
+        "/api/palette/suggest",
+        json={
+            "image_path": "tiny.png",
+            "n_filaments": 2,
+            "filament_ids": ["reserved-white", "unit-a"],
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "Reserved base/cap filaments" in response.text
+
+
+def test_suggest_rejects_too_few_selected_eligible_colors(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "_load_registry",
+        lambda: {"excluded": {"exclude_from_model": True}},
+    )
+    response = client.post(
+        "/api/palette/suggest",
+        json={
+            "image_path": "tiny.png",
+            "n_filaments": 3,
+            "filament_ids": ["unit-a", "unit-b", "excluded"],
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "only 2 selected eligible color filaments" in response.text
 
 
 @pytest.mark.parametrize(
     "stale_field",
-    [{"search_mode": "quality"}, {"quality_weights": {"mean_de": 1.0}}],
+    [
+        {"search_mode": "quality"},
+        {"quality_weights": {"mean_de": 1.0}},
+        {"max_swaps": 1},
+        {"improvement_threshold": 2.0},
+        {"force_all_tiers": True},
+    ],
 )
-def test_removed_quality_mode_fields_are_rejected_loudly(client: TestClient, stale_field: dict) -> None:
+def test_removed_suggestion_fields_are_rejected_loudly(client: TestClient, stale_field: dict) -> None:
     payload = {"image_path": "tiny.png", **stale_field}
     resp = client.post("/api/palette/suggest", json=payload)
     assert resp.status_code == 422, resp.text

@@ -1,4 +1,5 @@
-import { createAnchoredMenuController } from "../../core/anchored-menu.js";
+import { createAnchoredMenuController } from "../../core/anchored-menu.js?v=2026-08-02-topbar-menu-switch-v1";
+import { GUIDE_DURABLE_OPERATIONS } from "./core/schema.js?v=2026-08-04-saving-loading-v1";
 
 const FIRST_RUN_GUIDE_OFFER_ENABLED = true;
 const GUIDE_STATE_SCHEMA_VERSION = 2;
@@ -15,18 +16,155 @@ export function installFeaturesGuidesController(app) {
   let initialized = false;
   let menuController = null;
   let completionDisposer = null;
-  let stateBeforeSuspension = null;
+  let guideSuspended = false;
   let catalogRestoreFocus = null;
   let controllerDocument = null;
   let firstLaunchWaitDisposer = null;
   let firstLaunchOfferStarted = false;
   let lastWelcomePersistenceFailure = null;
   let runtimeCleanupPromise = Promise.resolve();
+  let guideLaunchPromise = null;
+  let activeStepActionPromise = null;
+  let guideEndingRequested = false;
   let pendingAdvanceAfterSuspension = false;
 
   function guideIsActive() {
     return !!app.state.guides.currentGuide
-      && !["idle", "completed"].includes(app.state.guides.runtimeState);
+      && app.state.guides.runtimeState !== "idle";
+  }
+
+  function resolveGuideRuntimePath(path) {
+    return String(path || "").split(".").reduce(
+      (value, part) => (value == null ? undefined : value[part]),
+      app.state.guides.runtimeContext,
+    );
+  }
+
+  function durableValuesEqual(actual, expected) {
+    if (Array.isArray(actual) || Array.isArray(expected)) {
+      return Array.isArray(actual)
+        && Array.isArray(expected)
+        && actual.length === expected.length
+        && actual.every((value, index) => durableValuesEqual(value, expected[index]));
+    }
+    return actual === expected;
+  }
+
+  function validateDurableMutationDetail(operation, detail) {
+    const schema = GUIDE_DURABLE_OPERATIONS[operation];
+    if (!schema || !detail || typeof detail !== "object" || Array.isArray(detail)) return false;
+    if (Object.keys(detail).length !== Object.keys(schema).length) return false;
+    return Object.entries(schema).every(([key, type]) => (
+      key in detail
+      && (type === "array" ? Array.isArray(detail[key]) : typeof detail[key] === type)
+    ));
+  }
+
+  function authorizeGuideDurableMutation(operation, detail) {
+    const guide = app.state.guides.currentGuide;
+    const policy = guide?.durable_mutation_policy;
+    const enforcing = guide?.workspace_policy === "basic-teaching"
+      && app.state.guides.runtimeState === "presenting"
+      && policy?.default === "deny";
+    if (!enforcing) return true;
+    if (!validateDurableMutationDetail(operation, detail)) {
+      app.commands.showToast?.("This durable action is unavailable while the Guide is running.", "warn");
+      return false;
+    }
+    const rules = policy.steps?.[app.state.guides.currentStep?.id] || [];
+    const allowed = rules.some(rule => rule.operation === operation && Object.entries(rule.match).every(
+      ([key, matcher]) => durableValuesEqual(
+        detail[key],
+        "literal" in matcher ? matcher.literal : resolveGuideRuntimePath(matcher.context),
+      ),
+    ));
+    if (!allowed) {
+      app.commands.showToast?.(
+        "This Guide only changes the teaching item required by the current step.",
+        "warn",
+      );
+    }
+    return allowed;
+  }
+
+  async function persistGuideResourceTransition(resource, attempts = 3) {
+    let lastError = null;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return await app.api.transitionGuideResource(
+          app.state.guides.workspaceSessionId,
+          resource,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("The Guide resource ledger could not be updated");
+  }
+
+  async function performGuideDurableMutation(spec, mutate) {
+    const journaling = app.state.guides.currentGuide?.durable_mutation_policy
+      && app.state.guides.workspaceSessionId
+      && typeof app.api.transitionGuideResource === "function";
+    if (!journaling) return mutate();
+    const direction = spec?.direction;
+    if (!["create", "delete"].includes(direction)) {
+      throw new Error("Unknown Guide durable mutation direction");
+    }
+    const resourceCache = app.state.guides.runtimeContext.durableResources ||= {};
+    const recorded = direction === "delete" ? resourceCache[spec.operationId] : null;
+    if (recorded && (
+      recorded.kind !== spec.kind
+      || (spec.id && recorded.id !== spec.id)
+      || recorded.name !== spec.name
+    )) {
+      throw new Error("The Guide-created resource no longer matches its recorded identity");
+    }
+    const base = recorded ? clone(recorded) : {
+      operation_id: spec.operationId,
+      kind: spec.kind,
+      id: spec.id || null,
+      name: spec.name,
+      fingerprint: clone(spec.fingerprint),
+    };
+    const pendingStatus = direction === "create" ? "pending_create" : "pending_delete";
+    const rollbackStatus = direction === "create" ? "absent" : "present";
+    const successStatus = direction === "create" ? "present" : "absent";
+    await persistGuideResourceTransition({ ...base, status: pendingStatus });
+    const priorKey = app.api.getRequestContext?.().guideActionIdempotencyKey || null;
+    app.api.setRequestContext?.({
+      guideActionIdempotencyKey: `${app.state.guides.workspaceSessionId}:${spec.operationId}:${direction}`,
+    });
+    let result;
+    try {
+      result = await mutate();
+    } catch (error) {
+      app.api.setRequestContext?.({ guideActionIdempotencyKey: priorKey });
+      try {
+        await persistGuideResourceTransition({ ...base, status: rollbackStatus });
+      } catch (journalError) {
+        console.error("[guides] durable mutation rollback could not be journaled:", journalError);
+      }
+      throw error;
+    }
+    app.api.setRequestContext?.({ guideActionIdempotencyKey: priorKey });
+    const authoritativeId = direction === "create"
+      ? String(spec.resolveId?.(result) || spec.id || "") || null
+      : base.id;
+    await persistGuideResourceTransition({
+      ...base,
+      id: authoritativeId,
+      status: successStatus,
+    });
+    if (direction === "create") {
+      resourceCache[spec.operationId] = {
+        ...base,
+        id: authoritativeId,
+      };
+    } else {
+      delete resourceCache[spec.operationId];
+    }
+    return result;
   }
 
   function activeDetourDefinition(guide = app.state.guides.currentGuide) {
@@ -49,11 +187,35 @@ export function installFeaturesGuidesController(app) {
     };
   }
 
-  function getOfferedGuideDetour() {
-    if (app.state.guides.activeDetour) return null;
+  /** Every detour attached to the current step, in declaration order. */
+  function getGuideDetoursAtCurrentStep() {
+    if (app.state.guides.activeDetour) return [];
     const guide = app.state.guides.currentGuide;
     const stepId = app.state.guides.currentStep?.id;
-    return guide?.detours?.find(current => current.offer_step_id === stepId) || null;
+    return (guide?.detours || []).filter(current => current.offer_step_id === stepId);
+  }
+
+  /**
+   * The subset a learner can still enter. A repeatable detour stays enterable
+   * after completion; `completedDetourIds` continues to record completion for
+   * progress reporting either way.
+   */
+  function getOfferedGuideDetours() {
+    return getGuideDetoursAtCurrentStep().filter(current => (
+      current.repeatable || !app.state.guides.completedDetourIds.has(current.id)
+    ));
+  }
+
+  function returnFromGuideDetour(guide, currentDetour) {
+    const presentation = app.state.guides.activeDetour?.presentation || null;
+    cleanupCompletionSubscription();
+    app.state.guides.activeDetour = null;
+    if (presentation) app.commands.restoreGuidePresentation(presentation);
+    const returnStep = app.commands.getGuideStep(guide, currentDetour.return_step_id);
+    activateGuideStep(guide, returnStep, {
+      reviewCompleted: app.state.guides.completedStepIds.has(returnStep.id),
+      suppressPrevious: !!currentDetour.suppress_previous_on_return,
+    });
   }
 
   function getGuideProgressModel() {
@@ -193,10 +355,10 @@ export function installFeaturesGuidesController(app) {
     firstLaunchWaitDisposer?.();
     firstLaunchWaitDisposer = null;
     const begin = await (app.commands.appConfirm?.(
-      "Would you like to begin a brief guided setup to configure Prisma Generator for your printer and introduce its essential controls?",
+      "Would you like to begin First-Time Setup to configure Prisma Generator for your printer and introduce its essential controls?",
       {
         title: "Welcome to Prisma Generator!",
-        ok: "Start Guided Setup",
+        ok: "Start First-Time Setup",
         cancel: "Not Now",
       },
     ) ?? Promise.resolve(false));
@@ -286,7 +448,7 @@ export function installFeaturesGuidesController(app) {
         { title: "Open Guides Library", ok: "End Guide", cancel: "Keep Guide Open" },
       ) ?? Promise.resolve(false));
       if (!confirmed) return false;
-      endGuide({ restoreFocus: false });
+      await endGuide({ restoreFocus: false });
     }
     renderGuidesCatalog();
     catalogRestoreFocus = app.state.ui.$("#helpGuidesMenuBtn");
@@ -326,14 +488,11 @@ export function installFeaturesGuidesController(app) {
 
   function setGuideSuspended(suspended) {
     if (suspended) {
-      if (app.state.guides.runtimeState === "suspended_by_dialog") return;
-      stateBeforeSuspension = app.state.guides.runtimeState;
-      app.state.guides.runtimeState = "suspended_by_dialog";
+      guideSuspended = true;
       return;
     }
-    if (app.state.guides.runtimeState === "suspended_by_dialog") {
-      app.state.guides.runtimeState = stateBeforeSuspension || "running";
-      stateBeforeSuspension = null;
+    if (guideSuspended) {
+      guideSuspended = false;
       if (pendingAdvanceAfterSuspension) {
         pendingAdvanceAfterSuspension = false;
         nextGuideStep();
@@ -341,49 +500,142 @@ export function installFeaturesGuidesController(app) {
     }
   }
 
-  function activateGuideStep(guide, step, { reviewCompleted = false } = {}) {
+  async function handleGuideActionFailure(error, phase, guide, step) {
+    if (guideEndingRequested) return;
+    if (app.state.guides.currentGuide !== guide || app.state.guides.currentStep !== step) return;
+    app.state.guides.runtimeState = "recovering";
+    const retry = await (app.commands.appConfirm?.(
+      `Prisma could not complete this guide action: ${error.message}`,
+      { title: "Guide Action Failed", ok: "Retry", cancel: "End Guide" },
+    ) ?? Promise.resolve(false));
+    if (app.state.guides.currentGuide !== guide || app.state.guides.currentStep !== step) return;
+    if (!retry) {
+      await endGuide();
+      return;
+    }
+    app.state.guides.runtimeState = "presenting";
+    if (phase === "enter") activateGuideStep(guide, step);
+    else nextGuideStep();
+  }
+
+  async function executeTrackedStepActions(actions, {
+    guide,
+    step,
+    phase,
+    routeKey,
+  }) {
+    for (let index = 0; index < actions.length; index += 1) {
+      const descriptor = actions[index];
+      const actionKey = `${phase}:${guide.id}:${routeKey}:${step.id}:action:${index}`;
+      const rerunEnsure = phase === "enter" && descriptor.ensure_on_entry;
+      if (app.state.guides.actionLedger.has(actionKey) && !rerunEnsure) continue;
+      await app.commands.executeGuideAction(descriptor, {
+        guide,
+        step,
+        phase,
+        descriptorIndex: index,
+      });
+      app.state.guides.actionLedger.add(actionKey);
+    }
+  }
+
+  function activateGuideStep(guide, step, {
+    reviewCompleted = false,
+    actionsPrepared = false,
+    suppressPrevious = false,
+  } = {}) {
     cleanupCompletionSubscription();
     app.state.guides.currentGuide = guide;
     app.state.guides.currentStep = step;
     app.state.guides.reviewingCompletedStep = reviewCompleted
       && app.state.guides.completedStepIds.has(step.id);
+    app.state.guides.suppressPreviousForCurrentArrival = suppressPrevious;
+    const enterKey = `enter:${guide.id}:${app.state.guides.activeDetour?.id || "main"}:${step.id}`;
+    const routeKey = app.state.guides.activeDetour?.id || "main";
+    if (
+      !actionsPrepared
+      && step.enter_actions?.length
+      && (
+        !app.state.guides.actionLedger.has(enterKey)
+        || step.enter_actions.some(action => action.ensure_on_entry)
+      )
+    ) {
+      app.state.guides.runtimeState = "preparing";
+      const actionPromise = executeTrackedStepActions(
+        step.enter_actions,
+        { guide, step, phase: "enter", routeKey },
+      );
+      activeStepActionPromise = actionPromise;
+      void actionPromise
+        .then(() => {
+          app.state.guides.actionLedger.add(enterKey);
+          if (
+            !guideEndingRequested
+            && app.state.guides.currentGuide === guide
+            && app.state.guides.currentStep === step
+          ) {
+            activateGuideStep(guide, step, {
+              reviewCompleted,
+              actionsPrepared: true,
+              suppressPrevious,
+            });
+          }
+        })
+        .catch((error) => {
+          if (!guideEndingRequested) void handleGuideActionFailure(error, "enter", guide, step);
+        })
+        .finally(() => {
+          if (activeStepActionPromise === actionPromise) activeStepActionPromise = null;
+        });
+      return;
+    }
     if (step.reveal_id) {
       app.commands.revealGuideTarget(step.reveal_id, {
         reviewOnly: app.state.guides.reviewingCompletedStep,
       });
     }
-    app.state.guides.runtimeState = !app.state.guides.reviewingCompletedStep
-      && ["event", "interaction"].includes(step.completion.kind)
-      ? "waiting_for_action"
-      : "running";
+    app.state.guides.runtimeState = "presenting";
     app.commands.renderGuideStep(guideRenderPayload(guide, step));
     if (app.state.guides.reviewingCompletedStep) return;
     if (step.completion.kind === "event") {
-      completionDisposer = app.events.subscribe(step.completion.event, (detail) => {
+      const handleCompletionEvent = (detail) => {
         if (app.state.guides.currentStep !== step) return;
         app.commands.captureGuideCompletion(step, detail);
         if (!app.commands.guidePredicateSatisfied(step.completion.predicate_id)) return;
         app.state.guides.completedStepIds.add(step.id);
         cleanupCompletionSubscription();
-        if (app.state.guides.runtimeState === "suspended_by_dialog") {
+        if (step.completion.auto_advance === false) {
+          app.commands.renderGuideStep(guideRenderPayload(guide, step));
+          return;
+        }
+        if (guideSuspended) {
           pendingAdvanceAfterSuspension = true;
           return;
         }
         nextGuideStep();
-      });
+      };
+      const completionEvents = step.completion.events || [step.completion.event];
+      const completionDisposers = completionEvents.map(event => (
+        app.events.subscribe(event, handleCompletionEvent)
+      ));
+      completionDisposer = () => completionDisposers.forEach(dispose => dispose());
       if (
         step.completion.accept_preexisting
         && app.commands.guidePredicateSatisfied(step.completion.predicate_id)
       ) {
         app.state.guides.completedStepIds.add(step.id);
         cleanupCompletionSubscription();
-        nextGuideStep();
+        if (step.completion.auto_advance === false) {
+          app.commands.renderGuideStep(guideRenderPayload(guide, step));
+        } else {
+          nextGuideStep();
+        }
       }
     } else if (step.completion.kind === "interaction" && controllerDocument) {
       const onInteraction = () => {
         if (app.state.guides.currentStep !== step) return;
         cleanupCompletionSubscription();
-        endGuide({ restoreFocus: false });
+        void endGuide({ restoreFocus: false });
       };
       controllerDocument.addEventListener("click", onInteraction, true);
       completionDisposer = () => {
@@ -392,7 +644,7 @@ export function installFeaturesGuidesController(app) {
     }
   }
 
-  async function startGuide(guideId) {
+  async function startGuideInternal(guideId) {
     await runtimeCleanupPromise;
     const guide = app.commands.getGuideDefinition(guideId);
     if (!guide) return false;
@@ -408,30 +660,88 @@ export function installFeaturesGuidesController(app) {
           : { title: "Start Another Guide", ok: "End and Start", cancel: "Keep Guide Open" },
       ) ?? Promise.resolve(false));
       if (!confirmed) return false;
-      endGuide({ restoreFocus: false });
-      await runtimeCleanupPromise;
+      await endGuide({ restoreFocus: false });
     }
 
+    guideEndingRequested = false;
     if (!await app.commands.prepareGuideRuntime(guide)) return false;
     closeGuidesCatalog({ restoreFocus: true });
     app.state.guides.completedStepIds = new Set();
     app.state.guides.completedDetourIds = new Set();
+    app.state.guides.visitedDetourIds = new Set();
+    app.state.guides.presentationLocks = new Set();
     app.state.guides.activeDetour = null;
+    app.state.guides.suppressPreviousForCurrentArrival = false;
     app.state.guides.reviewingCompletedStep = false;
+    app.state.guides.targetUnavailable = false;
+    app.state.guides.actionLedger = new Set();
     app.state.guides.presentationSnapshot = app.commands.captureGuidePresentation();
     activateGuideStep(guide, guide.steps[0]);
     return true;
   }
 
+  function startGuide(guideId) {
+    // Catalog buttons and launch aliases can be activated more than once before
+    // preparation reaches its first modal. Share that transaction instead of
+    // allowing one launch to replace another launch's provisional lease.
+    if (guideLaunchPromise) return guideLaunchPromise;
+    const wrapped = startGuideInternal(guideId).finally(() => {
+      if (guideLaunchPromise === wrapped) guideLaunchPromise = null;
+    });
+    guideLaunchPromise = wrapped;
+    return wrapped;
+  }
+
   function nextGuideStep() {
     const guide = app.state.guides.currentGuide;
     const step = app.state.guides.currentStep;
-    if (!guide || !step || app.state.guides.runtimeState === "suspended_by_dialog") return false;
+    if (
+      !guide
+      || !step
+      || guideSuspended
+      || app.state.guides.targetUnavailable
+      || ["acquiring", "preparing", "completing", "ending", "recovering"].includes(
+        app.state.guides.runtimeState,
+      )
+    ) return false;
     if (
       !app.state.guides.reviewingCompletedStep
       && ["event", "interaction"].includes(step.completion.kind)
       && !app.state.guides.completedStepIds.has(step.id)
     ) {
+      return false;
+    }
+    const completionKey = `complete:${guide.id}:${app.state.guides.activeDetour?.id || "main"}:${step.id}`;
+    const routeKey = app.state.guides.activeDetour?.id || "main";
+    if (
+      !app.state.guides.reviewingCompletedStep
+      && step.complete_actions?.length
+      && !app.state.guides.actionLedger.has(completionKey)
+    ) {
+      app.state.guides.runtimeState = "completing";
+      const actionPromise = executeTrackedStepActions(
+        step.complete_actions,
+        { guide, step, phase: "complete", routeKey },
+      );
+      activeStepActionPromise = actionPromise;
+      void actionPromise
+        .then(() => {
+          app.state.guides.actionLedger.add(completionKey);
+          if (
+            !guideEndingRequested
+            && app.state.guides.currentGuide === guide
+            && app.state.guides.currentStep === step
+          ) {
+            app.state.guides.runtimeState = "presenting";
+            nextGuideStep();
+          }
+        })
+        .catch((error) => {
+          if (!guideEndingRequested) void handleGuideActionFailure(error, "complete", guide, step);
+        })
+        .finally(() => {
+          if (activeStepActionPromise === actionPromise) activeStepActionPromise = null;
+        });
       return false;
     }
     if (
@@ -463,9 +773,7 @@ export function installFeaturesGuidesController(app) {
         return false;
       }
       app.state.guides.completedDetourIds.add(currentDetour.id);
-      app.state.guides.activeDetour = null;
-      const returnStep = app.commands.getGuideStep(guide, currentDetour.return_step_id);
-      activateGuideStep(guide, returnStep, { reviewCompleted: false });
+      returnFromGuideDetour(guide, currentDetour);
       return true;
     }
     const nextStep = route[index + 1];
@@ -478,12 +786,23 @@ export function installFeaturesGuidesController(app) {
   function previousGuideStep() {
     const guide = app.state.guides.currentGuide;
     const step = app.state.guides.currentStep;
-    if (!guide || !step) return false;
+    if (
+      !guide
+      || !step
+      || app.state.guides.runtimeState !== "presenting"
+      || app.state.guides.suppressPreviousForCurrentArrival
+    ) return false;
     if (step.allow_previous === false) return false;
     const currentDetour = activeDetourDefinition(guide);
     const route = currentDetour?.steps || guide.steps;
     const index = route.indexOf(step);
-    if (index <= 0) return false;
+    if (index <= 0) {
+      if (currentDetour?.previous_returns_to_offer) {
+        returnFromGuideDetour(guide, currentDetour);
+        return true;
+      }
+      return false;
+    }
     const previousStep = route[index - 1];
     activateGuideStep(guide, previousStep, {
       reviewCompleted: app.state.guides.completedStepIds.has(previousStep.id),
@@ -494,73 +813,112 @@ export function installFeaturesGuidesController(app) {
   function exitGuideDetour() {
     const guide = app.state.guides.currentGuide;
     const currentDetour = activeDetourDefinition(guide);
-    if (!guide || !currentDetour) return false;
-    cleanupCompletionSubscription();
-    app.state.guides.activeDetour = null;
-    const offerStep = app.commands.getGuideStep(guide, currentDetour.offer_step_id);
-    activateGuideStep(guide, offerStep, {
-      reviewCompleted: app.state.guides.completedStepIds.has(offerStep.id),
-    });
+    if (!guide || !currentDetour || app.state.guides.runtimeState !== "presenting") return false;
+    returnFromGuideDetour(guide, currentDetour);
     return true;
   }
 
   function exitCurrentGuideContext() {
     if (activeDetourDefinition()) return exitGuideDetour();
-    endGuide();
+    void endGuide();
     return true;
   }
 
-  function endGuide({ restoreFocus = true } = {}) {
+  function skipGuideStep() {
+    const guide = app.state.guides.currentGuide;
+    const step = app.state.guides.currentStep;
+    if (
+      !guide
+      || !step
+      || !step.allow_skip
+      || !app.state.guides.targetUnavailable
+      || app.state.guides.runtimeState !== "presenting"
+    ) return false;
     cleanupCompletionSubscription();
-    try {
-      runtimeCleanupPromise = Promise.resolve(
-        app.commands.cleanupGuideRuntime?.(app.state.guides.currentGuide),
-      ).catch((error) => {
-        console.error("[guides] runtime cleanup failed:", error);
-        app.commands.showToast?.("The guide could not restore the previous settings state.", "warn");
-      });
-    } catch (error) {
-      runtimeCleanupPromise = Promise.resolve();
-      console.error("[guides] runtime cleanup failed:", error);
-      app.commands.showToast?.("The guide could not restore the previous settings state.", "warn");
+    app.state.guides.targetUnavailable = false;
+    app.state.guides.completedStepIds.add(step.id);
+    app.state.guides.reviewingCompletedStep = true;
+    return nextGuideStep();
+  }
+
+  function endGuide({ restoreFocus = true, normalCompletion = false } = {}) {
+    if (app.state.guides.runtimeState === "ending") {
+      return runtimeCleanupPromise;
     }
-    restorePrototypePresentation();
-    app.commands.hideGuideOverlay({ restoreFocus });
-    app.state.guides.runtimeState = "idle";
-    app.state.guides.currentGuide = null;
-    app.state.guides.currentStep = null;
-    app.state.guides.completedStepIds = new Set();
-    app.state.guides.completedDetourIds = new Set();
-    app.state.guides.activeDetour = null;
-    app.state.guides.reviewingCompletedStep = false;
-    app.state.guides.runtimeContext = null;
-    app.state.guides.stateBeforeTargetFailure = null;
-    stateBeforeSuspension = null;
-    pendingAdvanceAfterSuspension = false;
+    cleanupCompletionSubscription();
+    const guide = app.state.guides.currentGuide;
+    guideEndingRequested = true;
+    app.state.guides.runtimeState = "ending";
+    const cleanup = (async () => {
+      const pendingAction = activeStepActionPromise;
+      if (pendingAction) {
+        try { await pendingAction; } catch { /* cleanup still restores the snapshot */ }
+      }
+      try {
+        const cleanupResult = await app.commands.cleanupGuideRuntime?.(guide, { normalCompletion });
+        const remaining = cleanupResult?.present || [];
+        if (remaining.length) {
+          app.commands.showToast?.(
+            `Guide-created saves were preserved: ${remaining.map(resource => resource.name).join(", ")}.`,
+            "warn",
+          );
+        }
+      } catch (error) {
+        console.error("[guides] runtime cleanup failed:", error);
+        app.state.guides.runtimeState = "recovering";
+        app.commands.showToast?.(
+          `The guide could not restore the previous environment: ${error.message}. Retry by ending the guide again.`,
+          "warn",
+        );
+        return false;
+      }
+      // Presentation restoration may need to close the drawer or switch
+      // Advanced off. Successful cleanup releases every hold first; recovery
+      // deliberately retains them until a retry succeeds.
+      app.state.guides.presentationLocks = new Set();
+      restorePrototypePresentation();
+      app.commands.hideGuideOverlay({ restoreFocus });
+      app.state.guides.runtimeState = "idle";
+      app.state.guides.currentGuide = null;
+      app.state.guides.currentStep = null;
+      app.state.guides.completedStepIds = new Set();
+      app.state.guides.completedDetourIds = new Set();
+      app.state.guides.visitedDetourIds = new Set();
+      app.state.guides.activeDetour = null;
+      app.state.guides.suppressPreviousForCurrentArrival = false;
+      app.state.guides.reviewingCompletedStep = false;
+      app.state.guides.actionLedger = new Set();
+      app.state.guides.runtimeContext = null;
+      app.state.guides.targetUnavailable = false;
+      guideSuspended = false;
+      guideEndingRequested = false;
+      pendingAdvanceAfterSuspension = false;
+      return true;
+    })();
+    runtimeCleanupPromise = cleanup;
+    return cleanup;
   }
 
   function completeGuide() {
     const guide = app.state.guides.currentGuide;
     if (!guide) return false;
-    app.state.guides.runtimeState = "completed";
-    endGuide();
-    app.commands.showToast?.(`${guide.title} complete`, "success");
+    void endGuide({ normalCompletion: true }).then((completed) => {
+      if (completed) app.commands.showToast?.(`${guide.title} complete`, "success");
+    });
     return true;
   }
 
   function handleGuideTargetUnavailable(targetId) {
     if (app.state.guides.currentStep?.target_id !== targetId) return;
     if (app.state.guides.reviewingCompletedStep) return;
-    if (app.state.guides.runtimeState === "target_unavailable") return;
-    app.state.guides.stateBeforeTargetFailure = app.state.guides.runtimeState;
-    app.state.guides.runtimeState = "target_unavailable";
+    if (app.state.guides.targetUnavailable) return;
+    app.state.guides.targetUnavailable = true;
     app.commands.showGuideTargetUnavailable();
   }
 
   function handleGuideTargetAvailable() {
-    if (app.state.guides.runtimeState !== "target_unavailable") return;
-    app.state.guides.runtimeState = app.state.guides.stateBeforeTargetFailure || "running";
-    app.state.guides.stateBeforeTargetFailure = null;
+    if (!app.state.guides.targetUnavailable) return;
+    app.state.guides.targetUnavailable = false;
     const guide = app.state.guides.currentGuide;
     const step = app.state.guides.currentStep;
     if (guide && step) {
@@ -572,7 +930,7 @@ export function installFeaturesGuidesController(app) {
     const guide = app.state.guides.currentGuide;
     const step = app.state.guides.currentStep;
     if (!guide || !step) return;
-    app.state.guides.runtimeState = app.state.guides.stateBeforeTargetFailure || "running";
+    app.state.guides.targetUnavailable = false;
     app.commands.revealGuideTarget(step.reveal_id, {
       reviewOnly: app.state.guides.reviewingCompletedStep,
     });
@@ -586,21 +944,29 @@ export function installFeaturesGuidesController(app) {
     if (
       !guide
       || !step
+      || app.state.guides.runtimeState !== "presenting"
       || app.state.guides.activeDetour
       || !currentDetour
       || currentDetour.offer_step_id !== step.id
     ) return false;
     cleanupCompletionSubscription();
+    app.state.guides.visitedDetourIds ||= new Set();
     app.state.guides.completedStepIds.add(step.id);
+    app.state.guides.visitedDetourIds.add(currentDetour.id);
     app.state.guides.activeDetour = {
       id: currentDetour.id,
       offerStepId: currentDetour.offer_step_id,
       returnStepId: currentDetour.return_step_id,
+      presentation: app.commands.captureGuidePresentation(),
     };
     activateGuideStep(guide, currentDetour.steps[0], {
       reviewCompleted: app.state.guides.completedStepIds.has(currentDetour.steps[0].id),
     });
     return true;
+  }
+
+  function guidePresentationLocked(lockId) {
+    return app.state.guides.presentationLocks?.has(lockId) || false;
   }
 
   function moveGuideCard() {
@@ -615,6 +981,8 @@ export function installFeaturesGuidesController(app) {
     const action = item.dataset.helpGuidesAction;
     if (action === "guided-setup") void startGuide("guided-setup");
     if (action === "generator-basics") void startGuide("prisma-generator-basics");
+    if (action === "settings-drawer") void startGuide("settings-drawer");
+    if (action === "saving-and-loading") void startGuide("saving-and-loading");
     if (action === "catalog") void openGuidesCatalog();
     if (action === "interface-preview") void startGuide("interface-preview");
   }
@@ -622,7 +990,7 @@ export function installFeaturesGuidesController(app) {
   function startGuideFollowup() {
     const followup = app.state.guides.currentStep?.followup;
     if (!followup || !app.commands.getGuideDefinition(followup.guide_id)) return false;
-    endGuide({ restoreFocus: true });
+    void endGuide({ restoreFocus: true });
     void startGuide(followup.guide_id);
     return true;
   }
@@ -688,11 +1056,11 @@ export function installFeaturesGuidesController(app) {
       ["#guideStepEnd", "click", exitCurrentGuideContext],
       ["#guideStepMove", "click", moveGuideCard],
       ["#guideStepRetry", "click", retryGuideTarget],
-      ["#guideStepSkip", "click", nextGuideStep],
+      ["#guideStepSkip", "click", skipGuideStep],
       ["#guideStepFollowupButton", "click", startGuideFollowup],
-      ["#guideStepDetourButton", "click", () => {
-        const detourId = app.state.ui.$("#guideStepDetourButton")?.dataset.detourId;
-        if (detourId) startGuideDetour(detourId);
+      ["#guideStepDetour", "click", event => {
+        const button = event.target?.closest?.("[data-detour-id]");
+        if (button?.dataset.detourId) startGuideDetour(button.dataset.detourId);
       }],
     ];
     for (const [selector, type, listener] of bindings) {
@@ -708,6 +1076,11 @@ export function installFeaturesGuidesController(app) {
     }
     app.lifecycle.listen(documentEvents, "keydown", event => {
       if (event.key !== "Escape" || !guideIsActive()) return;
+      if (app.commands.closeGuideMediaLightbox?.()) {
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+        return;
+      }
       if (app.state.ui.$("#appDialog")?.getAttribute("aria-hidden") === "false") return;
       event.preventDefault();
       event.stopImmediatePropagation?.();
@@ -716,25 +1089,30 @@ export function installFeaturesGuidesController(app) {
   }
 
   Object.assign(app.commands, {
+    authorizeGuideDurableMutation,
     closeGuidesCatalog,
     completeGuide,
     endGuide,
     exitGuideDetour,
     handleGuideTargetAvailable,
     handleGuideTargetUnavailable,
+    getGuideDetoursAtCurrentStep,
     getGuideProgressModel,
-    getOfferedGuideDetour,
+    getOfferedGuideDetours,
+    guidePresentationLocked,
     initializeGuidesController,
     loadGuideState,
     maybeOfferGuidedSetup,
     moveGuideCard,
     nextGuideStep,
     openGuidesCatalog,
+    performGuideDurableMutation,
     persistWelcomeStatus,
     previousGuideStep,
     renderGuidesCatalog,
     retryGuideTarget,
     setGuideSuspended,
+    skipGuideStep,
     startGuideDetour,
     startGuideFollowup,
     startGuide,

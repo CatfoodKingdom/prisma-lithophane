@@ -159,6 +159,7 @@ export function installFeaturesSolveController(app) {
       app.commands.showToast("Wait for the active solve or export to finish before clearing history.", "warn");
       return;
     }
+    const removedRunIds = app.state.solve.solveRuns.map(run => run.id);
     app.commands.resetSolveRunDeleteConfirm({ render: false });
     app.state.solve.solveRuns.forEach((run) => app.commands.invalidateSolveRunCaches(run));
     app.state.solve.solveRuns = [];
@@ -179,6 +180,7 @@ export function installFeaturesSolveController(app) {
     app.state.export.exportSelectedRunId = null;
     app.commands.renderSolveTab();
     if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
+    if (!force && removedRunIds.length) app.events.emit("solve.history.cleared", { runIds: removedRunIds });
   }
 
   function getSolveHistoryClearButtons() {
@@ -380,6 +382,10 @@ export function installFeaturesSolveController(app) {
     const validationError = app.commands.validateWritableRunLabel(label);
     if (!run?.results || run.save_pending || validationError) return false;
     const trimmed = String(label).trim();
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("solve.saved-run.create", {
+      run_card_id: runId,
+      label: trimmed,
+    })) return false;
     run.save_pending = true;
     if (initiatingButton) {
       initiatingButton.disabled = true;
@@ -388,7 +394,20 @@ export function installFeaturesSolveController(app) {
       initiatingButton.title = "Saving this run";
     }
     try {
-      const response = await app.api.saveRun(runId, trimmed);
+      const save = () => app.api.saveRun(runId, trimmed);
+      const response = app.commands.performGuideDurableMutation
+        ? await app.commands.performGuideDurableMutation({
+          direction: "create",
+          operationId: "saving-loading-run",
+          kind: "saved-run",
+          name: trimmed,
+          fingerprint: {
+            source_image_name: run.image?.filename || "",
+            palette: [...(run.palette || [])],
+          },
+          resolveId: result => result?.save_id,
+        }, save)
+        : await save();
       const serverLabel = String(response?.label ?? "").trim();
       if (!serverLabel) throw new Error("Save response did not include a run label.");
       const currentRun = app.state.solve.solveRuns.find((candidate) => candidate.id === runId);
@@ -396,6 +415,7 @@ export function installFeaturesSolveController(app) {
         const previousLabel = currentRun.label;
         currentRun.label = serverLabel;
         currentRun.save_pending = false;
+        currentRun.saved_run_id = response?.save_id || null;
         app.commands.renderSolveTab();
         if (app.state.ui.currentTab === "export") app.commands.renderExportTab();
         if (app.state.solve.solveRunSettingsPanelRunId === runId && app.state.solve.solveRunSettingsPanelEl) {
@@ -404,6 +424,11 @@ export function installFeaturesSolveController(app) {
         app.commands.refreshOpenSolveRunLabels(currentRun, previousLabel);
       }
       app.commands.showToast(`Saved as "${serverLabel}"`, "");
+      app.events.emit("solve.saved-run.created", {
+        runId,
+        saveId: response?.save_id || null,
+        label: serverLabel,
+      });
       return true;
     } catch (err) {
       const currentRun = app.state.solve.solveRuns.find((candidate) => candidate.id === runId);
@@ -512,7 +537,13 @@ export function installFeaturesSolveController(app) {
         tier: save.tier === "auto" ? "auto" : "saved",
         label: save.label || body.label || save.save_id,
       });
-      if (loaded) app.commands._setSavedRunsModalOpen(false);
+      if (loaded) {
+        app.commands._setSavedRunsModalOpen(false);
+        app.events.emit("settings.temp-profile.loaded", {
+          profileId: app.state.settings.loadedProfileRef?.id,
+          source: app.state.settings.temporarySettingsProfile?.source,
+        });
+      }
       return loaded;
     } catch (error) {
       app.commands.showToast(`Settings could not be loaded: ${error.message}`, "error");
@@ -663,6 +694,9 @@ export function installFeaturesSolveController(app) {
   async function promoteSelectedSavedRun() {
     const selected = app.commands.getSelectedSavedRun();
     if (!selected || selected.tier !== "auto") return;
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("solve.saved-run.promote", {
+      save_id: selected.save_id,
+    })) return;
     try {
       const promoted = await app.api.promoteAutoRun(selected.save_id);
       app.state.ui.selectedSavedRunKey = app.commands.savedRunKey(promoted);
@@ -678,14 +712,39 @@ export function installFeaturesSolveController(app) {
     const delBtn = app.state.ui.$("#savedRunDeleteBtn");
     if (app.state.solve.savedRunDeleteConfirmPending) {
       app.commands.resetSavedRunDeleteConfirm();
+      const operation = tier === "auto" ? "solve.auto-run.delete" : "solve.saved-run.delete";
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation(operation, { save_id: selected.save_id })) return;
       try {
         if (tier === "auto") {
           await app.api.deleteAutoRun(selected.save_id);
         } else {
-          await app.api.deleteSavedRun(selected.save_id);
+          const remove = () => app.api.deleteSavedRun(selected.save_id);
+          if (app.commands.performGuideDurableMutation) {
+            await app.commands.performGuideDurableMutation({
+              direction: "delete",
+              operationId: "saving-loading-run",
+              kind: "saved-run",
+              id: selected.save_id,
+              name: selected.label,
+              fingerprint: {
+                source_image_name: selected.source_image_name || "",
+                palette: [...(selected.palette || [])],
+              },
+            }, remove);
+          } else {
+            await remove();
+          }
         }
         app.state.ui.selectedSavedRunKey = null;
         await app.commands.refreshSavedRunRows();
+        if (tier === "saved") {
+          for (const run of app.state.solve.solveRuns) {
+            if (run.saved_run_id === selected.save_id) run.saved_run_id = null;
+            if (run.source_save_id === selected.save_id) run.source_save_id = null;
+          }
+          app.commands.renderSolveTab();
+          app.events.emit("solve.saved-run.deleted", { saveId: selected.save_id, label: selected.label });
+        }
       } catch (err) { app.commands.showToast(err.message, "error"); }
       return;
     }
@@ -741,6 +800,10 @@ export function installFeaturesSolveController(app) {
       const validationError = app.commands.validateWritableRunLabel(newLabel);
       setValidation(validationError);
       if (validationError || submit.disabled) return;
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("solve.saved-run.rename", {
+        save_id: save.save_id,
+        label: newLabel,
+      })) return;
       submit.disabled = true;
       submit.setAttribute("aria-busy", "true");
       try {
@@ -769,6 +832,11 @@ export function installFeaturesSolveController(app) {
       await app.commands.applyLoadedRun(body);
       app.commands._setSavedRunsModalOpen(false);
       app.commands.showToast("Loaded saved run", "");
+      app.events.emit("solve.saved-run.loaded", {
+        saveId,
+        cardId: body.card_id,
+        label: body.label,
+      });
     } catch (e) { app.commands.showToast(e.message, "error"); }
   }
 
@@ -875,6 +943,7 @@ export function installFeaturesSolveController(app) {
     const loadedLabel = String(body.label || "").trim();
     app.state.solve.solveRuns.push({
       id: body.card_id,
+      source_save_id: body.save_id || null,
       label: loadedLabel || `Loaded ${app.state.solve.solveRunCounter}`,
       image: body.source_image
         ? app.commands._cloneValue(body.source_image)

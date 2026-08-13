@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from pipeline.base import ParamDef, PreprocessingModule
+from pipeline.base import ParamDef, PresetDef, PreprocessingModule
 from pipeline.registry import register_preprocessing
 from preprocessing.types import PreprocessingContext, PreprocessingResult
 
@@ -36,36 +36,54 @@ def _flat_region_mask(luma: np.ndarray) -> np.ndarray:
 class A1BilateralDenoise(PreprocessingModule):
     name = "a1_bilateral_denoise"
     description = "Edge-preserving bilateral denoise on the solve-grid sRGB raster."
+    display_label = "Noise Reduction"
+    display_tooltip = (
+        "Softens small image noise before solving so color regions are less "
+        "fragmented while preserving the overall look of the source image."
+    )
+    preset_control_label = "Noise reduction"
+    default_preset = "medium"
+    presets = (
+        PresetDef("off", "Off", enabled=False),
+        PresetDef("light", "Light", {"radius_px": 3, "sigma_range": 0.01, "sigma_spatial": 0.5}),
+        PresetDef("medium", "Medium", {"radius_px": 3, "sigma_range": 0.04, "sigma_spatial": 0.5}),
+        PresetDef("strong", "Strong", {"radius_px": 8, "sigma_range": 0.04, "sigma_spatial": 2.0}),
+        PresetDef("very_strong", "Very Strong", {"radius_px": 8, "sigma_range": 0.15, "sigma_spatial": 2.0}),
+        PresetDef("custom", "Custom", custom=True),
+    )
     params = {
         "radius_px": ParamDef(
             name="radius_px",
-            label="Radius",
+            label="Filter radius",
             type="int",
             default=3,
             min=1,
             max=8,
             description="Bilateral filter radius in pixels.",
+            tooltip="Pixel radius of the local bilateral filter window.",
             unit="px",
             order=10,
         ),
         "sigma_range": ParamDef(
             name="sigma_range",
-            label="Range Sigma",
+            label="Color similarity",
             type="float",
             default=0.04,
             min=0.005,
             max=0.25,
             description="Range sigma in srgb_f32 units.",
+            tooltip="Higher values allow smoothing across larger color differences.",
             order=20,
         ),
         "sigma_spatial": ParamDef(
             name="sigma_spatial",
-            label="Spatial Sigma",
+            label="Spatial reach",
             type="float",
             default=2.0,
             min=0.5,
             max=10.0,
             description="Spatial sigma in pixels.",
+            tooltip="Higher values allow smoothing influence to extend farther inside the filter radius.",
             unit="px",
             order=30,
         ),

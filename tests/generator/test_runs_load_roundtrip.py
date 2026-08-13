@@ -165,6 +165,7 @@ def _seed_banded_export_valid_solve(card_id: str) -> dict:
         "palette": palette,
         "ams_slots": 3,
         "white_slots": 1,
+        "min_cap_layers": 1,
     })
     solve["thickness_maps"] = {
         MapKey.WHITE_CAP: np.full(shape, 0.16, np.float32),
@@ -175,6 +176,11 @@ def _seed_banded_export_valid_solve(card_id: str) -> dict:
         "c": np.full(shape, 0.08, np.float32),
         "d": np.zeros(shape, np.float32),
     }
+    solve["export_maps"][WHITE_CAP_FIELD_TARGET_UPPER_SURFACE_KEY] = np.full(
+        shape,
+        0.44,
+        np.float32,
+    )
     solve["swap_grouping"] = copy.deepcopy(grouping)
     solve["result"]["staged_metrics"] = {
         "swap_grouping": copy.deepcopy(grouping),
@@ -266,6 +272,8 @@ def _stale_phantom_values() -> dict:
         "v2_enable_cap_topology_cleanup": True,
         "v2_max_cleanup_rounds": 9,
         "v2_full_cap_quality_report": True,
+        "swap_improvement_threshold": 3.5,
+        "force_all_tiers": True,
     }
 
 
@@ -583,6 +591,7 @@ def test_loaded_run_preserves_banded_swap_plan_after_save_clear_load(roundtrip_e
     ).json()["save_id"]
     archived = run_archive.read_run_archive(run_store.read_zip_bytes(save_id))
     assert archived.run_json["result"]["staged_metrics"]["swap_grouping"] == grouping
+    assert archived.run_json["config"]["min_cap_layers"] == 1
 
     env.server.session["solve_cache"].clear()
     loaded = env.client.post(
@@ -593,6 +602,7 @@ def test_loaded_run_preserves_banded_swap_plan_after_save_clear_load(roundtrip_e
     cached = env.server.session["solve_cache"][loaded_card]
     loaded_solve = cached["solve"]
     loaded_cfg = cached["config"]
+    assert loaded_cfg["min_cap_layers"] == 1
 
     assert env.server._swap_grouping_from_solve(loaded_solve) == grouping
     swap = _build_export_swap_payload(env.server, loaded_card)

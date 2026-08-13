@@ -1,4 +1,4 @@
-import { API_BASE, apiFetch, apiPost } from "./client.js";
+import { API_BASE, apiFetch, apiPost } from "./client.js?v=2026-08-04-saving-loading-fixes-v1";
 
 export function fetchImages() { return apiFetch("/images"); }
 export function openImagesFolder() { return apiPost("/images/open-folder"); }

@@ -22,12 +22,14 @@ from pipeline.registry import (
 from preprocessing.types import PreprocessingContext, PreprocessingResult
 
 
-def setup_function():
+@pytest.fixture(autouse=True)
+def _isolated_registry():
+    """Keep synthetic test operators out of the process-wide registry."""
     _clear_registry()
-
-
-def teardown_function():
-    _clear_registry()
+    try:
+        yield
+    finally:
+        _clear_registry()
 
 
 def _make_op(

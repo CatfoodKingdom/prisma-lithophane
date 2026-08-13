@@ -696,7 +696,7 @@ def test_effective_color_region_target_can_follow_printability_limits():
         white_base="white",
         color_region_target_mm=0.60,
         color_region_target_from_printability=True,
-        printability_minimum_extrusion_width_mm=0.40,
+        printability_extrusion_width_mm=0.40,
         printability_minimum_line_length_mm=0.50,
     )
 
@@ -709,7 +709,7 @@ def test_effective_color_region_target_preserves_larger_explicit_target():
         white_base="white",
         color_region_target_mm=1.00,
         color_region_target_from_printability=True,
-        printability_minimum_extrusion_width_mm=0.40,
+        printability_extrusion_width_mm=0.40,
         printability_minimum_line_length_mm=0.50,
     )
 
@@ -1744,7 +1744,7 @@ def test_stage2_fine_override_seam_gate_keeps_whole_zone_component():
 
 def test_stage2_fine_override_printability_gate_rejects_hard_fail_component():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1777,7 +1777,7 @@ def test_stage2_fine_override_printability_gate_rejects_hard_fail_component():
 
 def test_stage2_fine_override_printability_gate_keeps_acceptable_component():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1808,7 +1808,7 @@ def test_stage2_fine_override_printability_gate_keeps_acceptable_component():
 
 def test_stage2_fine_override_printability_repair_grows_valuable_component():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1850,7 +1850,7 @@ def test_stage2_fine_override_printability_repair_grows_valuable_component():
 
 def test_stage2_fine_override_printability_repair_rejects_weak_growth():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1890,7 +1890,7 @@ def test_stage2_fine_override_printability_repair_rejects_weak_growth():
 
 def test_stage2_final_color_printability_gate_keeps_boundary_attached_delta():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1927,7 +1927,7 @@ def test_stage2_final_color_printability_gate_keeps_boundary_attached_delta():
 
 def test_stage2_final_color_printability_gate_rejects_isolated_final_feature():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1962,7 +1962,7 @@ def test_stage2_final_color_printability_gate_rejects_isolated_final_feature():
 
 def test_stage2_final_color_printability_gate_absorbs_mandatory_cap_island():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2002,7 +2002,7 @@ def test_stage2_final_color_printability_gate_absorbs_mandatory_cap_island():
 
 def test_stage2_final_color_printability_gate_absorbs_coarse_hard_fail():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2041,7 +2041,7 @@ def test_stage2_final_color_printability_gate_absorbs_coarse_hard_fail():
 
 def test_stage2_final_color_printability_gate_prefers_optical_neighbor():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.40,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2084,7 +2084,7 @@ def test_stage2_final_color_printability_gate_prefers_optical_neighbor():
 
 def test_stage2_final_color_printability_gate_diagnostic_only_preserves_map():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.20,
+        extrusion_width_mm=0.20,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2121,7 +2121,7 @@ def test_stage2_final_color_printability_gate_diagnostic_only_preserves_map():
 
 def test_stage2_final_color_printability_gate_ignores_nonstructural_opening_loss():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2171,7 +2171,7 @@ def test_stage2_final_color_printability_gate_ignores_nonstructural_opening_loss
 
 def test_stage2_printability_ledger_snapshot_matches_structural_contract():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -2220,7 +2220,7 @@ def test_stage2_printability_ledger_snapshot_matches_structural_contract():
 
 def test_stage2_localized_width_nudge_fixes_large_neck_one_shot():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,

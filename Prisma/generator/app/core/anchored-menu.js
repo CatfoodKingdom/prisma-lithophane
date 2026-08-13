@@ -9,6 +9,7 @@ export function createAnchoredMenuController({
   button,
   menu,
   onActivate,
+  onClose,
   itemSelector = "[role='menuitem']",
   documentTarget = document,
   viewportTarget = window,
@@ -47,6 +48,7 @@ export function createAnchoredMenuController({
     if (!menu || menu.hidden) return;
     menu.hidden = true;
     button?.setAttribute("aria-expanded", "false");
+    onClose?.();
     if (restoreFocus) button?.focus();
   }
 
@@ -101,7 +103,7 @@ export function createAnchoredMenuController({
     listen(menu, "click", event => {
       const item = event.target.closest?.(itemSelector);
       if (!item || item.hidden || item.disabled || item.getAttribute("aria-disabled") === "true") return;
-      close({ restoreFocus: true });
+      if (item.dataset.menuStayOpen !== "true") close({ restoreFocus: true });
       onActivate?.(item);
     });
     listen(menu, "keydown", handleMenuKeydown);
@@ -111,7 +113,7 @@ export function createAnchoredMenuController({
     close();
   });
   listen(viewportTarget, "resize", () => close());
-  listen(viewportTarget, "scroll", () => close(), true);
+  listen(viewportTarget, "scroll", () => close());
   if (viewportTarget.visualViewport) {
     listen(viewportTarget.visualViewport, "resize", () => close());
     listen(viewportTarget.visualViewport, "scroll", () => close());

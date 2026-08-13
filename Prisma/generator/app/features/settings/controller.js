@@ -3,7 +3,191 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesSettingsController(app) {
+  const SETTINGS_NUMERIC_RULES = {
+    // Steppers are deliberately opt-in. A decimal step describes input
+    // precision, not a discrete user-facing quantity.
+    cfgDWcMin: { key: "min_cap_layers", quantized: true, step: 1, integer: true },
+    cfgKMax: { key: "k_max", quantized: true, step: 1, integer: true },
+    cfgStage1Coarsening: { key: "stage1_coarsening_factor", quantized: true, step: 1, integer: true },
+    cfgStage2BoundaryMutationMaxPasses: { key: "stage2_boundary_mutation_max_passes", quantized: true, step: 1, integer: true },
+    cfgBaseShadingLimit: { key: "luminance_base_shading_limit_fraction", quantized: true, step: 5, integer: true, scale: 100 },
+    cfgDetailCapMaxLayers: { key: "detail_cap_max_layers", quantized: true, step: 1, integer: true },
+  };
+
+  function formatSettingsInputNumber(value, { maxDecimals = 4 } = {}) {
+    if (value == null || value === "") return "";
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return String(value);
+    const places = Math.max(0, Math.min(10, Number(maxDecimals) || 0));
+    const rounded = Number(numeric.toFixed(places));
+    return Object.is(rounded, -0) ? "0" : String(rounded);
+  }
+
+  function parseSettingsNumericAttribute(input, name) {
+    const raw = input?.getAttribute?.(name);
+    if (raw == null || String(raw).trim() === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function enhanceNumericInput(input, rule = {}) {
+    if (!input || input.dataset.settingsNumericEnhanced === "1") return;
+    const inputRule = { ...rule };
+    if (!inputRule.quantized) return;
+    const parsedStep = parseSettingsNumericAttribute(input, "step");
+    if (parsedStep != null && parsedStep > 0 && inputRule.step == null) inputRule.step = parsedStep;
+    const parsedMin = parseSettingsNumericAttribute(input, "min");
+    const parsedMax = parseSettingsNumericAttribute(input, "max");
+    if (parsedMin != null && inputRule.min == null) inputRule.min = parsedMin;
+    if (parsedMax != null && inputRule.max == null) inputRule.max = parsedMax;
+    if (inputRule.step == null) return;
+    input.dataset.settingsNumericEnhanced = "1";
+    input.classList.add("settings-number-control");
+    const wrapper = input.closest(".input-with-unit");
+    if (wrapper && !wrapper.querySelector(".settings-number-steppers")) {
+      wrapper.classList.add("settings-has-steppers");
+      const steppers = document.createElement("span");
+      steppers.className = "settings-number-steppers";
+      [
+        ["up", 1, "Increase value"],
+        ["down", -1, "Decrease value"],
+      ].forEach(([direction, multiplier, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `settings-number-step settings-number-step-${direction}`;
+        button.tabIndex = 0;
+        button.setAttribute("aria-label", label);
+        button.textContent = direction === "up" ? "▲" : "▼";
+        button.addEventListener("mousedown", (event) => event.preventDefault());
+        button.addEventListener("click", () => commit(multiplier));
+        steppers.appendChild(button);
+      });
+      wrapper.appendChild(steppers);
+    }
+
+    function commit(multiplier) {
+      const step = Number(inputRule.step) || 1;
+      const current = Number(input.value);
+      const fallback = Number.isFinite(current)
+        ? current
+        : (inputRule.defaultValue ?? inputRule.min ?? 0);
+      let value = fallback + (step * multiplier);
+      if (inputRule.integer) value = Math.round(value);
+      if (inputRule.min != null) value = Math.max(Number(inputRule.min), value);
+      if (inputRule.max != null) value = Math.min(Number(inputRule.max), value);
+      input.value = app.commands.formatSettingsInputNumber(value, {
+        maxDecimals: decimalPlacesForNumber(inputRule.step),
+      });
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      commit(event.key === "ArrowUp" ? 1 : -1);
+    });
+    input.addEventListener("wheel", (event) => {
+      if (document.activeElement !== input && !input.matches(":hover")) return;
+      event.preventDefault();
+      // Wheel deltas follow the browser convention: a negative delta is an
+      // upward gesture, which should match the visible increase arrow.
+      const multiplier = settingsWheelMultiplier(event.deltaY);
+      if (multiplier) commit(multiplier);
+    }, { passive: false });
+  }
+
+  function decimalPlacesForNumber(value) {
+    const text = String(value ?? "");
+    if (!text || text.includes("e")) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return 0;
+      const exponent = Math.floor(Math.log10(Math.abs(numeric) || 1));
+      return Math.max(0, 6 - exponent);
+    }
+    const decimal = text.split(".")[1];
+    return decimal ? decimal.length : 0;
+  }
+
+  function settingsWheelMultiplier(deltaY) {
+    const delta = Number(deltaY);
+    if (!Number.isFinite(delta) || delta === 0) return 0;
+    return delta < 0 ? 1 : -1;
+  }
+
+  function stepSettingsRangeInput(input, multiplier) {
+    const direction = Math.sign(Number(multiplier));
+    const current = Number(input?.value);
+    const step = parseSettingsNumericAttribute(input, "step");
+    if (!direction || !Number.isFinite(current) || step == null || step <= 0) return false;
+
+    const minimum = parseSettingsNumericAttribute(input, "min");
+    const maximum = parseSettingsNumericAttribute(input, "max");
+    let value = current + (step * direction);
+    if (minimum != null) value = Math.max(minimum, value);
+    if (maximum != null) value = Math.min(maximum, value);
+    if (value === current) return false;
+
+    input.value = app.commands.formatSettingsInputNumber(value, {
+      maxDecimals: decimalPlacesForNumber(step),
+    });
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
+  function enhanceSettingsNumericInputs() {
+    document.querySelectorAll(".settings-grid input").forEach((input) => {
+      const rule = SETTINGS_NUMERIC_RULES[input.id];
+      if (rule?.quantized || input.dataset.settingsQuantized === "1") {
+        enhanceNumericInput(input, settingsNumericRuleFor(input.id) || {
+          quantized: true,
+          step: input.step || 1,
+          min: input.min === "" ? undefined : Number(input.min),
+          max: input.max === "" ? undefined : Number(input.max),
+          integer: input.dataset.settingsInteger === "1",
+          defaultValue: input.dataset.settingsDefaultValue,
+        });
+      }
+    });
+  }
+
+  function settingsNumericRuleFor(controlId) {
+    const rule = SETTINGS_NUMERIC_RULES[controlId];
+    if (!rule) return null;
+    const spec = app.commands.settingSpec(rule.key) || {};
+    const scale = rule.scale || 1;
+    return {
+      ...rule,
+      ...(spec.minimum != null ? { min: spec.minimum * scale } : {}),
+      ...(spec.maximum != null ? { max: spec.maximum * scale } : {}),
+      ...(spec.default != null ? { defaultValue: spec.default * scale } : {}),
+    };
+  }
+
+  function syncSettingsPresentationMetadata() {
+    const sections = app.state.ui.SETTINGS_PRESENTATION || [];
+    for (const section of sections) {
+      for (const row of section.rows || []) {
+        if (!row.controlId) continue;
+        const control = app.state.ui.$(`#${row.controlId}`);
+        if (!control) continue;
+        if (!control.dataset) control.dataset = {};
+        control.dataset.settingsKey = row.key;
+        control.dataset.settingsSection = section.key;
+        control.dataset.settingsGroup = row.group || "";
+        const rowElement = control.closest?.("tr");
+        if (rowElement?.dataset) rowElement.dataset.settingKey = row.key;
+        rowElement?.classList?.toggle("advanced-setting", !!row.advanced);
+      }
+    }
+  }
+
   function closeSettingsDrawer() {
+    if (app.commands.guidePresentationLocked?.("settings-drawer-open")) {
+      app.commands.showToast?.("The Settings Drawer stays open during this guide.", "info");
+      return false;
+    }
     const grid = app.state.ui.$(".settings-grid");
     const tabSettings = app.state.ui.$("#tabSettings");
     const drawer = app.state.ui.$("#settingsDrawer");
@@ -158,8 +342,8 @@ export function installFeaturesSettingsController(app) {
   function updateAccordionSummaries() {
     const geom = app.state.ui.$("#accordionSummaryGeometry");
     if (geom) {
-      const lh = parseFloat(app.state.ui.$("#cfgLayerHeight")?.value) || 0.08;
-      const tmax = parseFloat(app.state.ui.$("#cfgTMax")?.value) || 2.5;
+      const lh = parseFloat(app.state.ui.$("#cfgLayerHeight")?.value) || app.commands.settingDefault("layer_height");
+      const tmax = parseFloat(app.state.ui.$("#cfgTMax")?.value) || app.commands.settingDefault("t_max");
       geom.textContent = `${lh} mm layers, ${tmax} mm max`;
     }
 
@@ -232,17 +416,30 @@ export function installFeaturesSettingsController(app) {
   function updateSuggestSlotHint() {
     const totalSlots = app.state.session.printerConfig.ams_slots || 4;
     const bcSlots = app.commands.getBaseCapSlots();
-    const ceiling = Math.max(1, totalSlots - bcSlots);
-    // Sync max constraint but don't overwrite user's chosen value
+    const capacity = Math.max(0, totalSlots - bcSlots);
     const input = app.state.ui.$("#targetFilamentCount");
     if (input) {
-      input.max = ceiling;
-      const current = parseInt(input.value);
-      if (!current || current > ceiling) {
-        input.value = ceiling;
+      input.min = "2";
+      input.max = "16";
+      if (!String(input.value || "").trim()) {
+        input.value = String(Math.max(2, Math.min(16, capacity)));
       }
     }
+  }
 
+  function renderSolvePitchControl() {
+    const solvePitchVal = app.state.session.resolvedPrintSetup?.effective_solve_pitch_mm
+      || app.state.settings.config.solver_fine_pitch_mm
+      || app.state.settings.config.image_sample_pitch_mm
+      || 0.2;
+    const solvePitchEl = app.state.ui.$("#cfgSolvePitch");
+    if (solvePitchEl) solvePitchEl.textContent = app.commands.formatSettingsInputNumber(solvePitchVal);
+    const solvePitchMultiplier = Number(app.state.settings.config.solve_pitch_extrusion_width_multiplier) || 1;
+    const solvePitchMaximum = Number(app.state.session.resolvedPrintSetup?.max_solve_pitch_extrusion_width_multiplier) || 1;
+    const minusPitch = app.state.ui.$("#cfgSolvePitchMinus");
+    const plusPitch = app.state.ui.$("#cfgSolvePitchPlus");
+    if (minusPitch) minusPitch.disabled = solvePitchMultiplier <= 1;
+    if (plusPitch) plusPitch.disabled = solvePitchMultiplier >= solvePitchMaximum;
   }
 
   function renderSettingsTab(options = {}) {
@@ -251,57 +448,58 @@ export function installFeaturesSettingsController(app) {
     // any in-progress hardcoded-field edits before config -> DOM rendering.
     if (preservePendingUi) app.commands.readConfigFromUI();
     app.commands.syncConfigFromModuleState();
-    app.commands.applyLuminanceMode(app.state.settings.config.luminance_mode || "standard");
+    app.commands.applyLuminanceMode(app.state.settings.config.luminance_mode || app.commands.settingDefault("luminance_mode"));
     app.commands.applyMandatoryProductSettings();
     app.commands.populateBaseCapDropdowns();
     const baseEl = app.state.ui.$("#cfgBaseFilament");
     if (baseEl) baseEl.value = app.state.settings.config.base_filament || app.state.session.DEFAULT_BASE_FILAMENT;
     app.state.settings.config.cap_filament = "__same__";
-    app.state.ui.$("#cfgLayerHeight").value = app.state.settings.config.layer_height;
-    app.state.ui.$("#cfgDWb").value = app.state.settings.config.d_wb;
-    app.state.ui.$("#cfgDWcMin").value = app.commands.minCapLayersFromThickness();
-    app.state.ui.$("#cfgTMax").value = app.state.settings.config.t_max;
-    const solvePitchVal = app.state.settings.config.image_sample_pitch_mm || 0.20;
-    const solvePitchEl = app.state.ui.$("#cfgSolvePitch");
-    if (solvePitchEl) solvePitchEl.value = solvePitchVal;
+    app.state.ui.$("#cfgLayerHeight").value = app.commands.formatSettingsInputNumber(app.state.settings.config.layer_height);
+    app.state.ui.$("#cfgDWb").value = app.commands.formatSettingsInputNumber(app.state.settings.config.d_wb);
+    app.state.ui.$("#cfgDWcMin").value = app.state.settings.config.min_cap_layers;
+    app.state.ui.$("#cfgTMax").value = app.commands.formatSettingsInputNumber(app.state.settings.config.t_max);
+    app.commands.renderSolvePitchControl();
     // These elements may be dynamically rendered by modules — guard against null
-    const _set = (sel, val) => { const el = app.state.ui.$(sel); if (el) el.value = val; };
+    const _set = (sel, val) => {
+      const el = app.state.ui.$(sel);
+      if (el) el.value = app.commands.formatSettingsInputNumber(val);
+    };
     const _chk = (sel, val) => { const el = app.state.ui.$(sel); if (el) el.checked = val; };
-    _set("#cfgSourceResampleKernel", app.state.settings.config.source_resample_kernel || "lanczos");
-    _set("#cfgDetailCapMaxLayers", app.state.settings.config.detail_cap_max_layers ?? 5);
-    _set("#cfgCellMode", app.state.settings.config.cell_mode || "felzenszwalb");
-    _set("#cfgAppearanceModelProvider", app.state.settings.config.appearance_model_provider || "photo_stack_bundle");
-    _set("#cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor ?? 1);
-    _set("#cfgColorRegionTarget", app.state.settings.config.color_region_target_mm ?? 0.60);
-    _set("#cfgNeutralFieldProtection", app.state.settings.config.neutral_field_protection_mode || "off");
+    _set("#cfgSourceResampleKernel", app.state.settings.config.source_resample_kernel || app.commands.settingDefault("source_resample_kernel"));
+    _set("#cfgDetailCapMaxLayers", app.state.settings.config.detail_cap_max_layers ?? app.commands.settingDefault("detail_cap_max_layers"));
+    _set("#cfgCellMode", app.state.settings.config.cell_mode || app.commands.settingDefault("cell_mode"));
+    _set("#cfgAppearanceModelProvider", app.state.settings.config.appearance_model_provider || app.commands.settingDefault("appearance_model_provider"));
+    _set("#cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor ?? app.commands.settingDefault("stage1_coarsening_factor"));
+    _set("#cfgColorRegionTarget", app.state.settings.config.color_region_target_mm ?? app.commands.settingDefault("color_region_target_mm"));
+    _chk("#cfgNeutralFieldProtectionEnabled", app.state.settings.config.neutral_field_protection_enabled === true);
+    _set("#cfgNeutralFieldProtectionCutoff", app.state.settings.config.neutral_field_protection_cutoff ?? app.commands.settingDefault("neutral_field_protection_cutoff"));
+    app.commands.syncNeutralFieldProtectionPreset();
     _chk("#cfgStage2FineOverride", app.state.settings.config.stage2_fine_override_enabled !== false);
     _chk("#cfgStage2BoundaryMutation", app.state.settings.config.stage2_boundary_mutation_enabled);
-    app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationPercentile", app.state.settings.config.stage2_boundary_mutation_current_de_percentile);
-    app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationMaxPasses", app.state.settings.config.stage2_boundary_mutation_max_passes ?? 1);
-    app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationMinGain", app.state.settings.config.stage2_boundary_mutation_min_gain);
-    app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationMinComponent", app.state.settings.config.stage2_boundary_mutation_min_component_mm);
+    app.commands.setOptionalNumberInput("cfgStage2BoundaryMutationMaxPasses", app.state.settings.config.stage2_boundary_mutation_max_passes ?? app.commands.settingDefault("stage2_boundary_mutation_max_passes"));
+    _set("#cfgStage2BoundaryMutationMinGain", app.state.settings.config.stage2_boundary_mutation_min_gain ?? app.commands.settingDefault("stage2_boundary_mutation_min_gain"));
     _set("#cfgKMax", app.state.settings.config.k_max);
     _set("#cfgDeThreshold", app.state.settings.config.de_threshold);
-    _set("#cfgSmoothKernel", app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel));
+    _set("#cfgSmoothKernel", app.state.settings.config.boundary_cap_smoothing_radius_mm);
     _chk("#cfgBorder", app.state.settings.config.border);
     _set("#cfgBorderWidth", app.state.settings.config.border_width_mm);
     _set("#cfgBorderHeight", app.state.settings.config.border_height_mm);
-    _chk("#cfgUseCorrections", app.state.settings.config.use_corrections);
     const capModeEl = app.state.ui.$("#cfgCapMode");
-    if (capModeEl) capModeEl.value = app.state.settings.config.cap_mode || "appearance_bounded_smooth";
+    if (capModeEl) capModeEl.value = app.state.settings.config.cap_mode || app.commands.settingDefault("cap_mode");
     const capDeBudgetEl = app.state.ui.$("#cfgBoundaryCapDeBudget");
-    if (capDeBudgetEl) capDeBudgetEl.value = app.state.settings.config.boundary_cap_de_budget ?? 0.004;
+    if (capDeBudgetEl) capDeBudgetEl.value = app.commands.formatSettingsInputNumber(
+      app.state.settings.config.boundary_cap_de_budget ?? app.commands.settingDefault("boundary_cap_de_budget"),
+    );
     app.commands.syncChromaWeightControlFromConfig();
-    _set("#cfgGamutMode", app.commands.normalizeActiveGamutMode(app.state.settings.config.gamut_mode || "hull"));
+    _set("#cfgGamutMode", app.commands.normalizeActiveGamutMode(app.state.settings.config.gamut_mode || app.commands.settingDefault("gamut_mode")));
     _chk("#cfgGamutWhiteRescale", app.state.settings.config.gamut_white_rescale);
-    app.commands.setSolveModeControlValue(app.state.settings.config.luminance_mode || "standard");
+    app.commands.setSolveModeControlValue(app.state.settings.config.luminance_mode || app.commands.settingDefault("luminance_mode"));
     app.commands.syncBaseShadingLimitControls();
     app.commands.updateLuminanceModeFields();
     app.commands.updateCapModeFields();
     app.commands.updateStage4DetailFields();
     app.commands.updateBoundaryMutationFields();
-    app.commands.syncDeckGenerationSettingsUI("settings");
-
+    app.commands.updateNeutralFieldProtectionFields();
     // Printer summary removed — info is in the left rail printer card
 
     app.commands.renderPresetBar();
@@ -311,6 +509,9 @@ export function installFeaturesSettingsController(app) {
     app.commands.updateSuggestSlotHint();
     app.commands.updateAdvancedSettingsVisibility();
     app.commands.bindSettingsAutoSyncControls();
+    app.commands.applyContractConstraints();
+    app.commands.annotateSettingsRows();
+    app.commands.renderSettingsEvaluation();
   }
 
   function updateSolveModeFields() {
@@ -318,6 +519,8 @@ export function installFeaturesSettingsController(app) {
   }
 
   function bindSettingsAutoSyncControls() {
+    syncSettingsPresentationMetadata();
+    enhanceSettingsNumericInputs();
     app.state.ui.$$(".settings-grid input, .settings-grid select").forEach((input) => {
       if (input.dataset.settingsAutosyncBound === "1") return;
       input.dataset.settingsAutosyncBound = "1";
@@ -331,6 +534,27 @@ export function installFeaturesSettingsController(app) {
           app.commands.applyChromaWeightSliderInput(input.value);
           app.commands.checkPresetModified();
         });
+        input.addEventListener("wheel", (event) => {
+          if (document.activeElement !== input && !input.matches(":hover")) return;
+          const multiplier = app.commands.settingsWheelMultiplier(event.deltaY);
+          if (!multiplier) return;
+          event.preventDefault();
+          app.commands.stepSettingsRangeInput(input, multiplier);
+        }, { passive: false });
+      }
+      if (input.id === "cfgNeutralFieldProtectionPreset") {
+        input.addEventListener("change", () => {
+          const preset = app.commands.neutralFieldProtectionPresets().find(
+            (candidate) => candidate.id === input.value,
+          );
+          const cutoff = app.state.ui.$("#cfgNeutralFieldProtectionCutoff");
+          if (preset && cutoff) cutoff.value = app.commands.formatSettingsInputNumber(preset.value, { maxDecimals: 3 });
+        });
+      }
+      if (input.id === "cfgNeutralFieldProtectionCutoff") {
+        input.addEventListener("input", () => {
+          app.commands.syncNeutralFieldProtectionPreset(input.value);
+        });
       }
       input.addEventListener("change", () => {
         app.commands.updateSolveModeFields();
@@ -339,11 +563,11 @@ export function installFeaturesSettingsController(app) {
         app.commands.updateBoundaryMutationFields();
         app.commands.updateStage4DetailFields();
         app.commands.readConfigFromUI();
+        app.commands.updateNeutralFieldProtectionFields();
         app.commands.updateBorderVisibility();
         app.commands.updateDerivedParams();
         app.commands.updateAccordionSummaries();
         app.commands.checkPresetModified();
-        app.commands.syncDeckGenerationSettingsUI("settings");
         app.commands.syncConfigToServer();
       });
     });
@@ -362,7 +586,7 @@ export function installFeaturesSettingsController(app) {
         app.state.settings.capModeForcedByLuminance = true;
       }
     } else {
-      const restored = app.state.settings.lastColorCapMode || app.state.settings.config.cap_mode || "appearance_bounded_smooth";
+      const restored = app.state.settings.lastColorCapMode || app.state.settings.config.cap_mode || app.commands.settingDefault("cap_mode");
       if (capMode && app.state.settings.capModeForcedByLuminance) {
         capMode.value = restored;
         app.state.settings.capModeForcedByLuminance = false;
@@ -388,7 +612,7 @@ export function installFeaturesSettingsController(app) {
       capModeEl.value = "smooth_variable";
       app.state.settings.capModeForcedByLuminance = true;
     }
-    const mode = capModeEl?.value || "appearance_bounded_smooth";
+    const mode = capModeEl?.value || app.commands.settingDefault("cap_mode");
     const isAppearanceBounded = mode === "appearance_bounded_smooth";
     document.querySelectorAll(".cap-mode-field").forEach(row => {
       row.classList.toggle("is-hidden", luminanceMode);
@@ -422,6 +646,49 @@ export function installFeaturesSettingsController(app) {
     });
   }
 
+  function neutralFieldProtectionPresets() {
+    return app.commands.settingSpec("neutral_field_protection_cutoff")?.presets || [];
+  }
+
+  function neutralFieldProtectionPresetForCutoff(cutoff) {
+    const numeric = Number(cutoff);
+    const match = app.commands.neutralFieldProtectionPresets().find(
+      (preset) => Math.abs(Number(preset.value) - numeric) <= 1e-6,
+    );
+    return match?.id || "custom";
+  }
+
+  function syncNeutralFieldProtectionPreset(cutoff = undefined) {
+    const presetControl = app.state.ui.$("#cfgNeutralFieldProtectionPreset");
+    if (!presetControl) return;
+    const preset = app.commands.neutralFieldProtectionPresetForCutoff(
+      cutoff
+        ?? app.state.settings.config.neutral_field_protection_cutoff
+        ?? app.commands.settingDefault("neutral_field_protection_cutoff"),
+    );
+    let customOption = presetControl.querySelector?.('option[value="custom"]');
+    if (preset === "custom" && !customOption) {
+      customOption = document.createElement("option");
+      customOption.value = "custom";
+      customOption.textContent = "Custom";
+      customOption.disabled = true;
+      presetControl.appendChild(customOption);
+    } else if (preset !== "custom" && customOption) {
+      customOption.remove();
+    }
+    presetControl.value = preset;
+  }
+
+  function updateNeutralFieldProtectionFields() {
+    const enabled = app.state.ui.$("#cfgNeutralFieldProtectionEnabled")?.checked === true;
+    document.querySelectorAll(".neutral-field-preset-row, .neutral-field-cutoff-row").forEach((row) => {
+      row.classList.toggle("is-hidden", !enabled);
+      row.classList.toggle("is-disabled", !enabled);
+      row.querySelectorAll("input, select").forEach((input) => { input.disabled = !enabled; });
+    });
+    app.commands.syncNeutralFieldProtectionPreset();
+  }
+
   function updateStage4DetailFields() {
     document.querySelectorAll(".detail-surface-field").forEach(row => {
       row.classList.toggle("is-hidden", false);
@@ -450,6 +717,11 @@ export function installFeaturesSettingsController(app) {
     loadSettingsAdvancedVisible,
     saveSettingsAdvancedVisible,
     updateAdvancedSettingsVisibility,
+    formatSettingsInputNumber,
+    parseSettingsNumericAttribute,
+    settingsWheelMultiplier,
+    stepSettingsRangeInput,
+    settingsNumericRuleFor,
     openFilamentDetail,
     bindAccordions,
     updateAccordionSummaries,
@@ -457,12 +729,19 @@ export function installFeaturesSettingsController(app) {
     filamentSelectLabel,
     populateBaseCapDropdowns,
     updateSuggestSlotHint,
+    renderSolvePitchControl,
     renderSettingsTab,
     updateSolveModeFields,
     bindSettingsAutoSyncControls,
+    syncSettingsPresentationMetadata,
+    enhanceSettingsNumericInputs,
     updateLuminanceModeFields,
     updateCapModeFields,
     updateBoundaryMutationFields,
+    neutralFieldProtectionPresets,
+    neutralFieldProtectionPresetForCutoff,
+    syncNeutralFieldProtectionPreset,
+    updateNeutralFieldProtectionFields,
     updateStage4DetailFields,
     readPrinterConfig,
     _currentSettingsSnapshot,

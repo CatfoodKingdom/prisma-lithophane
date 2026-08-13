@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 
-from pipeline.base import ParamDef, PreprocessingModule
+from pipeline.base import ParamDef, PresetDef, PreprocessingModule
 from pipeline.registry import register_preprocessing
 from preprocessing.color_convert import (
     oklab_f32_to_srgb_f32,
@@ -81,6 +81,21 @@ def _tv_denoise(
 class B3TvFlatten(PreprocessingModule):
     name = "b3_tv_flatten"
     description = "TV flattening at print-feature scale (Wing B)"
+    display_label = "Flat-Area Smoothing"
+    display_tooltip = (
+        "Flattens gradual texture into broader smooth areas before solving, "
+        "creating a more painted or graphic look at stronger settings."
+    )
+    preset_control_label = "Flat-area smoothing"
+    default_preset = "balanced"
+    presets = (
+        PresetDef("off", "Off", enabled=False),
+        PresetDef("subtle", "Subtle", {"tv_weight": 0.01, "weight_autoscale": True, "channel_axis": "oklab_L_only", "n_iter_max": 20}),
+        PresetDef("balanced", "Balanced", {"tv_weight": 0.04, "weight_autoscale": True, "channel_axis": "oklab_L_only", "n_iter_max": 20}),
+        PresetDef("bold", "Bold", {"tv_weight": 0.16, "weight_autoscale": True, "channel_axis": "oklab_L_only", "n_iter_max": 20}),
+        PresetDef("graphic", "Graphic", {"tv_weight": 0.16, "weight_autoscale": True, "channel_axis": "oklab_L_ab", "n_iter_max": 20}),
+        PresetDef("custom", "Custom", custom=True),
+    )
     default_enabled = False
     input_domain = "srgb_f32"
     output_domain = "srgb_f32"
@@ -89,7 +104,7 @@ class B3TvFlatten(PreprocessingModule):
     params = {
         "tv_weight": ParamDef(
             name="tv_weight",
-            label="TV Weight",
+            label="Flattening strength",
             type="float",
             default=0.04,
             min=0.005,
@@ -99,11 +114,12 @@ class B3TvFlatten(PreprocessingModule):
                 "piecewise-constant. Effective weight is autoscaled by "
                 "(feature_scale_mm / 0.40) when weight_autoscale=True."
             ),
+            tooltip="Higher values push the image toward broader smooth regions.",
             order=10,
         ),
         "weight_autoscale": ParamDef(
             name="weight_autoscale",
-            label="Autoscale Weight",
+            label="Scale strength to print width",
             type="bool",
             default=True,
             description=(
@@ -111,24 +127,31 @@ class B3TvFlatten(PreprocessingModule):
                 "(feature_scale_mm / 0.40). Keeps TV strength proportional "
                 "to the shared print-feature scale (§B.5)."
             ),
+            tooltip="Keeps flattening strength tied to the configured printable feature width.",
             order=20,
         ),
         "channel_axis": ParamDef(
             name="channel_axis",
-            label="Channel Axis",
+            label="Flattening mode",
             type="choice",
             default="oklab_L_ab",
             choices=["srgb_rgb", "oklab_L_ab", "oklab_L_only"],
+            choice_labels={
+                "srgb_rgb": "RGB channels",
+                "oklab_L_ab": "Lightness and chroma",
+                "oklab_L_only": "Lightness only",
+            },
             description=(
                 "Color space for TV: srgb_rgb = per-channel RGB; "
                 "oklab_L_ab = perceptually uniform (default); "
                 "oklab_L_only = flatten luminance, preserve chroma."
             ),
+            tooltip="Controls whether flattening operates in RGB, perceptual lightness/chroma, or lightness only.",
             order=30,
         ),
         "n_iter_max": ParamDef(
             name="n_iter_max",
-            label="Max Iterations",
+            label="Iteration limit",
             type="int",
             default=100,
             min=MIN_ITERATIONS,
@@ -137,6 +160,7 @@ class B3TvFlatten(PreprocessingModule):
                 "Chambolle iteration cap. Low values may stop well before "
                 "convergence; 100 is the recommended default."
             ),
+            tooltip="Advanced convergence cap for the flattening operation.",
             order=40,
         ),
     }

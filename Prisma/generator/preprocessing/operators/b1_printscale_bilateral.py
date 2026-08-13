@@ -3,7 +3,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from pipeline.base import ParamDef, PreprocessingModule
+from pipeline.base import ParamDef, PresetDef, PreprocessingModule
 from pipeline.registry import register_preprocessing
 from preprocessing.feature_scale import resolve_feature_scale_mm
 from preprocessing.types import PreprocessingContext, PreprocessingResult
@@ -35,7 +35,7 @@ def _flat_region_mask(luma: np.ndarray) -> np.ndarray:
     return local_std <= _FLAT_REGION_STD_THRESHOLD
 
 
-def _resolve_bilateral_params(
+def resolve_bilateral_params(
     *,
     feature_scale_multiplier: float,
     feature_scale_mm: float,
@@ -63,7 +63,7 @@ def _apply_bilateral_variant(
     sigma_range: float,
     passes: int,
 ) -> tuple[np.ndarray, float, float, int]:
-    sigma_spatial_mm, sigma_spatial_px, kernel_d_px = _resolve_bilateral_params(
+    sigma_spatial_mm, sigma_spatial_px, kernel_d_px = resolve_bilateral_params(
         feature_scale_multiplier=feature_scale_multiplier,
         feature_scale_mm=feature_scale_mm,
         solver_fine_pitch_mm=solver_fine_pitch_mm,
@@ -84,6 +84,21 @@ def _apply_bilateral_variant(
 class B1PrintscaleBilateral(PreprocessingModule):
     name = "b1_printscale_bilateral"
     description = "Print-scale bilateral flattening (Wing B)"
+    display_label = "Print-Scale Smoothing"
+    display_tooltip = (
+        "Smooths image features at the scale the printer can reproduce, "
+        "producing simpler and larger color regions."
+    )
+    preset_control_label = "Print-scale smoothing"
+    default_preset = "medium"
+    presets = (
+        PresetDef("off", "Off", enabled=False),
+        PresetDef("light", "Light", {"feature_scale_multiplier": 0.5, "sigma_range": 0.01, "passes": 1}),
+        PresetDef("medium", "Medium", {"feature_scale_multiplier": 1.0, "sigma_range": 0.05, "passes": 1}),
+        PresetDef("strong", "Strong", {"feature_scale_multiplier": 1.0, "sigma_range": 0.05, "passes": 2}),
+        PresetDef("very_strong", "Very Strong", {"feature_scale_multiplier": 2.0, "sigma_range": 0.05, "passes": 2}),
+        PresetDef("custom", "Custom", custom=True),
+    )
     default_enabled = False
     input_domain = "srgb_f32"
     output_domain = "srgb_f32"
@@ -92,22 +107,23 @@ class B1PrintscaleBilateral(PreprocessingModule):
     params = {
         "feature_scale_multiplier": ParamDef(
             name="feature_scale_multiplier",
-            label="Feature Scale Multiplier",
+            label="Feature scale",
             type="float",
             default=1.0,
             min=0.5,
             max=2.0,
             description=(
                 "sigma_spatial_mm = feature_scale_multiplier x the shared "
-                "nozzle-derived feature scale (2 x nozzle_diameter). "
+                "Extrusion-Width-derived feature scale (2 x Extrusion Width). "
                 "1.0 = blur exactly at print-feature scale; <1 preserves more detail; "
                 ">1 flattens more."
             ),
+            tooltip="Multiplier against the configured printable feature width.",
             order=10,
         ),
         "sigma_range": ParamDef(
             name="sigma_range",
-            label="Range Sigma",
+            label="Color similarity",
             type="float",
             default=0.05,
             min=0.005,
@@ -117,6 +133,7 @@ class B1PrintscaleBilateral(PreprocessingModule):
                 "Calibrated higher than Wing A's A1 because B1 is a flattener at print "
                 "scale, not a denoiser."
             ),
+            tooltip="Higher values smooth across larger color differences.",
             order=20,
         ),
         "passes": ParamDef(
@@ -130,6 +147,7 @@ class B1PrintscaleBilateral(PreprocessingModule):
                 "Number of bilateral-filter passes. 2-3 strengthens flattening at cost "
                 "of edge softness."
             ),
+            tooltip="Repeating the filter increases flattening and region simplification.",
             order=30,
         ),
     }

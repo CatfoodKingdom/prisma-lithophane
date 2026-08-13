@@ -415,6 +415,10 @@
 .export-file-row .copy-path-btn,
 .export-file-row .export-file-download,
 .export-outdir-row .copy-path-btn { flex: 0 0 auto; }
+.export-outdir-row .open-export-folder-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .export-outdir-row {
   display: flex;
   align-items: center;

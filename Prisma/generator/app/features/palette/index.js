@@ -167,6 +167,9 @@ function openSettingsDrawer() {
     // Show drawer — persistent overlay, NO scrim: settings must not dim or close the page.
     drawer.setAttribute("aria-hidden", "false");
     app.state.settings.settingsDrawerOpen = true;
+    if (!app.state.settings.settingsContractAvailable) {
+      app.commands.setSettingsContractDisconnected(true);
+    }
     app.commands.scheduleSettingsDrawerDistribution();
     app.events.emit("settings.opened", { source: "settings-drawer" });
   }

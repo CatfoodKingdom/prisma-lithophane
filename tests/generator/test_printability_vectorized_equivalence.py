@@ -37,7 +37,7 @@ FOUR = ndi.generate_binary_structure(2, 1)
 
 SETTINGS = SimpleNamespace(
     pitch_mm=0.2,
-    minimum_extrusion_width_mm=0.4,
+    extrusion_width_mm=0.4,
     minimum_line_length_mm=0.8,
     layer_height_mm=0.08,
 )

@@ -342,7 +342,7 @@ def _repair_stage2_printability_component(
     max_growth_steps = max(
         1,
         int(np.ceil(float(settings.minimum_line_length_mm) / max(float(settings.pitch_mm), 1e-9))),
-        int(np.ceil(float(settings.minimum_extrusion_width_mm) / max(float(settings.pitch_mm), 1e-9))),
+        int(np.ceil(float(settings.extrusion_width_mm) / max(float(settings.pitch_mm), 1e-9))),
     )
     ys = component_indices // int(shape[1])
     xs = component_indices - ys * int(shape[1])
@@ -960,7 +960,7 @@ def _apply_stage2_localized_width_loss_boundary_nudge(
         1,
         int(
             np.ceil(
-                float(settings.minimum_extrusion_width_mm)
+                float(settings.extrusion_width_mm)
                 / max(float(settings.pitch_mm), 1e-9)
             )
         ),
@@ -1137,7 +1137,7 @@ def _apply_stage2_localized_width_loss_boundary_nudge(
                 1,
                 int(
                     np.ceil(
-                        float(settings.minimum_extrusion_width_mm)
+                        float(settings.extrusion_width_mm)
                         / max(float(settings.pitch_mm), 1e-9)
                     )
                 ),
@@ -1183,7 +1183,7 @@ def _apply_stage2_localized_width_loss_boundary_nudge(
             1,
             int(
                 np.ceil(
-                    float(settings.minimum_extrusion_width_mm)
+                    float(settings.extrusion_width_mm)
                     / max(float(settings.pitch_mm), 1e-9)
                 )
             ),

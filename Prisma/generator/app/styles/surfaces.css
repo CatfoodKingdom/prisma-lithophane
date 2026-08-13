@@ -57,6 +57,7 @@
   max-width: 100%;
   background: var(--drawer-bg);
   border-left: 2px solid var(--line);
+  border-top-left-radius: 8px;
   box-shadow: var(--shadow);
   z-index: 100;
   transform: translateX(100%);
@@ -99,30 +100,30 @@
 }
 .settings-drawer-body {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   padding: 8px 12px 16px;
 }
 
 /* ── Settings Grid: drawer overrides ─────────────────────────────────────── */
 
 .settings-grid.in-drawer {
+  min-width: 0;
   flex-direction: row;
   align-items: flex-start;
   gap: 24px;
   height: auto;
   overflow-y: visible;
+  overflow-x: visible;
 }
 .settings-grid.in-drawer .settings-column {
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex: 0 0 auto;
-}
-
-/* Hide SVG stack diagram in drawer — too wide */
-.settings-grid.in-drawer .stack-diagram {
-  display: none;
 }
 
 .settings-grid.in-drawer [data-bucket] {
@@ -225,6 +226,9 @@
 .app-dialog {
   max-width: 390px;
 }
+.app-dialog.is-detailed {
+  max-width: 560px;
+}
 .app-dialog-body {
   display: grid;
   gap: 10px;
@@ -232,6 +236,11 @@
   padding-bottom: 14px;
 }
 .app-dialog-msg { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-line; }
+.app-dialog-emphasis {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .app-dialog-input { width: 100%; margin-bottom: 0; box-sizing: border-box; }
 .app-dialog-hint {
   margin: -6px 0 12px;
@@ -239,6 +248,50 @@
   color: var(--muted);
   max-height: 140px;
   overflow-y: auto;
+}
+.app-dialog.is-detailed .app-dialog-hint {
+  margin: 0;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  color: var(--ink);
+  font-size: 12px;
+}
+.print-setup-review-section + .print-setup-review-section {
+  margin-top: 12px;
+}
+.print-setup-review-section h4 {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.print-setup-review-section ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.print-setup-review-section li {
+  line-height: 1.4;
+}
+.print-setup-review-section:not(.is-attention) li {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(0, 1.2fr);
+  align-items: baseline;
+  gap: 14px;
+}
+.print-setup-review-section:not(.is-attention) li strong {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.print-setup-review-section.is-attention {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn-ink) 35%, var(--line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--warn-bg) 75%, transparent);
 }
 .app-dialog-hint-label {
   text-transform: uppercase;
@@ -313,15 +366,25 @@
 .library-filter-grid {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
   padding: 6px 14px 12px;
   flex: 1;
+}
+.library-filter-grid .library-group-header {
+  padding: 14px 4px 5px;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.library-filter-grid .library-group-header:first-child {
+  padding-top: 0;
 }
 .library-filter-grid .library-group-cards {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 6px;
+  margin-left: 4px;
 }
 .library-filter-grid .filament-card {
   flex: 0 0 auto;
@@ -363,7 +426,7 @@
   min-width: 0;
 }
 .library-filter-grid .filament-detail {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.1;
 }

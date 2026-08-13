@@ -25,23 +25,38 @@ from .zone_geometry import (
     _summarize_zone_targets,
 )
 
-def _effective_color_region_target_mm(cfg) -> float:
-    """Return the Stage 1 region target, optionally scaled by printability limits."""
-    base = float(cfg.color_region_target_mm or 0.60)
-    if not bool(cfg.color_region_target_from_printability):
+def resolve_effective_color_region_target_mm(
+    requested_mm: float,
+    *,
+    from_printability: bool,
+    minimum_line_length_mm: float,
+    extrusion_width_mm: float,
+    width_multiplier: float,
+) -> float:
+    """Resolve the shared Stage 1 physical region target."""
+    base = float(requested_mm or 0.60)
+    if not from_printability:
         return base
-
-    settings = resolve_blueprint_printability_settings(cfg)
-    multiplier = float(
-        cfg.color_region_target_width_multiplier or 2.0
-    )
+    multiplier = float(width_multiplier or 2.0)
     if multiplier <= 0.0:
         multiplier = 2.0
     physical_floor = max(
-        float(settings.minimum_line_length_mm),
-        float(settings.minimum_extrusion_width_mm) * multiplier,
+        float(minimum_line_length_mm),
+        float(extrusion_width_mm) * multiplier,
     )
     return max(base, physical_floor)
+
+
+def _effective_color_region_target_mm(cfg) -> float:
+    """Return the Stage 1 region target, optionally scaled by printability limits."""
+    settings = resolve_blueprint_printability_settings(cfg)
+    return resolve_effective_color_region_target_mm(
+        float(cfg.color_region_target_mm or 0.60),
+        from_printability=bool(cfg.color_region_target_from_printability),
+        minimum_line_length_mm=settings.minimum_line_length_mm,
+        extrusion_width_mm=settings.extrusion_width_mm,
+        width_multiplier=float(cfg.color_region_target_width_multiplier or 2.0),
+    )
 
 def build_zone_plan(state, diagnostics: PlanningDiagnosticsStream) -> LateralZonePlan:
     """Produce the Stage 1 authoritative zone artifact."""
@@ -130,5 +145,6 @@ def build_zone_plan(state, diagnostics: PlanningDiagnosticsStream) -> LateralZon
 
 __all__ = (
     '_effective_color_region_target_mm',
+    'resolve_effective_color_region_target_mm',
     'build_zone_plan',
 )

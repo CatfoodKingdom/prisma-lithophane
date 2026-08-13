@@ -10,19 +10,51 @@ import pytest
 from PIL import Image
 
 
+def _active_print_setup(
+    *, nozzle_um: int = 200, width_um: int = 200, line_multiplier: int = 2
+) -> dict:
+    nozzle = {
+        "id": f"nozzle-{nozzle_um}",
+        "diameter_um": nozzle_um,
+        "min_layer_height_um": 50 if nozzle_um == 200 else 80,
+        "max_layer_height_um": 150 if nozzle_um == 200 else 320,
+        "max_extrusion_width_um": max(nozzle_um, width_um),
+        "minimum_line_length_multiplier": line_multiplier,
+    }
+    width = {"width_um": width_um}
+    width_mm = width_um / 1000
+    return {
+        "printer": {"id": "test-printer", "nozzle_profiles": [nozzle]},
+        "nozzle": nozzle,
+        "extrusion_width": width,
+        "printability": {
+            "extrusion_width_um": width_um,
+            "extrusion_width_mm": width_mm,
+            "minimum_line_length_multiplier": line_multiplier,
+            "minimum_line_length_mm": width_mm * line_multiplier,
+            "minimum_component_area_mm2": width_mm * width_mm * line_multiplier,
+        },
+    }
+
+
 def test_reviewed_solve_quality_defaults_are_consistent():
     import server
     from facade import SolveConfig
     from pipeline.state import PipelineConfig
 
-    configs = [
+    public_configs = [
         server._DEFAULT_CONFIG,
         server.ConfigPayload().model_dump(),
+    ]
+    runtime_configs = [
         vars(SolveConfig(palette=[], white_base="bambu-tough-white")),
         vars(PipelineConfig(palette=[], white_base="bambu-tough-white")),
     ]
     assert server._DEFAULT_CONFIG["solver_fine_pitch_mm"] == 0.2
-    for config in configs:
+    for config in public_configs:
+        assert config["min_cap_layers"] == 2
+        assert config["boundary_cap_smoothing_radius_mm"] == 1.0
+    for config in runtime_configs:
         assert config["d_wc_min"] == 0.16
         assert config["smooth_kernel"] == 5.0
         if config.get("solver_fine_pitch_mm") is not None:
@@ -33,93 +65,99 @@ def test_reviewed_solve_quality_defaults_are_consistent():
         assert config["boundary_cap_de_budget"] == 0.004
         assert config["gamut_white_rescale"] is False
         assert config["stage2_boundary_mutation_enabled"] is True
-        assert config["neutral_field_protection_mode"] == "off"
+        assert config["neutral_field_protection_enabled"] is False
+        assert config["neutral_field_protection_cutoff"] == 0.020
 
 
-def test_neutral_field_protection_modes_are_canonical_and_profile_owned():
+def test_neutral_field_protection_state_and_presets_are_canonical_and_profile_owned():
     import server
-    from config.solve_settings import NEUTRAL_FIELD_PROTECTION_CUTOFFS
+    from config.solve_settings import (
+        NEUTRAL_FIELD_PROTECTION_PRESETS,
+        neutral_field_preset_for_cutoff,
+        resolve_neutral_field_cutoff,
+    )
     from facade import SolveConfig
     from pipeline.state import PipelineConfig
-    from pydantic import ValidationError
-
-    assert NEUTRAL_FIELD_PROTECTION_CUTOFFS == {
-        "off": None,
+    assert NEUTRAL_FIELD_PROTECTION_PRESETS == {
         "narrow": 0.010,
         "standard": 0.020,
         "broad": 0.035,
     }
-    payload = server.ConfigPayload(neutral_field_protection_mode=" STANDARD ")
-    assert payload.neutral_field_protection_mode == "standard"
+    assert neutral_field_preset_for_cutoff(0.010) == "narrow"
+    assert neutral_field_preset_for_cutoff(0.020) == "standard"
+    assert neutral_field_preset_for_cutoff(0.035) == "broad"
+    assert neutral_field_preset_for_cutoff(0.023) == "custom"
+    assert resolve_neutral_field_cutoff(False, 0.023) is None
+    assert resolve_neutral_field_cutoff(True, 0.023) == 0.023
+    payload = server.ConfigPayload(
+        neutral_field_protection_enabled=True,
+        neutral_field_protection_cutoff=0.023,
+    )
+    assert payload.neutral_field_protection_enabled is True
     assert SolveConfig(
         palette=[],
         white_base="bambu-tough-white",
-        neutral_field_protection_mode=" BROAD ",
-    ).neutral_field_protection_mode == "broad"
+        neutral_field_protection_enabled=True,
+        neutral_field_protection_cutoff=0.035,
+    ).neutral_field_protection_cutoff == 0.035
     assert PipelineConfig(
         palette=[],
         white_base="bambu-tough-white",
-        neutral_field_protection_mode="narrow",
-    ).neutral_field_protection_mode == "narrow"
-    assert "neutral_field_protection_mode" in server._SETTINGS_PROFILE_KEYS
-    assert "neutral_field_protection_mode" in server._SOLVE_OWNED_KEYS
-
-    with pytest.raises(ValidationError, match="neutral_field_protection_mode"):
-        server.ConfigPayload(neutral_field_protection_mode="maximum")
-    with pytest.raises(ValueError, match="neutral_field_protection_mode"):
-        SolveConfig(
-            palette=[],
-            white_base="bambu-tough-white",
-            neutral_field_protection_mode="maximum",
-        )
+        neutral_field_protection_enabled=True,
+        neutral_field_protection_cutoff=0.010,
+    ).neutral_field_protection_enabled is True
+    assert "neutral_field_protection_enabled" in server._SETTINGS_PROFILE_KEYS
+    assert "neutral_field_protection_enabled" in server._SOLVE_OWNED_KEYS
 
 
-def test_legacy_settings_profile_defaults_neutral_field_protection_off():
+def test_settings_profile_defaults_and_payload_use_current_neutral_field_state():
     import server
     from pydantic import ValidationError
 
     normalized = server._normalize_settings_profile_settings({})
-    assert normalized["neutral_field_protection_mode"] == "off"
-
-    normalized = server._normalize_settings_profile_settings(
-        {"neutral_field_protection_mode": " BROAD "}
-    )
-    assert normalized["neutral_field_protection_mode"] == "broad"
-
-    with pytest.raises(ValueError, match="neutral_field_protection_mode"):
-        server._normalize_settings_profile_settings(
-            {"neutral_field_protection_mode": "maximum"}
-        )
+    assert normalized["neutral_field_protection_enabled"] is False
+    assert normalized["neutral_field_protection_cutoff"] == 0.020
 
     payload = server.SettingsProfilePayload(
         name="Neutral",
-        settings={"neutral_field_protection_mode": " STANDARD "},
+        settings={
+            "neutral_field_protection_enabled": True,
+            "neutral_field_protection_cutoff": 0.023,
+        },
     )
-    assert payload.settings["neutral_field_protection_mode"] == "standard"
+    assert payload.settings["neutral_field_protection_enabled"] is True
     with pytest.raises(ValidationError, match="neutral_field_protection_mode"):
         server.SettingsProfilePayload(
             name="Invalid",
-            settings={"neutral_field_protection_mode": "maximum"},
+            settings={"neutral_field_protection_mode": "off"},
         )
 
 
-def test_saved_run_config_validates_neutral_field_protection_compatibility():
+def test_neutral_field_custom_cutoff_is_bounded_at_mandatory_settings_boundary():
     import server
 
-    legacy = server._validate_loaded_archive_config({"layer_height": 0.08})
-    assert "neutral_field_protection_mode" not in legacy
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": 1.4}
+    )["neutral_field_protection_cutoff"] == 1.0
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": "not-a-number"}
+    )["neutral_field_protection_cutoff"] == 0.020
+    assert server._force_mandatory_product_settings(
+        {"neutral_field_protection_cutoff": 0.0}
+    )["neutral_field_protection_cutoff"] == 0.0
+
+
+def test_saved_run_config_accepts_only_current_neutral_field_state():
+    import server
 
     canonical = server._validate_loaded_archive_config(
-        {"neutral_field_protection_mode": " BROAD "}
+        {
+            "neutral_field_protection_enabled": True,
+            "neutral_field_protection_cutoff": 0.023,
+        }
     )
-    assert canonical["neutral_field_protection_mode"] == "broad"
-
-    with pytest.raises(server.HTTPException) as exc_info:
-        server._validate_loaded_archive_config(
-            {"neutral_field_protection_mode": "maximum"}
-        )
-    assert exc_info.value.status_code == 422
-    assert "neutral_field_protection_mode" in str(exc_info.value.detail)
+    assert canonical["neutral_field_protection_enabled"] is True
+    assert canonical["neutral_field_protection_cutoff"] == 0.023
 
 
 def test_build_solve_config_propagates_neutral_field_protection(monkeypatch):
@@ -128,23 +166,21 @@ def test_build_solve_config_propagates_neutral_field_protection(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
     cfg = deepcopy(server._DEFAULT_CONFIG)
     cfg.update(
         {
             "palette": ["bambu-basic-cyan"],
             "appearance_model_provider": "historical_spline",
-            "neutral_field_protection_mode": "standard",
+            "neutral_field_protection_enabled": True,
+            "neutral_field_protection_cutoff": 0.020,
         }
     )
 
     solve_config = server._build_solve_config(cfg)
 
-    assert solve_config.neutral_field_protection_mode == "standard"
+    assert solve_config.neutral_field_protection_enabled is True
     monkeypatch.setattr(server, "_module_descriptors_by_name", lambda: {})
     monkeypatch.setattr(
         server,
@@ -153,8 +189,8 @@ def test_build_solve_config_propagates_neutral_field_protection(monkeypatch):
     )
     diagnostics = server._build_solve_start_diagnostics(cfg, module_state={})
     assert (
-        diagnostics["resolved_settings"]["neutral_field_protection_mode"]
-        == "standard"
+        diagnostics["resolved_settings"]["neutral_field_protection_enabled"]
+        is True
     )
     batch_recipe = server._authoritative_batch_recipe(
         {},
@@ -164,35 +200,50 @@ def test_build_solve_config_propagates_neutral_field_protection(monkeypatch):
         profile_ref={},
         profile_name="Neutral Fields",
     )
-    assert batch_recipe["config"]["neutral_field_protection_mode"] == "standard"
+    assert batch_recipe["config"]["neutral_field_protection_enabled"] is True
     assert (
         batch_recipe["profile_snapshot"]["settings"][
-            "neutral_field_protection_mode"
+            "neutral_field_protection_enabled"
         ]
-        == "standard"
+        is True
     )
 
 
 def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
+    import server
+
     generator_root = Path(__file__).resolve().parents[2] / "Prisma" / "generator"
     application_context = (
         generator_root / "app" / "core" / "application-context.js"
     ).read_text(encoding="utf-8")
     index_html = (generator_root / "app" / "index.html").read_text(encoding="utf-8")
 
-    assert "d_wc_min: 0.16," in application_context
-    assert "smooth_kernel: 5.0," in application_context
-    assert "solver_fine_pitch_mm: 0.20," in application_context
-    assert "boundary_cap_de_budget: 0.004," in application_context
+    contract = server.get_settings_contract()
+    specs = {spec["key"]: spec for spec in contract["settings"]}
+    assert specs["min_cap_layers"]["default"] == 2
+    assert specs["boundary_cap_smoothing_radius_mm"]["default"] == 1.0
+    assert "min_cap_layers: 2," not in application_context
+    assert "boundary_cap_smoothing_radius_mm: 1.0," not in application_context
+    assert specs["solve_pitch_extrusion_width_multiplier"]["default"] == 1
+    assert specs["boundary_cap_de_budget"]["default"] == 0.004
+    assert specs["stage2_boundary_mutation_min_gain"]["default"] == 0.010
+    assert specs["stage2_boundary_mutation_min_gain"]["nullable"] is False
+    assert "solve_pitch_extrusion_width_multiplier: 1," in application_context
+    assert "boundary_cap_de_budget: 0.004," not in application_context
     assert 'id="cfgDWcMin" class="unit-input" value="2"' in index_html
     assert 'id="cfgSmoothKernel" class="unit-input" value="1"' in index_html
     assert 'id="cfgBoundaryCapDeBudget" class="unit-input" value="0.004"' in index_html
-    assert 'neutral_field_protection_mode: "off",' in application_context
-    assert 'id="cfgNeutralFieldProtection"' in index_html
-    for mode in ("off", "narrow", "standard", "broad"):
-        assert f'<option value="{mode}">' in index_html
+    assert 'id="cfgStage2BoundaryMutationMinGain" class="unit-input" value="0.010"' in index_html
+    assert specs["neutral_field_protection_enabled"]["default"] is False
+    assert specs["neutral_field_protection_cutoff"]["presets"] == [
+        {"id": "narrow", "value": 0.010},
+        {"id": "standard", "value": 0.020},
+        {"id": "broad", "value": 0.035},
+    ]
+    assert 'id="cfgNeutralFieldProtectionEnabled"' in index_html
+    assert 'id="cfgNeutralFieldProtectionPreset"' in index_html
     assert index_html.index('id="cfgColorRegionTarget"') < index_html.index(
-        'id="cfgNeutralFieldProtection"'
+        'id="cfgNeutralFieldProtectionEnabled"'
     ) < index_html.index('id="cfgStage2FineOverride"')
 
     bundled_profiles = (
@@ -201,7 +252,10 @@ def test_reviewed_solve_quality_defaults_are_reflected_in_browser_bootstrap():
     for profile_path in bundled_profiles:
         payload = json.loads(profile_path.read_text(encoding="utf-8"))
         assert (
-            payload["settings"]["neutral_field_protection_mode"] == "off"
+            payload["settings"]["neutral_field_protection_enabled"] is False
+        ), profile_path
+        assert (
+            payload["settings"]["stage2_boundary_mutation_min_gain"] == 0.010
         ), profile_path
 
 
@@ -227,14 +281,10 @@ def test_basic_white_point_and_subsection_flow_contracts_are_present():
     assert white_point_row is not None
     assert "advanced-setting" not in white_point_row.group("attrs")
     assert "extractSettingsSubsectionFlowUnits" in layout_source
-    assert 'settingsFlowWrapper = "true"' in layout_source
-    assert "wrapper.appendChild(group)" in layout_source
-    assert layout_source.index("insertionPoint.after(wrapper)") < layout_source.index(
-        "wrapper.appendChild(group)"
-    )
-    assert "if (parentGroup) unit.before(parentGroup)" in layout_source
+    assert "return grid;" in layout_source
+    assert "initCollapsibleSections()" in layout_source
     assert ".settings-subsection-flow-unit" in layout_css
-    assert 'content: attr(data-settings-parent-title) " · "' in layout_css
+    assert 'data-settings-parent-title' not in layout_css
 
 
 def test_missing_product_min_cap_defaults_to_two_layers_but_one_remains_allowed():
@@ -242,11 +292,11 @@ def test_missing_product_min_cap_defaults_to_two_layers_but_one_remains_allowed(
 
     defaulted = server._force_mandatory_product_settings({"layer_height": 0.12})
     explicit_one = server._force_mandatory_product_settings(
-        {"layer_height": 0.12, "d_wc_min": 0.12}
+        {"layer_height": 0.12, "min_cap_layers": 1}
     )
 
-    assert defaulted["d_wc_min"] == 0.24
-    assert explicit_one["d_wc_min"] == 0.12
+    assert defaulted["min_cap_layers"] == 2
+    assert explicit_one["min_cap_layers"] == 1
 
 
 def test_bundled_named_profiles_are_only_the_reviewed_refinement_recipes():
@@ -295,10 +345,11 @@ def test_bundled_named_profiles_are_only_the_reviewed_refinement_recipes():
 
         assert payload["kind"] == "named"
         assert settings["boundary_cap_de_budget"] == 0.004
-        assert settings["d_wc_min"] == 0.16
-        assert settings["image_sample_pitch_mm"] == 0.4
-        assert settings["solver_fine_pitch_mm"] == 0.4
-        assert settings["smooth_kernel"] * settings["solver_fine_pitch_mm"] == 1.0
+        assert settings["min_cap_layers"] == 2
+        assert settings["solve_pitch_extrusion_width_multiplier"] == 1
+        assert "image_sample_pitch_mm" not in settings
+        assert "solver_fine_pitch_mm" not in settings
+        assert settings["boundary_cap_smoothing_radius_mm"] == 1.0
         assert settings["color_region_target_mm"] == 0.8
         assert settings["cell_mode"] == "felzenszwalb"
         assert settings["gamut_mode"] == "hull"
@@ -375,29 +426,26 @@ def test_default_boundary_mutation_pass_limit_is_1():
     assert "stage2_boundary_mutation_max_passes" in server._SETTINGS_PROFILE_KEYS
 
 
-def test_boundary_smoothing_sigma_survives_config_as_float(monkeypatch):
+def test_boundary_smoothing_radius_resolves_to_solve_cells(monkeypatch):
     import server
 
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
     cfg["palette"] = ["bambu-basic-cyan"]
-    cfg["smooth_kernel"] = 1.5
+    cfg["boundary_cap_smoothing_radius_mm"] = 1.5
 
     payload = server.ConfigPayload(**cfg)
     solve_config = server._build_solve_config(payload.model_dump())
 
-    assert isinstance(payload.smooth_kernel, float)
-    assert payload.smooth_kernel == 1.5
+    assert isinstance(payload.boundary_cap_smoothing_radius_mm, float)
+    assert payload.boundary_cap_smoothing_radius_mm == 1.5
     assert isinstance(solve_config.smooth_kernel, float)
-    assert solve_config.smooth_kernel == 1.5
+    assert solve_config.smooth_kernel == 7.5
 
 
 def test_boundary_cap_de_budget_survives_config_as_float(monkeypatch):
@@ -406,10 +454,7 @@ def test_boundary_cap_de_budget_survives_config_as_float(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -451,11 +496,12 @@ def test_frontend_and_server_settings_profile_keys_match():
     source = (Path(server.__file__).parent / "app" / "core" / "application-context.js").read_text(
         encoding="utf-8"
     )
-    start = source.index("app.state.settings.SETTINGS_PROFILE_KEYS = [")
-    end = source.index("];", start)
-    frontend_keys = set(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', source[start:end]))
-
-    assert frontend_keys == set(server._SETTINGS_PROFILE_KEYS)
+    contract_source = (
+        Path(server.__file__).parent / "app" / "features" / "settings" / "contract.js"
+    ).read_text(encoding="utf-8")
+    assert "app.state.settings.SETTINGS_PROFILE_KEYS = []" in source
+    assert "app.state.settings.SETTINGS_PROFILE_KEYS = [...contract.profile_keys]" in contract_source
+    assert server.get_settings_contract()["profile_keys"] == list(server._SETTINGS_PROFILE_KEYS)
 
 
 def test_settings_profiles_do_not_own_printer_or_printability_state():
@@ -466,10 +512,8 @@ def test_settings_profiles_do_not_own_printer_or_printability_state():
         "printer_profiles",
         "active_printer_id",
         "active_nozzle_size",
-        "min_line_width",
-        "min_line_length",
-        "min_line_length_multiplier",
-        "printability_minimum_extrusion_width_mm",
+        "minimum_line_length_multiplier",
+        "printability_extrusion_width_mm",
         "printability_minimum_line_length_mm",
     ):
         assert key not in server._SETTINGS_PROFILE_KEYS
@@ -481,10 +525,7 @@ def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -500,6 +541,10 @@ def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
             "stage2_boundary_mutation_enabled": True,
             "stage2_boundary_mutation_max_passes": 12,
             "stage4_printability_gate_detail": False,
+            "use_corrections": False,
+            "stage2_boundary_mutation_current_de_percentile": 90,
+            "stage2_boundary_mutation_min_component_mm": 8,
+            "neutral_field_protection_cutoff": 0.031,
         }
     )
 
@@ -513,6 +558,10 @@ def test_build_solve_config_forces_mandatory_product_safety(monkeypatch):
     assert solve_config.stage2_printability_repair_fine_override is True
     assert solve_config.stage2_boundary_mutation_max_passes == 12
     assert solve_config.stage4_printability_gate_detail is True
+    assert solve_config.use_corrections is True
+    assert solve_config.stage2_boundary_mutation_current_de_percentile is None
+    assert solve_config.stage2_boundary_mutation_min_component_mm is None
+    assert solve_config.neutral_field_protection_cutoff == 0.031
 
 
 def test_session_config_rejects_translucent_underfill_enablement():
@@ -582,7 +631,6 @@ def test_settings_profile_round_trips_hue_preserving_mode(tmp_path, monkeypatch)
     assert profile["settings"]["gamut_mode"] == "hue_preserving"
     record = server._load_settings_profile_record(
         server._settings_profile_path(profile["id"]),
-        kind_hint="named",
     )
     assert record.settings["gamut_mode"] == "hue_preserving"
 
@@ -596,7 +644,10 @@ def test_settings_profile_round_trips_neutral_field_protection(tmp_path, monkeyp
     created = server.create_settings_profile(
         server.SettingsProfilePayload(
             name="Neutral Fields",
-            settings={"neutral_field_protection_mode": " BROAD "},
+            settings={
+                "neutral_field_protection_enabled": True,
+                "neutral_field_protection_cutoff": 0.035,
+            },
             modules={},
         )
     )
@@ -604,16 +655,16 @@ def test_settings_profile_round_trips_neutral_field_protection(tmp_path, monkeyp
         p for p in created["profiles"] if p["name"] == "Neutral Fields"
     )
 
-    assert profile["settings"]["neutral_field_protection_mode"] == "broad"
+    assert profile["settings"]["neutral_field_protection_enabled"] is True
+    assert profile["settings"]["neutral_field_protection_cutoff"] == 0.035
     persisted = json.loads(
         server._settings_profile_path(profile["id"]).read_text(encoding="utf-8")
     )
-    assert persisted["settings"]["neutral_field_protection_mode"] == "broad"
+    assert persisted["settings"]["neutral_field_protection_enabled"] is True
     record = server._load_settings_profile_record(
         server._settings_profile_path(profile["id"]),
-        kind_hint="named",
     )
-    assert record.settings["neutral_field_protection_mode"] == "broad"
+    assert record.settings["neutral_field_protection_enabled"] is True
 
 
 def test_settings_profile_normalizes_legacy_chroma_mode(tmp_path, monkeypatch):
@@ -634,22 +685,21 @@ def test_settings_profile_normalizes_legacy_chroma_mode(tmp_path, monkeypatch):
     assert profile["settings"]["gamut_mode"] == "hue_preserving"
     record = server._load_settings_profile_record(
         server._settings_profile_path(profile["id"]),
-        kind_hint="named",
     )
     assert record.settings["gamut_mode"] == "hue_preserving"
 
 
-def test_session_config_keeps_live_staged_backend_fields():
+def test_session_config_derives_live_pitch_from_multiplier(monkeypatch):
     """Live staged-backend parameter fields still pass through."""
     import server
 
     original_session = deepcopy(server.session)
     try:
         server.session["config"] = deepcopy(server._DEFAULT_CONFIG)
+        monkeypatch.setattr(server, "_effective_printers_data", lambda: deepcopy(server._DEFAULT_PRINTERS))
 
         payload = server.ConfigPayload(
-            image_sample_pitch_mm=0.3,
-            solver_fine_pitch_mm=0.3,
+            solve_pitch_extrusion_width_multiplier=2,
             color_region_target_mm=0.9,
             cell_mode="grid",
             enforce_printability=False,
@@ -658,8 +708,9 @@ def test_session_config_keeps_live_staged_backend_fields():
         response = server.set_config(payload)
         cfg = response["config"]
 
-        assert cfg["image_sample_pitch_mm"] == 0.3
-        assert cfg["solver_fine_pitch_mm"] == 0.3
+        assert cfg["solve_pitch_extrusion_width_multiplier"] == 2
+        assert cfg["image_sample_pitch_mm"] == 0.4
+        assert cfg["solver_fine_pitch_mm"] == 0.4
         assert cfg["color_region_target_mm"] == 0.9
         assert "pixel_size_mm" not in cfg
         assert "color_pixel_mm" not in cfg
@@ -762,10 +813,7 @@ def test_build_solve_config_carries_preprocessing_params(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -790,13 +838,7 @@ def test_luminance_mode_preset_expands_to_backend_flags(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {
-                "size": 0.2,
-                "min_line_length_multiplier": 3,
-            },
-        },
+        lambda: _active_print_setup(line_multiplier=3),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -824,10 +866,7 @@ def test_standard_luminance_mode_preserves_mandatory_printability(monkeypatch):
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -847,10 +886,7 @@ def test_standard_luminance_mode_preserves_layer_limited_detail_cap(monkeypatch)
     monkeypatch.setattr(
         server,
         "get_active_printer",
-        lambda: {
-            "printer": {"id": "test-printer"},
-            "nozzle": {"size": 0.2, "min_line_length_multiplier": 2},
-        },
+        lambda: _active_print_setup(),
     )
 
     cfg = deepcopy(server._DEFAULT_CONFIG)
@@ -1059,6 +1095,7 @@ def test_system_settings_profile_is_regenerated_when_drifted(tmp_path, monkeypat
         "name": "User Edited",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
 
     record = server._ensure_system_settings_profile()
@@ -1067,12 +1104,12 @@ def test_system_settings_profile_is_regenerated_when_drifted(tmp_path, monkeypat
     assert record.settings == server._normalize_settings_profile_settings({})
     assert record.modules == server._normalize_module_state({})
 
-    persisted = server._load_settings_profile_record(system_path, kind_hint="system")
+    persisted = server._load_settings_profile_record(system_path)
     assert persisted.name == server._SYSTEM_SETTINGS_PROFILE_NAME
     assert persisted.settings == server._normalize_settings_profile_settings({})
     assert persisted.modules == server._normalize_module_state({})
     persisted_json = json.loads(system_path.read_text(encoding="utf-8"))
-    assert persisted_json["settings"]["neutral_field_protection_mode"] == "off"
+    assert persisted_json["settings"]["neutral_field_protection_enabled"] is False
 
 
 def test_profile_store_physically_migrates_legacy_named_profile(tmp_path, monkeypatch):
@@ -1088,23 +1125,241 @@ def test_profile_store_physically_migrates_legacy_named_profile(tmp_path, monkey
                 "id": "legacy-neutral",
                 "kind": "named",
                 "name": "Legacy Neutral",
-                "settings": {"layer_height": 0.12},
+                "settings": {
+                    "layer_height": 0.12,
+                    "neutral_field_protection_mode": "broad",
+                    "neutral_field_protection_cutoff": 0.027,
+                },
                 "modules": {},
                 "created_at": server._utc_now_iso(),
                 "updated_at": server._utc_now_iso(),
-                "schema_version": 1,
+                "schema_version": 4,
             }
         ),
         encoding="utf-8",
     )
 
+    original = profile_path.read_bytes()
+    server._upgrade_settings_profile_store()
     profiles = server._load_all_settings_profiles()
 
     record = next(profile for profile in profiles if profile.id == "legacy-neutral")
-    assert record.settings["neutral_field_protection_mode"] == "off"
+    assert record.settings["neutral_field_protection_enabled"] is True
+    assert record.settings["neutral_field_protection_cutoff"] == 0.035
     persisted = json.loads(profile_path.read_text(encoding="utf-8"))
-    assert persisted["settings"]["neutral_field_protection_mode"] == "off"
+    assert persisted["settings"]["neutral_field_protection_enabled"] is True
+    assert "neutral_field_protection_mode" not in persisted["settings"]
+    assert persisted["schema_version"] == server._SETTINGS_PROFILE_SCHEMA_VERSION
     assert persisted["settings"]["layer_height"] == 0.12
+    assert profile_path.with_name("legacy-neutral.json.v4.backup").read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    ("mode", "stored_cutoff", "enabled", "cutoff"),
+    [
+        ("off", 0.027, False, 0.027),
+        ("narrow", 0.027, True, 0.010),
+        ("standard", 0.027, True, 0.020),
+        ("broad", 0.027, True, 0.035),
+        ("custom", 0.027, True, 0.027),
+    ],
+)
+def test_settings_profile_v4_neutral_field_migration_preserves_effective_behavior(
+    mode, stored_cutoff, enabled, cutoff
+):
+    import server
+
+    migrated = server._upgrade_settings_profile_v4_to_v5(
+        {
+            "neutral_field_protection_mode": mode,
+            "neutral_field_protection_cutoff": stored_cutoff,
+        }
+    )
+
+    assert migrated["neutral_field_protection_enabled"] is enabled
+    assert migrated["neutral_field_protection_cutoff"] == cutoff
+    assert "neutral_field_protection_mode" not in migrated
+
+
+def test_schema_three_profile_is_permanently_upgraded_before_current_loading(
+    tmp_path, monkeypatch
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    profile_path = settings_dir / "schema-three.json"
+    original_payload = {
+        "id": "schema-three",
+        "kind": "named",
+        "name": "Schema Three",
+        "settings": {
+            "layer_height": 0.12,
+            "image_sample_pitch_mm": 0.2,
+            "solver_fine_pitch_mm": 0.2,
+            "neutral_field_protection_mode": "off",
+            "neutral_field_protection_cutoff": 0.027,
+        },
+        "modules": {"a1_bilateral_denoise": True},
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-02-01T00:00:00Z",
+        "schema_version": 3,
+    }
+    profile_path.write_text(json.dumps(original_payload), encoding="utf-8")
+    original = profile_path.read_bytes()
+
+    assert server._upgrade_settings_profile_record(profile_path) is True
+    upgraded_bytes = profile_path.read_bytes()
+    record = server._load_settings_profile_record(profile_path)
+    persisted = json.loads(upgraded_bytes)
+
+    assert persisted["schema_version"] == server._SETTINGS_PROFILE_SCHEMA_VERSION
+    assert set(persisted) == server._SETTINGS_PROFILE_RECORD_KEYS
+    assert set(persisted["settings"]) == set(server._SETTINGS_PROFILE_KEYS)
+    assert set(persisted["modules"]) == set(server._normalize_module_state({}))
+    assert persisted["settings"]["solve_pitch_extrusion_width_multiplier"] == 1
+    assert "image_sample_pitch_mm" not in persisted["settings"]
+    assert "solver_fine_pitch_mm" not in persisted["settings"]
+    assert persisted["settings"]["neutral_field_protection_enabled"] is False
+    assert persisted["settings"]["neutral_field_protection_cutoff"] == 0.027
+    assert record.created_at == original_payload["created_at"]
+    assert record.updated_at == original_payload["updated_at"]
+    assert record.modules["a1_bilateral_denoise"] is True
+    assert profile_path.with_name("schema-three.json.v3.backup").read_bytes() == original
+
+    assert server._upgrade_settings_profile_record(profile_path) is False
+    assert profile_path.read_bytes() == upgraded_bytes
+
+
+def test_schema_two_profile_preserves_effective_user_units_during_upgrade(
+    tmp_path, monkeypatch
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    profile_path = settings_dir / "schema-two.json"
+    profile_path.write_text(json.dumps({
+        "id": "schema-two",
+        "kind": "named",
+        "name": "Schema Two",
+        "settings": {
+            "layer_height": 0.08,
+            "d_wc_min": 0.24,
+            "smooth_kernel": 3.0,
+            "image_sample_pitch_mm": 0.4,
+            "solver_fine_pitch_mm": 0.4,
+            "neutral_field_protection_mode": "narrow",
+            "neutral_field_protection_cutoff": 0.027,
+        },
+        "modules": {},
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "schema_version": 2,
+    }), encoding="utf-8")
+
+    assert server._upgrade_settings_profile_record(profile_path) is True
+    record = server._load_settings_profile_record(profile_path)
+
+    assert record.settings["min_cap_layers"] == 3
+    assert record.settings["boundary_cap_smoothing_radius_mm"] == 1.2
+    assert record.settings["neutral_field_protection_enabled"] is True
+    assert record.settings["neutral_field_protection_cutoff"] == 0.010
+
+
+@pytest.mark.parametrize("schema_version", [0, 1, 2, 3, 4, 5, 7])
+def test_current_settings_profile_loader_rejects_noncurrent_schema_without_rewriting(
+    tmp_path, monkeypatch, schema_version
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    profile_path = settings_dir / "unsupported.json"
+    original = json.dumps({
+        "id": "unsupported",
+        "kind": "named",
+        "name": "Unsupported",
+        "settings": {},
+        "modules": {},
+        "schema_version": schema_version,
+    })
+    profile_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="current loader requires schema"):
+        server._load_settings_profile_record(profile_path)
+
+    assert profile_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("schema_version", [0, 7])
+def test_profile_upgrader_rejects_unknown_schema_without_rewriting(
+    tmp_path, monkeypatch, schema_version
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    profile_path = settings_dir / "unknown.json"
+    original = json.dumps({
+        "id": "unknown",
+        "kind": "named",
+        "name": "Unknown",
+        "settings": {},
+        "modules": {},
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "schema_version": schema_version,
+    })
+    profile_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no complete migration path exists"):
+        server._upgrade_settings_profile_record(profile_path)
+
+    assert profile_path.read_text(encoding="utf-8") == original
+    assert not profile_path.with_name(
+        f"unknown.json.v{schema_version}.backup"
+    ).exists()
+
+
+def test_settings_profile_migration_validates_full_record_before_rewriting(tmp_path):
+    import server
+
+    profile_path = tmp_path / "invalid-v4.json"
+    original = json.dumps({
+        "id": "invalid-v4",
+        "kind": "named",
+        "name": "Invalid v4",
+        "settings": {
+            "neutral_field_protection_mode": "standard",
+            "neutral_field_protection_cutoff": 0.027,
+            "detail_cap_enabled": False,
+        },
+        "modules": {},
+        "schema_version": 4,
+    })
+    profile_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="detail_cap_enabled is mandatory"):
+        server._upgrade_settings_profile_record(profile_path)
+
+    assert profile_path.read_text(encoding="utf-8") == original
+    assert not profile_path.with_name("invalid-v4.json.v4.backup").exists()
+
+
+def test_settings_profile_payload_rejects_unknown_nested_key():
+    import server
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="Unknown Settings Profile setting key"):
+        server.SettingsProfilePayload(
+            name="Typo",
+            settings={"neutral_field_protection_enabledd": True},
+        )
 
 
 def test_settings_profile_normalizer_drops_retired_module_and_setting_keys(tmp_path, monkeypatch):
@@ -1130,14 +1385,18 @@ def test_settings_profile_normalizer_drops_retired_module_and_setting_keys(tmp_p
         },
         "created_at": server._utc_now_iso(),
         "updated_at": server._utc_now_iso(),
+        "schema_version": 5,
     }), encoding="utf-8")
 
-    record = server._load_settings_profile_record(profile_path, kind_hint="named")
+    original = profile_path.read_bytes()
+    assert server._upgrade_settings_profile_record(profile_path) is True
+    record = server._load_settings_profile_record(profile_path)
 
     assert retired_setting not in record.settings
     assert record.settings["layer_height"] == 0.12
     assert retired_module not in record.modules
     assert record.modules["a1_bilateral_denoise"] is True
+    assert profile_path.with_name("legacy.json.v5.backup").read_bytes() == original
 
 
 def test_settings_profile_store_bootstraps_system_and_reviewed_bundled_profiles(
@@ -1172,7 +1431,80 @@ def test_settings_profile_store_bootstraps_system_and_reviewed_bundled_profiles(
     }
 
 
-def test_bundled_profile_revision_two_updates_refinement_smoothing_to_1mm(
+def test_settings_profile_state_is_permanently_upgraded_and_then_loaded_exactly(
+    tmp_path, monkeypatch
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    state_path = settings_dir / "state.json"
+    original = json.dumps({
+        "schema_version": 4,
+        "user_default_profile_id": "profile-a",
+        "bundled_profile_revision": 5,
+    })
+    state_path.write_text(original, encoding="utf-8")
+
+    assert server._upgrade_settings_profile_state() is True
+    upgraded_bytes = state_path.read_bytes()
+    state = server._load_settings_profile_state()
+
+    assert state == {
+        "schema_version": server._SETTINGS_PROFILE_SCHEMA_VERSION,
+        "user_default_profile_id": "profile-a",
+        "bundled_profile_revision": 5,
+    }
+    assert state_path.with_name("state.json.v4.backup").read_text(
+        encoding="utf-8"
+    ) == original
+    assert server._upgrade_settings_profile_state() is False
+    assert state_path.read_bytes() == upgraded_bytes
+
+
+def test_bundled_profile_identity_is_transformed_instead_of_discarded(
+    tmp_path, monkeypatch
+):
+    import server
+
+    settings_dir = tmp_path / "settings_profiles"
+    settings_dir.mkdir()
+    monkeypatch.setattr(server, "_SETTINGS_PROFILES_DIR", settings_dir)
+    (settings_dir / "state.json").write_text(json.dumps({
+        "schema_version": 5,
+        "user_default_profile_id": "wing-c-minimal",
+        "bundled_profile_revision": 6,
+    }), encoding="utf-8")
+    old_path = settings_dir / "wing-c-minimal.json"
+    old_path.write_text(json.dumps({
+        "id": "wing-c-minimal",
+        "kind": "named",
+        "name": "Wing C — Minimal (C1)",
+        "settings": {"layer_height": 0.08},
+        "modules": {},
+        "created_at": "2026-04-22T00:00:00Z",
+        "updated_at": "2026-04-22T00:00:00Z",
+        "schema_version": 1,
+    }), encoding="utf-8")
+    old_bytes = old_path.read_bytes()
+
+    store = server._ensure_settings_profile_store()
+    target_path = settings_dir / "refinement-balanced.json"
+    target = server._load_settings_profile_record(target_path)
+
+    assert not old_path.exists()
+    assert old_path.with_name("wing-c-minimal.json.v1.backup").read_bytes() == old_bytes
+    assert target.id == "refinement-balanced"
+    assert target.created_at == "2026-04-22T00:00:00Z"
+    assert store["state"]["user_default_profile_id"] == "refinement-balanced"
+    assert (
+        store["state"]["bundled_profile_revision"]
+        == server._BUNDLED_SETTINGS_PROFILE_REVISION
+    )
+
+
+def test_bundled_profile_revision_seven_replaces_legacy_pitch_fields(
     tmp_path, monkeypatch
 ):
     import server
@@ -1202,6 +1534,9 @@ def test_bundled_profile_revision_two_updates_refinement_smoothing_to_1mm(
                     "smooth_kernel": 5.0,
                 },
                 "modules": {},
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "schema_version": 1,
             }
         ),
         encoding="utf-8",
@@ -1214,13 +1549,16 @@ def test_bundled_profile_revision_two_updates_refinement_smoothing_to_1mm(
         if profile.id == "refinement-balanced"
     )
 
-    assert server._BUNDLED_SETTINGS_PROFILE_REVISION == 2
-    assert store["state"]["bundled_profile_revision"] == 2
-    assert (
-        balanced.settings["smooth_kernel"]
-        * balanced.settings["solver_fine_pitch_mm"]
-        == 1.0
-    )
+    assert server._BUNDLED_SETTINGS_PROFILE_REVISION == 7
+    assert store["state"]["bundled_profile_revision"] == 7
+    assert balanced.settings["solve_pitch_extrusion_width_multiplier"] == 1
+    assert "image_sample_pitch_mm" not in balanced.settings
+    assert "solver_fine_pitch_mm" not in balanced.settings
+    assert balanced.settings["min_cap_layers"] == 2
+    assert balanced.settings["boundary_cap_smoothing_radius_mm"] == 1.0
+    assert "d_wc_min" not in balanced.settings
+    assert "smooth_kernel" not in balanced.settings
+    assert (settings_dir / "refinement-balanced.json.v1.backup").exists()
 
 
 def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_overrides(tmp_path, monkeypatch):
@@ -1238,18 +1576,21 @@ def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_o
         "name": "Top Level",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "alpha" / "minimal.json").write_text(server.json.dumps({
         "kind": "named",
         "name": "Alpha Minimal",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "beta" / "minimal.json").write_text(server.json.dumps({
         "kind": "named",
         "name": "Beta Minimal",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "shipped" / "standard.json").write_text(server.json.dumps({
         "id": "shared-profile",
@@ -1257,6 +1598,7 @@ def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_o
         "name": "Nested Shared",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "shared-profile.json").write_text(server.json.dumps({
         "id": "shared-profile",
@@ -1264,6 +1606,7 @@ def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_o
         "name": "Top Shared",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "state.json").write_text("{}", encoding="utf-8")
     (settings_dir / "alpha" / "state.json").write_text("{}", encoding="utf-8")
@@ -1282,6 +1625,7 @@ def test_nested_settings_profile_discovery_excludes_reserved_files_and_dedupes_o
         "shipped/standard.json",
     ]
 
+    server._upgrade_settings_profile_store()
     named_profiles = [
         profile for profile in server._load_all_settings_profiles() if profile.kind == "named"
     ]
@@ -1310,6 +1654,7 @@ def test_delete_nested_settings_profile_removes_source_and_overrides(tmp_path, m
         "name": "Custom Standard",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     top_level_path.write_text(server.json.dumps({
         "id": "custom-standard",
@@ -1317,6 +1662,7 @@ def test_delete_nested_settings_profile_removes_source_and_overrides(tmp_path, m
         "name": "Custom Standard Override",
         "settings": {},
         "modules": {},
+        "schema_version": 5,
     }), encoding="utf-8")
     (settings_dir / "state.json").write_text(server.json.dumps({
         "user_default_profile_id": "custom-standard",
@@ -1458,7 +1804,7 @@ def test_settings_profile_accepts_true_mandatory_detail_cap_flag():
         {"detail_cap_enabled": True, "detail_cap_max_layers": 7}
     )
 
-    assert settings["detail_cap_enabled"] is True
+    assert "detail_cap_enabled" not in settings
     assert settings["detail_cap_max_layers"] == 7
 
 
@@ -1571,93 +1917,83 @@ def test_profile_without_modules_uses_default_module_state(tmp_path, monkeypatch
         "kind": "named",
         "name": "No Modules",
         "settings": {},
+        "schema_version": 5,
     }), encoding="utf-8")
 
-    record = server._load_settings_profile_record(profile_path, kind_hint="named")
+    original = profile_path.read_bytes()
+    assert server._upgrade_settings_profile_record(profile_path) is True
+    record = server._load_settings_profile_record(profile_path)
 
     assert record.modules == server._normalize_module_state({})
+    assert profile_path.with_name("profile-nomod.json.v5.backup").read_bytes() == original
 
 
-def test_active_printer_normalizes_line_width_bounds():
+def test_legacy_printer_profile_schema_is_rejected_without_migration():
     import server
 
-    resolved = server._resolve_active_printer(
-        {
-            "printers": [
-                {
-                    "id": "printer-a",
-                    "name": "Printer A",
-                    "nozzle_profiles": [
-                        {
-                            "size": 0.2,
-                            "min_layer_height": 0.04,
-                            "max_layer_height": 0.16,
-                            "line_width": 0.30,
-                            "min_line_length_multiplier": 2,
-                        }
-                    ],
-                }
-            ],
-            "active_printer_id": "printer-a",
-            "active_nozzle_size": 0.2,
-        }
-    )
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._normalize_printers_data({"schema_version": 2, "printers": []})
 
-    nozzle = resolved["nozzle"]
-
-    assert nozzle["max_line_width"] == pytest.approx(0.25)
-    assert nozzle["line_width"] == pytest.approx(0.25)
-    assert nozzle["min_line_length_multiplier"] == 2
-    assert resolved["printability"] == {
-        "minimum_extrusion_width_mm": pytest.approx(0.2),
-        "minimum_line_length_multiplier": 2,
-        "minimum_line_length_mm": pytest.approx(0.4),
-        "minimum_component_area_mm2": pytest.approx(0.08),
-    }
-    assert "preferred_line_length" not in nozzle
+    assert exc_info.value.status_code == 422
+    assert "current schema version" in exc_info.value.detail["message"]
 
 
-def test_active_printer_drops_retired_preferred_line_length():
-    import server
-
-    resolved = server._resolve_active_printer(
-        {
-            "printers": [
-                {
-                    "id": "printer-a",
-                    "name": "Printer A",
-                    "nozzle_profiles": [
-                        {
-                            "size": 0.4,
-                            "min_layer_height": 0.08,
-                            "max_layer_height": 0.32,
-                            "min_line_length_multiplier": 3,
-                            "preferred_line_length": 0.50,
-                        }
-                    ],
-                }
-            ],
-            "active_printer_id": "printer-a",
-            "active_nozzle_size": 0.4,
-        }
-    )
-
-    nozzle = resolved["nozzle"]
-
-    assert nozzle["min_line_length_multiplier"] == 3
-    assert resolved["printability"]["minimum_extrusion_width_mm"] == pytest.approx(0.40)
-    assert resolved["printability"]["minimum_line_length_mm"] == pytest.approx(1.20)
-    assert "preferred_line_length" not in nozzle
-
-
-def test_default_printer_profiles_use_nozzle_multiplier_schema():
+def test_default_printer_profiles_use_nozzle_owned_multiplier_and_numeric_width_state():
     import server
 
     for printer in server._DEFAULT_PRINTERS["printers"]:
         for nozzle in printer["nozzle_profiles"]:
-            assert nozzle["min_line_length_multiplier"] == 2
-            assert "min_line_width" not in nozzle
-            assert "min_line_length" not in nozzle
+            assert set(nozzle) == {
+                "id", "diameter_um", "min_layer_height_um", "max_layer_height_um",
+                "max_extrusion_width_um", "minimum_line_length_multiplier",
+            }
+            assert nozzle["minimum_line_length_multiplier"] == 2
+        setup = server._DEFAULT_PRINTERS["printer_setup_state"][printer["id"]]
+        assert set(setup["nozzle_width_state"]) == {
+            nozzle["id"] for nozzle in printer["nozzle_profiles"]
+        }
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("max_print_area", "x"), 49, "Print Area X"),
+        (("max_print_area", "y"), 501, "Print Area Y"),
+        (("ams_units",), 0, "AMS Units"),
+        (("slots_per_ams",), 17, "Slots per AMS"),
+        (("slots_per_ams",), 4.5, "whole number"),
+    ],
+)
+def test_printer_capability_fields_are_server_validated(path, value, message):
+    import server
+
+    payload = deepcopy(server._DEFAULT_PRINTERS)
+    target = payload["printers"][0]
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._normalize_printers_data(payload)
+
+    assert exc_info.value.status_code == 422
+    assert message in exc_info.value.detail["message"]
+
+
+@pytest.mark.parametrize(
+    "max_width_um", [199],
+)
+def test_nozzle_diameter_is_the_derived_extrusion_width_floor(max_width_um):
+    import server
+
+    payload = deepcopy(server._DEFAULT_PRINTERS)
+    payload["printers"][0]["nozzle_profiles"][0]["max_extrusion_width_um"] = max_width_um
+
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._normalize_printers_data(payload)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["field"] == "max_extrusion_width_um"
 
 
 def test_tutorial_printer_matches_x1c_except_for_identity():
@@ -1669,30 +2005,28 @@ def test_tutorial_printer_matches_x1c_except_for_identity():
     x1c.pop("name")
     tutorial.pop("id")
     tutorial.pop("name")
+    for capability in ("virtual", "guide_only", "editable", "deletable", "renameable"):
+        tutorial.pop(capability)
 
     assert tutorial == x1c
-    assert server._TUTORIAL_PRINTER_PROFILE["id"] == "tutorial-printer"
-    assert server._TUTORIAL_PRINTER_PROFILE["name"] == "Tutorial Printer"
+    assert server._TUTORIAL_PRINTER_PROFILE["guide_only"] is True
+    assert server._TUTORIAL_PRINTER_PROFILE["editable"] is False
     assert server._DEFAULT_PRINTERS["active_printer_id"] == "bambu-x1c"
 
 
-@pytest.mark.parametrize(
-    "multiplier",
-    [1, 11, 2.5, True, "2", float("nan"), float("inf")],
-)
+@pytest.mark.parametrize("multiplier", [1, 11, 2.5, True, "2", float("nan"), float("inf")])
 def test_nozzle_printability_rejects_invalid_multiplier(multiplier):
     import server
 
     with pytest.raises(server.HTTPException) as exc_info:
         server._resolve_nozzle_printability(
-            {"size": 0.2, "min_line_length_multiplier": multiplier},
+            {"id": "nozzle-200", "minimum_line_length_multiplier": multiplier},
+            200,
             printer_id="printer-a",
         )
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail["field"] == "min_line_length_multiplier"
-    assert exc_info.value.detail["printer"] == "printer-a"
-    assert exc_info.value.detail["path"] == str(server._PRINTERS_PATH)
+    assert exc_info.value.detail["field"] == "minimum_line_length_multiplier"
 
 
 @pytest.mark.parametrize("multiplier", [2, 10])
@@ -1700,135 +2034,101 @@ def test_nozzle_printability_resolves_bounded_multiplier(multiplier):
     import server
 
     resolved = server._resolve_nozzle_printability(
-        {"size": 0.2, "min_line_length_multiplier": multiplier},
+        {"id": "nozzle-200", "minimum_line_length_multiplier": multiplier},
+        200,
         printer_id="printer-a",
     )
-
-    assert resolved["minimum_extrusion_width_mm"] == pytest.approx(0.2)
+    assert resolved["extrusion_width_mm"] == pytest.approx(0.2)
     assert resolved["minimum_line_length_multiplier"] == multiplier
     assert resolved["minimum_line_length_mm"] == pytest.approx(0.2 * multiplier)
-    assert resolved["minimum_component_area_mm2"] == pytest.approx(
-        0.2 * 0.2 * multiplier
-    )
+    assert resolved["minimum_component_area_mm2"] == pytest.approx(0.04 * multiplier)
 
 
-def test_nozzle_printability_canonicalizes_derived_values():
+def test_nozzle_printability_uses_exact_micrometer_arithmetic():
     import server
 
     resolved = server._resolve_nozzle_printability(
-        {"size": 0.3333333, "min_line_length_multiplier": 3},
+        {"id": "nozzle-200", "minimum_line_length_multiplier": 3},
+        333,
         printer_id="printer-a",
     )
-
     assert resolved == {
-        "minimum_extrusion_width_mm": 0.333333,
+        "extrusion_width_um": 333,
+        "extrusion_width_mm": 0.333,
         "minimum_line_length_multiplier": 3,
-        "minimum_line_length_mm": 0.999999,
-        "minimum_component_area_mm2": 0.333333,
+        "minimum_line_length_mm": 0.999,
+        "minimum_component_area_mm2": 0.332667,
     }
-    normalized = server._normalize_nozzle_profile(
-        {"size": 0.3333333, "min_line_length_multiplier": 3},
-        printer_id="printer-a",
-    )
-    assert normalized["size"] == 0.333333
 
 
-def test_obsolete_printability_fields_are_rejected_without_rewriting_file(
-    tmp_path, monkeypatch
-):
+def test_printer_configuration_requires_at_least_one_printer():
     import server
 
-    printers_path = tmp_path / "config" / "printers.json"
-    printers_path.parent.mkdir(parents=True)
-    original = {
-        "printers": [
-            {
-                "id": "printer-a",
-                "name": "Printer A",
-                "nozzle_profiles": [
-                    {
-                        "size": 0.2,
-                        "min_line_width": 0.16,
-                        "min_line_length": 0.4,
-                    }
-                ],
-            }
-        ],
-        "active_printer_id": "printer-a",
-        "active_nozzle_size": 0.2,
-    }
-    encoded = server.json.dumps(original, indent=2)
-    printers_path.write_text(encoded, encoding="utf-8")
-    monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
-
     with pytest.raises(server.HTTPException) as exc_info:
-        server._load_printers()
+        server._normalize_printers_data({"schema_version": 3, "revision": 1, "printers": []})
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail["obsolete_fields"] == [
-        "min_line_length",
-        "min_line_width",
-    ]
-    assert exc_info.value.detail["printer"] == "printer-a"
-    assert exc_info.value.detail["nozzle_size"] == pytest.approx(0.2)
-    assert exc_info.value.detail["path"] == str(printers_path)
-    assert printers_path.read_text(encoding="utf-8") == encoded
+    assert exc_info.value.detail["error"] == "invalid_printer_configuration"
 
 
-def test_save_printers_rejects_retired_preferred_line_length():
+def test_printer_configuration_requires_at_least_one_nozzle_per_printer():
     import server
 
     payload = {
+        "schema_version": 3,
+        "revision": 1,
         "printers": [
             {
                 "id": "printer-a",
                 "name": "Printer A",
-                "nozzle_profiles": [
-                    {
-                        "size": 0.4,
-                        "min_layer_height": 0.08,
-                        "max_layer_height": 0.32,
-                        "min_line_length_multiplier": 2,
-                        "preferred_line_length": 0.80,
-                    }
-                ],
+                    "nozzle_profiles": [],
             }
         ],
         "active_printer_id": "printer-a",
-        "active_nozzle_size": 0.4,
+        "printer_setup_state": {},
     }
 
     with pytest.raises(server.HTTPException) as exc_info:
-        server.save_printers(payload)
+        server._normalize_printers_data(payload)
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail["error"] == "retired_printer_profile_field"
+    assert exc_info.value.detail["error"] == "invalid_printer_configuration"
 
 
-def test_printer_normalization_canonicalizes_active_selection():
+def test_printer_normalization_rejects_missing_active_selection():
     import server
 
-    normalized = server._normalize_printers_data(
-        {
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._normalize_printers_data({
+            "schema_version": 3,
+            "revision": 1,
             "printers": [
                 {
                     "id": "printer-a",
                     "name": "Printer A",
                     "nozzle_profiles": [
                         {
-                            "size": 0.2,
-                            "min_line_length_multiplier": 2,
+                            "id": "nozzle-200", "diameter_um": 200,
+                            "min_layer_height_um": 50, "max_layer_height_um": 150,
+                            "max_extrusion_width_um": 250,
+                            "minimum_line_length_multiplier": 2,
                         }
                     ],
                 }
             ],
             "active_printer_id": "missing-printer",
-            "active_nozzle_size": 0.8,
-        }
-    )
+            "printer_setup_state": {
+                "printer-a": {
+                    "active_nozzle_id": "nozzle-200",
+                    "nozzle_width_state": {
+                        "nozzle-200": {"current_width_um": 200, "saved_widths_um": [200]},
+                    },
+                },
+            },
+        })
 
-    assert normalized["active_printer_id"] == "printer-a"
-    assert normalized["active_nozzle_size"] == pytest.approx(0.2)
+    assert exc_info.value.status_code == 422
+    assert "active printer" in exc_info.value.detail["message"].lower()
 
 
 def test_save_printers_returns_authoritative_printability_and_updates_session(
@@ -1841,39 +2141,50 @@ def test_save_printers_returns_authoritative_printability_and_updates_session(
     monkeypatch.setitem(server.session, "config", dict(server._DEFAULT_CONFIG))
     response = server.save_printers(
         {
+            "schema_version": 3,
+            "revision": 1,
+            "expected_revision": 1,
             "printers": [
                 {
                     "id": "printer-a",
                     "name": "Printer A",
                     "nozzle_profiles": [
                         {
-                            "size": 0.4,
-                            "min_line_length_multiplier": 3,
+                            "id": "nozzle-400", "diameter_um": 400,
+                            "min_layer_height_um": 80, "max_layer_height_um": 320,
+                            "max_extrusion_width_um": 500,
+                            "minimum_line_length_multiplier": 3,
                         }
                     ],
                 }
             ],
             "active_printer_id": "printer-a",
-            "active_nozzle_size": 0.4,
+            "printer_setup_state": {
+                "printer-a": {
+                    "active_nozzle_id": "nozzle-400",
+                    "nozzle_width_state": {
+                        "nozzle-400": {"current_width_um": 400, "saved_widths_um": [400]},
+                    },
+                },
+            },
         }
     )
 
     assert response["active"]["printability"] == {
-        "minimum_extrusion_width_mm": pytest.approx(0.4),
+        "extrusion_width_um": 400,
+        "extrusion_width_mm": pytest.approx(0.4),
         "minimum_line_length_multiplier": 3,
         "minimum_line_length_mm": pytest.approx(1.2),
         "minimum_component_area_mm2": pytest.approx(0.48),
     }
     assert server.session["config"][
-        "printability_minimum_extrusion_width_mm"
+        "printability_extrusion_width_mm"
     ] == pytest.approx(0.4)
     assert server.session["config"][
         "printability_minimum_line_length_mm"
     ] == pytest.approx(1.2)
     persisted = server.json.loads(printers_path.read_text(encoding="utf-8"))
-    assert persisted["printers"][0]["nozzle_profiles"][0][
-        "min_line_length_multiplier"
-    ] == 3
+    assert persisted["printers"][0]["nozzle_profiles"][0]["minimum_line_length_multiplier"] == 3
 
 
 def test_luminance_base_shading_limit_folds_into_optical_authority():

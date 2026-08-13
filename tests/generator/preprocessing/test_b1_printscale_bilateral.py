@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from preprocessing.feature_scale import _FEATURE_WIDTHS_PER_NOZZLE
+from preprocessing.feature_scale import _FEATURE_SCALE_WIDTHS
 from preprocessing.operators.b1_printscale_bilateral import (
     B1PrintscaleBilateral,
 )
@@ -34,7 +34,7 @@ def _make_context(
 ) -> PreprocessingContext:
     return PreprocessingContext(
         config=SimpleNamespace(
-            nozzle_diameter=feature_scale_mm / _FEATURE_WIDTHS_PER_NOZZLE,
+            extrusion_width_mm=feature_scale_mm / _FEATURE_SCALE_WIDTHS,
             solver_fine_pitch_mm=solver_fine_pitch_mm,
         ),
         image_fingerprint="b1-test-fingerprint",

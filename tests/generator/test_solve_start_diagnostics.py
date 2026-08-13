@@ -134,8 +134,7 @@ def solve_env(tmp_path, monkeypatch):
 def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_env):
     client = solve_env.client
     resp = client.post("/api/session/config", json={
-        "image_sample_pitch_mm": 0.25,
-        "solver_fine_pitch_mm": 0.25,
+        "solve_pitch_extrusion_width_multiplier": 2,
         "color_region_target_mm": 1.40,
     })
     assert resp.status_code == 200
@@ -150,10 +149,10 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     assert "solver" not in diagnostics["resolved_settings"]
     assert "grouping" not in diagnostics["resolved_settings"]
     assert diagnostics["resolved_settings"]["color_region_target_mm"] == 1.40
-    assert diagnostics["resolved_settings"]["image_sample_pitch_mm"] == 0.25
-    assert diagnostics["resolved_settings"]["solver_fine_pitch_mm"] == 0.25
+    assert diagnostics["resolved_settings"]["image_sample_pitch_mm"] == 0.4
+    assert diagnostics["resolved_settings"]["solver_fine_pitch_mm"] == 0.4
     assert diagnostics["resolved_settings"][
-        "printability_minimum_extrusion_width_mm"
+        "printability_extrusion_width_mm"
     ] == 0.2
     assert diagnostics["resolved_settings"][
         "printability_minimum_line_length_mm"
@@ -165,7 +164,7 @@ def test_solve_start_diagnostics_include_active_modules_and_key_settings(solve_e
     assert "solver" not in run_json["solve_start_diagnostics"]["active_modules"]
     assert "grouping" not in run_json["solve_start_diagnostics"]["active_modules"]
     assert run_json["diagnostic_palette_version"] == "inferno-v1"
-    assert run_json["config"]["printability_minimum_extrusion_width_mm"] == 0.2
+    assert run_json["config"]["printability_extrusion_width_mm"] == 0.2
     assert run_json["config"]["printability_minimum_line_length_mm"] == 0.4
 
 
@@ -188,15 +187,13 @@ def test_solve_start_uses_latest_session_config_values(solve_env):
     client = solve_env.client
     first = client.post("/api/session/config", json={
         "color_region_target_mm": 0.60,
-        "image_sample_pitch_mm": 0.20,
-        "solver_fine_pitch_mm": 0.20,
+        "solve_pitch_extrusion_width_multiplier": 1,
     })
     assert first.status_code == 200
 
     second = client.post("/api/session/config", json={
         "color_region_target_mm": 1.80,
-        "image_sample_pitch_mm": 0.30,
-        "solver_fine_pitch_mm": 0.30,
+        "solve_pitch_extrusion_width_multiplier": 2,
     })
     assert second.status_code == 200
 
@@ -205,8 +202,8 @@ def test_solve_start_uses_latest_session_config_values(solve_env):
 
     solve_config = solve_env.captured["solve_config"]
     assert solve_config.color_region_target_mm == pytest.approx(1.80)
-    assert solve_config.image_sample_pitch_mm == pytest.approx(0.30)
-    assert solve_config.solver_fine_pitch_mm == pytest.approx(0.30)
+    assert solve_config.image_sample_pitch_mm == pytest.approx(0.40)
+    assert solve_config.solver_fine_pitch_mm == pytest.approx(0.40)
     assert Path(solve_env.captured["modules_path"]) == solve_env.output_dir.parent / "modules.json"
 
 

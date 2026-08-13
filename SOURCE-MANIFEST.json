@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-08-02T01:35:17.982949+00:00",
+  "created_at": "2026-08-13T19:22:21.792715+00:00",
   "documentation_repository": "https://github.com/CatfoodKingdom/prisma-docs",
   "excluded_assets": [
     "Prisma/data/",
@@ -35,14 +35,14 @@
       "sha256": "8dfda54ba2f66ab3a8ebab460f4338bbeea1fb1e0f85ce06fe3530aa3c64679b"
     },
     {
-      "byte_size": 1503,
+      "byte_size": 1561,
       "path": "ASSET_LICENSES.md",
-      "sha256": "5f493b911eb9072cd943c00a4a520b3a80b0ccd2eaa62eacf7d8b178c9d96187"
+      "sha256": "b9a863d7cbb783d98f23e9521378b6c42be4a46d83990b7d8a950c4deb499f99"
     },
     {
-      "byte_size": 35149,
+      "byte_size": 35823,
       "path": "LICENSE",
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+      "sha256": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
     },
     {
       "byte_size": 0,
@@ -370,9 +370,9 @@
       "sha256": "430f0dd03bcdc48613618ca32f4bb5f4dddcbbb91e33b0e793032fd8613dddfc"
     },
     {
-      "byte_size": 163391,
+      "byte_size": 163577,
       "path": "Prisma/calibration/backup_restore.py",
-      "sha256": "02a7cd741b13a64d5486b1a278e6fc2811781b39df40c79b44236ba75c193961"
+      "sha256": "84478a5cc3bb60526f24988f317b2655d05ac49956ea1dcd6167beb5bf27a183"
     },
     {
       "byte_size": 21477,
@@ -385,9 +385,9 @@
       "sha256": "d524f45e0341b7fd2cfb9d5d88c69174f88f12c8a4e3470a4e43f58375c95835"
     },
     {
-      "byte_size": 68353,
+      "byte_size": 68358,
       "path": "Prisma/calibration/data_access.py",
-      "sha256": "6d87511c4e1659562ee2a8fb364566dc9579ee2df2d01842cd3f31fa3baa7285"
+      "sha256": "d01a47543a05b5559f9ec7787f024ccb0ff945b6e0ae1f3b96b8ea217b2e1582"
     },
     {
       "byte_size": 0,
@@ -405,14 +405,14 @@
       "sha256": "cd0a9068d7b4d5b0b450e9f589df5ee5b212f98e7b2c7c93032911eb0a3cfc34"
     },
     {
-      "byte_size": 32522,
+      "byte_size": 32524,
       "path": "Prisma/calibration/fitting/camera_transform/corpus.py",
-      "sha256": "2db022c6f698ef8a79d7473d5766878267d26665ecfc460ed133529fefe5991e"
+      "sha256": "f068f94d45d5479fc320451ec55018626b9d38331130638d06ed5491fd0761bc"
     },
     {
-      "byte_size": 9782,
+      "byte_size": 9818,
       "path": "Prisma/calibration/fitting/camera_transform/export.py",
-      "sha256": "e41bf25bb1646919585bb34945cf78544c189ffc54b06c1b4bde2945c2a7b50a"
+      "sha256": "0281e3efe293e120a59bde7db951c16bc579efdd246c8970c30771e847752ac1"
     },
     {
       "byte_size": 9981,
@@ -485,9 +485,9 @@
       "sha256": "d42afbe55e7f1dbd9d15e2e311fa2d85e8f7c49852ef5c91d1f4d95c55fc1124"
     },
     {
-      "byte_size": 16163,
+      "byte_size": 16186,
       "path": "Prisma/calibration/fitting/model_publication.py",
-      "sha256": "7f4532f25e7d379ab428ad771616f7880614908deaed64ea618c077f7a221bb2"
+      "sha256": "5f822771dafcab97e8bc8811a5d0568a5ee1c2731799df9e379192e80b76c6f1"
     },
     {
       "byte_size": 312,
@@ -575,9 +575,9 @@
       "sha256": "e336ef07f664db783609462a0a6993a82ac594fa9c6a7bcc51198fb7c30d078d"
     },
     {
-      "byte_size": 434736,
+      "byte_size": 434740,
       "path": "Prisma/calibration/fitting/photo_stack_model/v63_fit_engine/research_arc_v63_td_full_license_probe/run_td_full_license_probe_v63.py",
-      "sha256": "ebd222564eee956554a37c39e927145ff8802b1aaa5a4178d9eba6b16b166771"
+      "sha256": "fe73321e25c359822d8d0e2391c7d23f722658d37c6f4c0e4ec59292f98ff9d7"
     },
     {
       "byte_size": 1487,
@@ -710,14 +710,14 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "byte_size": 395427,
+      "byte_size": 396004,
       "path": "Prisma/calibration/server.py",
-      "sha256": "bd54c77e85a2e3335a12f5916905eb07222b724d90dcc21d887bdb097defbdfc"
+      "sha256": "205d6032f709646fd44bf5c6b64112c746c6146a5a54b29360a11e8946341bfa"
     },
     {
-      "byte_size": 286974,
+      "byte_size": 287279,
       "path": "Prisma/calibration/sqlite_data_access.py",
-      "sha256": "1a460ede98241a90fb0b1aa4d830174ebba686cff9abdb7ea0e479c1115e0129"
+      "sha256": "cb472de3959d1e17d355546a3443da03b964d7b231ddabd483a99b2c660f6b85"
     },
     {
       "byte_size": 21187,
@@ -740,19 +740,19 @@
       "sha256": "f3679a2a7c50660bae0fde5789c22b662d8af91bc23a0c9cb3b18033fc8bb8af"
     },
     {
-      "byte_size": 10089,
+      "byte_size": 10362,
       "path": "Prisma/calibration_launcher.py",
-      "sha256": "65356eaaffae4458093524bf72e64a583421478a2ad9371e24d7d9180aaf6674"
+      "sha256": "697a95f21ae6d9351b6a8b4893100badabdefb1a713f01da781a817fe79730b1"
     },
     {
-      "byte_size": 1950,
+      "byte_size": 1855,
       "path": "Prisma/data/generator/settings_profiles/refinement/balanced.json",
-      "sha256": "cb3b4b0a23192804cb2f773c5154653fe8bd00a250c54bbf11e2bce15e037359"
+      "sha256": "204f6ffb9786aab4769415cf08b8668515567ea40a7167d305fb1b1cdf853b5b"
     },
     {
-      "byte_size": 1946,
+      "byte_size": 1851,
       "path": "Prisma/data/generator/settings_profiles/refinement/strong.json",
-      "sha256": "b8dc4f5cdcf57d3e2e3eb3591b1afd2b2a8f07ca1740b41eb0d0a638a2f925b3"
+      "sha256": "085218e1dc956cdbd9396d848d4ccce0199bbf9963b65b55fa85ecec3c60146f"
     },
     {
       "byte_size": 2146631,
@@ -760,84 +760,89 @@
       "sha256": "1fb9f44492b9bb3cff94e9ecb52f0ef24e96825b83848dde24af6b43c2320cbb"
     },
     {
+      "byte_size": 412,
+      "path": "Prisma/data/generator/tutorial_images/manifest.json",
+      "sha256": "81ccbd74f08728e364deed757bf7a8812f973b03babec8b9d695e53b9fc0de25"
+    },
+    {
       "byte_size": 0,
       "path": "Prisma/generator/__init__.py",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "byte_size": 127,
+      "byte_size": 164,
       "path": "Prisma/generator/app/api/cache.js",
-      "sha256": "53c7e6b84316c3b5b678d568de9fb44a721e08d46e0cac867f466867be20ce29"
+      "sha256": "cfa802b35d7dc021b1c23b7dc6627743a443e6fd73d4912325f9e74c2d47f71e"
     },
     {
-      "byte_size": 1475,
+      "byte_size": 5028,
       "path": "Prisma/generator/app/api/client.js",
-      "sha256": "15bc9300dce9c049cc43ba9c12761a50d9bff4523272596584f90605f8184961"
+      "sha256": "283c9836c2542b6e0b42c0b9bce515ec5b8f91d191224b68e5bda31bcbc774c9"
     },
     {
-      "byte_size": 783,
+      "byte_size": 4071,
       "path": "Prisma/generator/app/api/guides.js",
-      "sha256": "14230da5c4446c84e1f1a5cadcf4eb4e9102e33a6c4aaeeaa12ab1a8d9a09113"
+      "sha256": "f5c0dc5cdb90b82b40b98dc95753167d4562bfd03f9222a0d31726d97ab920da"
     },
     {
-      "byte_size": 1090,
+      "byte_size": 1127,
       "path": "Prisma/generator/app/api/images.js",
-      "sha256": "4639776e924c0b9e12f0e30dec1d467f0c88cc8b87f1b11f91da1ae019593f5d"
+      "sha256": "ec834b5cba38a2b089cdb5c92c9c54f897a17abeb76ed052e99b499b0e473484"
     },
     {
-      "byte_size": 1463,
+      "byte_size": 2316,
       "path": "Prisma/generator/app/api/index.js",
-      "sha256": "b2385ae755bb2fd74cba941ee18a1b6b87309aa7d221d95a9ffea2bed3b59440"
+      "sha256": "9c8a179feec2d8a8933309bf142342fe44ba80f63bbfcf8f4ecea17b73cfa281"
     },
     {
-      "byte_size": 2330,
+      "byte_size": 2367,
       "path": "Prisma/generator/app/api/jobs.js",
-      "sha256": "69c9ae3858b2f2aa5acf5f6a3f085027b146f4e3ef7b2d71233b94ee11a644db"
+      "sha256": "d68dcb99965c3d3047fb2dcc6fe342e97d9f6524e1031fd2e5a8b75c908909b1"
     },
     {
-      "byte_size": 772,
+      "byte_size": 809,
       "path": "Prisma/generator/app/api/model-libraries.js",
-      "sha256": "0439c24db5afd5fd5949bacf4049e02b4026f37833e557a3756e752375473f44"
+      "sha256": "e89da98f60adf16898a2fa8242c4f9e6644f9df0d74e54665161897e6395fd9c"
     },
     {
-      "byte_size": 377,
+      "byte_size": 414,
       "path": "Prisma/generator/app/api/modules.js",
-      "sha256": "e451794f07f02a82c97cd5cf903d4a2a25b15380ab905b6d4c94400a1608b13a"
+      "sha256": "cd0ec09f52fe203c1634997a833c53851af6db17e41ee9d799941b314e7ba653"
     },
     {
-      "byte_size": 448,
+      "byte_size": 800,
       "path": "Prisma/generator/app/api/printers.js",
-      "sha256": "7998f21c12d0da0f4e21f8a0137d28092d661a9729d643382661b48d00a732b4"
+      "sha256": "6caff45c1cb9f68f3eb2004fcf44a2832daa733cd64fdfa0d387f20d695b3fa3"
     },
     {
-      "byte_size": 1441,
+      "byte_size": 1478,
       "path": "Prisma/generator/app/api/runs.js",
-      "sha256": "2d7dc1ae5989b6e7c5b3e9db023b602a92c837f6c5ea7ffd2bc6daaf6ccf9870"
+      "sha256": "444f7d4831b0d756811640d17c3b4fbe0f2e6b128413efed997237a1f13cf198"
     },
     {
-      "byte_size": 472,
+      "byte_size": 593,
       "path": "Prisma/generator/app/api/session.js",
-      "sha256": "90207f3352e9a8776624817d221fbde488508c7939fd28d162c571546cba7c4f"
+      "sha256": "646650eef7261573ad06b52cc1ca4c8cb9a7f1a18a57a1978060af39268fe6ed"
     },
     {
-      "byte_size": 948,
+      "byte_size": 985,
       "path": "Prisma/generator/app/api/settings.js",
-      "sha256": "70a4a7caa0568ff97770ab6238541c725801ad320639f3d49db10752318e9e9d"
+      "sha256": "cd669af6ace1ecb739c4825db0b0522de85904299c54b32fb77774f7c30f4306"
     },
     {
-      "byte_size": 4565,
+      "byte_size": 5129,
       "path": "Prisma/generator/app/bootstrap.js",
-      "sha256": "3c601288e560bda2d4183e362df1da397b1359a792a0c3ec478bbac35ebb1f29"
+      "sha256": "d49cd52a2e5233b4ded088e6f5bcb8a4141ecc584a2ca001e9aa893b0019b5b3"
     },
     {
-      "byte_size": 4558,
+      "byte_size": 4624,
       "path": "Prisma/generator/app/core/anchored-menu.js",
-      "sha256": "f99f62183b863686483d3abf99159c92b26aea4f4d7a3a8a29e74bea07bf2b86"
+      "sha256": "3504b990e54835b17dc65883aa84cf947a8056b83b0e90becd4077a2e1c915b2"
     },
     {
-      "byte_size": 30142,
+      "byte_size": 22558,
       "path": "Prisma/generator/app/core/application-context.js",
-      "sha256": "a5a9deb2e2c5fa1532e43f10547a3e1f7a4a174dc4e40d01af8a8b33f3b215fd"
+      "sha256": "4984e9ecf311ac52d919d744b33216d25326a686bf581764a422e4731dac39d6"
     },
     {
       "byte_size": 707,
@@ -850,9 +855,9 @@
       "sha256": "0dd368037d8987f1bec5ccc6922ec108ea5896b6d42aec589f132f371f510ba2"
     },
     {
-      "byte_size": 8745,
+      "byte_size": 20827,
       "path": "Prisma/generator/app/core/guide-geometry.js",
-      "sha256": "ee8649970cde93d2d05f11966a4fb1e7d1ead0031e0f337083c37cd5b32320cf"
+      "sha256": "619c9b86d23472c0fed378ed29f13e889751c9c245d558f71838d23209944da8"
     },
     {
       "byte_size": 1015,
@@ -890,34 +895,89 @@
       "sha256": "3232af98c66102576eba84a4ea27be5a000a3acb299c42b72d3367374176f99b"
     },
     {
-      "byte_size": 5801,
+      "byte_size": 7398,
       "path": "Prisma/generator/app/features/application.js",
-      "sha256": "e0d62235f1c07199229888b4426da0f1ae363d1e2cb57f7650787767075c49b3"
+      "sha256": "6374b2015dbe5242db3e8dcf47739d1222ccd38b3b488f0a5778deb61a1ccff5"
     },
     {
-      "byte_size": 56351,
+      "byte_size": 56173,
       "path": "Prisma/generator/app/features/event-bindings.js",
-      "sha256": "8b9ed11675493a1b9a950b74cfbfca81816039fdd3c529b2e674d8036bc1cfbc"
+      "sha256": "dbad2d2ee3aa84128c4aee64c011fae5b81e4a522f8d1c73aa861651c4cd4e83"
     },
     {
-      "byte_size": 28670,
+      "byte_size": 31570,
+      "path": "Prisma/generator/app/features/guides/actions/registry.js",
+      "sha256": "5d8adc0d99711056bc70c4f7230c14e10ace139fbe3bd6546286aeb661c0e6ec"
+    },
+    {
+      "byte_size": 21772,
+      "path": "Prisma/generator/app/features/guides/actions/workspace.js",
+      "sha256": "26d48eaa23e2344e669da39602499402cbf680f8174884e60b6b75b0e3edc4db"
+    },
+    {
+      "byte_size": 43031,
       "path": "Prisma/generator/app/features/guides/controller.js",
-      "sha256": "4cef036d00bd2aa45e6b4324c9bb427d110f4dca221c7a5676e6a079f63c4926"
+      "sha256": "2262658da6711fb97dcaf077d214f50654d6d094bb113fd7db7f81c9efccc80d"
     },
     {
-      "byte_size": 55658,
-      "path": "Prisma/generator/app/features/guides/definitions.js",
-      "sha256": "2d81da0d02fc474999831903dba51facfceb523f3debbc711e768247c07dc240"
+      "byte_size": 26521,
+      "path": "Prisma/generator/app/features/guides/core/schema.js",
+      "sha256": "b8bd6c1a24ce31ee53fde692b83e1fc3df3a5e14a0af89d2b351f6f776d5a459"
     },
     {
-      "byte_size": 22395,
+      "byte_size": 4999,
+      "path": "Prisma/generator/app/features/guides/definitions/guided-setup/guide.js",
+      "sha256": "eb78b3a759d80b2b880c7083f0a7a0af2d5fa82117f83bda79c6bf76e33a3dfa"
+    },
+    {
+      "byte_size": 2645,
+      "path": "Prisma/generator/app/features/guides/definitions/interface-preview/guide.js",
+      "sha256": "e63c3044ed702456ccbc0ba535d03b0bdaa31867521a31ad2c09574510db416c"
+    },
+    {
+      "byte_size": 44863,
+      "path": "Prisma/generator/app/features/guides/definitions/prisma-generator-basics/content.js",
+      "sha256": "cae3d7b84c730b99420ef14756b43030b162599c9f1fa3c986bd37221c7e8291"
+    },
+    {
+      "byte_size": 7212,
+      "path": "Prisma/generator/app/features/guides/definitions/prisma-generator-basics/guide.js",
+      "sha256": "5acb694cc405e2cda430613a28712dce1201eeaed53bb91b8917339521e6547d"
+    },
+    {
+      "byte_size": 24700,
+      "path": "Prisma/generator/app/features/guides/definitions/saving-and-loading/guide.js",
+      "sha256": "432e501b7a10e55908f7fd4807216b8fbc676fda80951a83ef8a84fc4593eb51"
+    },
+    {
+      "byte_size": 26908,
+      "path": "Prisma/generator/app/features/guides/definitions/settings-drawer/content.js",
+      "sha256": "f95c8135c672d2238a0c9492e27112d538a3e0172cef9b53302454db32415fb1"
+    },
+    {
+      "byte_size": 16170,
+      "path": "Prisma/generator/app/features/guides/definitions/settings-drawer/guide.js",
+      "sha256": "c79e66d45041a8b98d92e01bd42ae9d1ee1d6f131997d4095cffa5e05ffbfec3"
+    },
+    {
+      "byte_size": 1686,
+      "path": "Prisma/generator/app/features/guides/definitions/settings-drawer/state.js",
+      "sha256": "a38bc7e2d886588822f14f329284394eb328c87412275891d9aa6c2d9730b0f7"
+    },
+    {
+      "byte_size": 41632,
       "path": "Prisma/generator/app/features/guides/overlay.js",
-      "sha256": "a2f65f5fcf8fe59d4b31a0cc68460c237fb7a841c77e968c547567a99356293d"
+      "sha256": "809f79aa8042fab2b0418b27dc202d63fff03ebc2f266eea820ec2b2df2a293c"
     },
     {
-      "byte_size": 32635,
+      "byte_size": 5349,
+      "path": "Prisma/generator/app/features/guides/registry.js",
+      "sha256": "ba516a4626ae6f6f6f7ff7af630858473676862bcaa62cc4fca9bdac6eae64c6"
+    },
+    {
+      "byte_size": 63401,
       "path": "Prisma/generator/app/features/guides/targets.js",
-      "sha256": "85d0a6fce3468d67b45a7df1bdd4db7eb1a69b5147b8dac26fac68ac8f444aa0"
+      "sha256": "cd3cd72d4732137bd40b286f17c5a3dd96a231bb7690473f0a81201a14b89aa9"
     },
     {
       "byte_size": 9400,
@@ -925,24 +985,24 @@
       "sha256": "e76bc5491ab8b62576c30071f3816c413306ed090cb598a0ffb1515937734ee3"
     },
     {
-      "byte_size": 62774,
+      "byte_size": 73298,
       "path": "Prisma/generator/app/features/image/index.js",
-      "sha256": "96d0c57a8633412dec713b1881b91dfe8bb547244b9aa79682a1f0ef1b7a712c"
+      "sha256": "030d9a258aac55cc88af3327725183befaaaba82d55b3e5a3d8f56e084585339"
     },
     {
-      "byte_size": 51183,
+      "byte_size": 55873,
       "path": "Prisma/generator/app/features/palette/deck.js",
-      "sha256": "e4c6ca5a15f40c84e90f5b61db4fd717f72be9dc8f1b0de297e25fb3e32f7d78"
+      "sha256": "dbc2f313ddd0948244211c4eb0a0f135d9571cbe49b721adc4a4ff16cc130677"
     },
     {
-      "byte_size": 7844,
+      "byte_size": 7968,
       "path": "Prisma/generator/app/features/palette/index.js",
-      "sha256": "03bb5c0520993a949f92b304122bcdca22d1fe05e263186ae5ff69a30c2513d5"
+      "sha256": "8485c573f14c8c0be09de07b6d8d32ff4b3a52f63663502536282c2d235bb054"
     },
     {
-      "byte_size": 9566,
+      "byte_size": 9865,
       "path": "Prisma/generator/app/features/palette/library.js",
-      "sha256": "4eb36ff473464d9bbf4b2611171feea9faab7eb836dec769c94c5dfc6f43d7df"
+      "sha256": "4de87d696159880658f3ba54ed4fc84a728342fbe64f3741d8541e18129c5f2e"
     },
     {
       "byte_size": 26532,
@@ -950,49 +1010,54 @@
       "sha256": "0f52d412ef2c04e571a09477b4a03ea6999e9f4bd706136ace0dfba0c9f0d38f"
     },
     {
-      "byte_size": 24785,
+      "byte_size": 26852,
       "path": "Prisma/generator/app/features/palette/suggestions.js",
-      "sha256": "7f7479de28da49342203f33994aa1baa8014b2ee154f5b9352db59ef93ce1423"
+      "sha256": "f0aed98e8366a675251959bb3a1fb487787dadc57174eef400af7d6a8e1b7ce1"
     },
     {
-      "byte_size": 20794,
+      "byte_size": 51175,
       "path": "Prisma/generator/app/features/printers/index.js",
-      "sha256": "f7378710e9ff35d8cc64744020aaa6bef2e03591fbf514d98938f0e6f28752d2"
+      "sha256": "9b4b621aa3aa5f4952866c0dd6d5022c768d074c4ee6adb6e4d4029e95dd7b04"
     },
     {
-      "byte_size": 22314,
+      "byte_size": 14174,
+      "path": "Prisma/generator/app/features/settings/contract.js",
+      "sha256": "f56a4ab1817e5c0739329c662cbf15d528b048da8da8eb0f9562d04433169b3d"
+    },
+    {
+      "byte_size": 35742,
       "path": "Prisma/generator/app/features/settings/controller.js",
-      "sha256": "23a5fbf88cdbd4ecdd5614a741ad5103e8149ebbe92288d270d682457474d061"
+      "sha256": "3dc4f1f61b9e5b72bbbe336d6268e97836b4638be62e68d0d79b3eab9cc8ba1b"
     },
     {
-      "byte_size": 14858,
+      "byte_size": 14462,
       "path": "Prisma/generator/app/features/settings/layout.js",
-      "sha256": "dfbac018847440698d65d0581ae0b2c0a0d8e1f06e4db38018e21f94e4ac211d"
+      "sha256": "7c61f33e3411abf25a0bbf88f45f92e950af26a9e13927a5f66e7a3ace75250e"
     },
     {
-      "byte_size": 20774,
+      "byte_size": 22309,
       "path": "Prisma/generator/app/features/settings/modules.js",
-      "sha256": "196fa9795edd453796d6d2f9987e552bb2ca811409d5b53bcf2d65dc6f5e38e9"
+      "sha256": "0f3315c3a59de032a6d504d2e903fb8571be3b580e244e45661908005e3dc0fe"
     },
     {
-      "byte_size": 87476,
+      "byte_size": 99028,
       "path": "Prisma/generator/app/features/settings/profiles.js",
-      "sha256": "85c1b284ba0020380205081cdd5fbc8cfb5ec811a88befd49e73cb8013328f3e"
+      "sha256": "a21706e93bcda823fb2234580d0c23facb05b21cf23a5de6d92ffa74f3ea4dc0"
     },
     {
-      "byte_size": 53568,
+      "byte_size": 66562,
       "path": "Prisma/generator/app/features/shell/index.js",
-      "sha256": "e9022beca12252b0c0c501037ac5c1696c810c4053e0cfe95172febcc8645552"
+      "sha256": "d700a34ba365d0dd8434176db3a3c20c8f19fe35982c73d93eb80a871fdfbac4"
     },
     {
-      "byte_size": 6862,
+      "byte_size": 6879,
       "path": "Prisma/generator/app/features/shell/theme.js",
-      "sha256": "0964d4d9154b121119b358325913cb8c429bf6582625a9e522d3eb0bc7ba9961"
+      "sha256": "9050f3e652785748a90cd0107ff54bba8724f2da647fbeef65eb8c2cb18ae8f8"
     },
     {
-      "byte_size": 25364,
+      "byte_size": 25750,
       "path": "Prisma/generator/app/features/solve/batch.js",
-      "sha256": "30b5a4588060aa4074548bdc0491815f10847eb8f546fd489309efbe6ff41724"
+      "sha256": "b7bc253a3d2c1d15729ceb4a8bde09c5bbd7cc5caa2df39d6c446c8f755d9afa"
     },
     {
       "byte_size": 28915,
@@ -1000,9 +1065,9 @@
       "sha256": "eb982383fedd15b71f6c6dfb02dbf2d5ad3a7c11411b1a2fc38885a7b6a15a65"
     },
     {
-      "byte_size": 56558,
+      "byte_size": 59714,
       "path": "Prisma/generator/app/features/solve/controller.js",
-      "sha256": "c6e862663c2e702154b08662acfa432f0d9a41c9a6d9b53375fef27ac296e275"
+      "sha256": "af67f308b1db8f12a5e64f00800dca765153d2c8d77f154e5343586f47211620"
     },
     {
       "byte_size": 67911,
@@ -1015,19 +1080,19 @@
       "sha256": "0290499b414e4197fc5f35321ab393eef4aeef9f710d1a142175f82917c0a0a0"
     },
     {
-      "byte_size": 76726,
+      "byte_size": 77193,
       "path": "Prisma/generator/app/features/solve/recipe-viewer.js",
-      "sha256": "2fcc64fe0858925ae3a4e61ff0eaec2312a52e927292533de88845c1d93cf130"
+      "sha256": "a47de1c334cd9ecc16eb1bceb07b9b3f06a40b38e471378c4dd420aeaa351d65"
     },
     {
-      "byte_size": 34245,
+      "byte_size": 35652,
       "path": "Prisma/generator/app/features/solve/run.js",
-      "sha256": "a921ee83b7d375969d7d96a4c9c9439643bc97295c38fab25fd2feebd395140c"
+      "sha256": "af6586e8efb032378a86a9b8d2293bb748fdb39a28e0ad9de8bfabffaed8e84a"
     },
     {
-      "byte_size": 116745,
+      "byte_size": 118793,
       "path": "Prisma/generator/app/index.html",
-      "sha256": "f250e300d2ddff39ad0ed891514f989d1cc52c6a2db62422765bc4c26e8685bd"
+      "sha256": "019ea05ef9a8f83ab015f32253b1eeece0be1ece3e33c5d4aa934e06c0c667f1"
     },
     {
       "byte_size": 174,
@@ -1040,9 +1105,9 @@
       "sha256": "4ae935ef906a8954168983d48aaca9acbb0d53232a095d20a32e0baf373b1dcd"
     },
     {
-      "byte_size": 1030,
+      "byte_size": 1092,
       "path": "Prisma/generator/app/style.css",
-      "sha256": "6dd596f003aa31d7edb6271f9e997053b072b0f82fb45cea4a6a00c8c5e40a76"
+      "sha256": "05ef5d8348190fc7609efae85fcf17914aad424a245c3091089f71d64acf2b33"
     },
     {
       "byte_size": 696,
@@ -1060,34 +1125,34 @@
       "sha256": "48aff169dfb92cc7791889e7969a6460a8166dc3ab9cbea46a1f740cc9cdfe6b"
     },
     {
-      "byte_size": 10391,
+      "byte_size": 10483,
       "path": "Prisma/generator/app/styles/export.css",
-      "sha256": "fd4878557789b4310968e5f500c22cb0f2ca3af86ae57d965612ddda683486b4"
+      "sha256": "5b3143e4dbec28c5a5ad891f23a078442c799657f6f74c940887c047576ef342"
     },
     {
-      "byte_size": 6393,
+      "byte_size": 12095,
       "path": "Prisma/generator/app/styles/guides.css",
-      "sha256": "6acc3f3c36a0a5d50487142de3760a190dafbbdc9f258d8998c0d996b9d3b210"
+      "sha256": "fa3cfaba38dd7b1b20ff8ce486842cac6f19540d3ccb1b8b09bd0bc4348bc0b7"
     },
     {
-      "byte_size": 23702,
+      "byte_size": 24830,
       "path": "Prisma/generator/app/styles/image.css",
-      "sha256": "66f5a9e012e3897f001d340b5cf5fb92219a2f533b07fca869760ba69d168d74"
+      "sha256": "7792c2744b6518ce2894b59d0da1919d7373d88627bf4dabd7d3bc2f87e74eae"
     },
     {
-      "byte_size": 18431,
+      "byte_size": 17192,
       "path": "Prisma/generator/app/styles/palette.css",
-      "sha256": "9df83c3c935b8ed998ef938877ea4944dcd5de5b449171be87da213b61138418"
+      "sha256": "a9a6c3736922f0f9792b963d42fcb7d4db294d62a1cfd57a44a02836068d0173"
     },
     {
-      "byte_size": 8497,
+      "byte_size": 15302,
       "path": "Prisma/generator/app/styles/printers-and-modules.css",
-      "sha256": "e7c67b40aef1fcbe59024c0fa854292aee3632a5238a7b34927d2d6288267f95"
+      "sha256": "7f031f5d321fb84bba8742596fb4ed0a6c9e475597e87192584221a9ec6bcfd6"
     },
     {
-      "byte_size": 12785,
+      "byte_size": 12353,
       "path": "Prisma/generator/app/styles/profiles.css",
-      "sha256": "80a54f304bfc4c6c78914d057a60c17b3207d948700c3b81d404054bf1f41868"
+      "sha256": "8ec2607643c341a868aca09bafaa94d13083a7663286c1f138b650d703e6d706"
     },
     {
       "byte_size": 13222,
@@ -1095,29 +1160,29 @@
       "sha256": "2ede4fd0e755df77f5ba8ee4675afc433351b0e4286bbb9353467caaf60ed5a6"
     },
     {
-      "byte_size": 6977,
+      "byte_size": 11438,
       "path": "Prisma/generator/app/styles/settings.css",
-      "sha256": "2fd957889666a0dc9f25cfc6866b89d07e43c7305920f839fdf67fbfebe2830b"
+      "sha256": "b50ccb60a2b8f39f08b362e1c42b03e9227a2aeabd089c8030ca2158fc18b47b"
     },
     {
-      "byte_size": 20673,
+      "byte_size": 20783,
       "path": "Prisma/generator/app/styles/shell.css",
-      "sha256": "ad05fae7a910c99e7de79ca41b581559b231d1e79bfec3918575189d0dab5000"
+      "sha256": "1312acea779a1338b8765fc569934b3956995228189e9afe38a2358b3a669a34"
     },
     {
-      "byte_size": 24538,
+      "byte_size": 25016,
       "path": "Prisma/generator/app/styles/solve.css",
-      "sha256": "a902d09d9a16a90d4d0cfcf3eff6f227ee8b5169d5b76a422774d19ef36d76d6"
+      "sha256": "cf0948a83cd32ea6232a794bad110a5196580863de0979b3c7f7c3827f07b0bc"
     },
     {
-      "byte_size": 13949,
+      "byte_size": 15499,
       "path": "Prisma/generator/app/styles/surfaces.css",
-      "sha256": "b118b8cf5ce2f3b1c4cb709b9bf3bd330d87fe64a7b9fc52df463eb37383a48f"
+      "sha256": "80213849cfbfb1f41e556802f5595ede7e8ab6de2396da4361aa3470d8f71466"
     },
     {
-      "byte_size": 2522,
+      "byte_size": 2552,
       "path": "Prisma/generator/app/styles/tokens.css",
-      "sha256": "a53ab088d7896eb0b441acb4d074c3c1b59ce892b33d0eda0a4d4b684adf7680"
+      "sha256": "60e097084aa5faac5a2df53b5a130baf87b7e8b0dfc70851ae059a3e80999d4f"
     },
     {
       "byte_size": 13550,
@@ -1145,14 +1210,39 @@
       "sha256": "f8d58e40566c8e038e16e6b0df726d5577e59affd1919f0c001e033dd5b186fe"
     },
     {
-      "byte_size": 6723,
-      "path": "Prisma/generator/config/resolution_schema.py",
-      "sha256": "7599fff1879ba91776bc3cbd5d828a1e62ab1ec47287ca79a1734010e6e24a11"
+      "byte_size": 6861,
+      "path": "Prisma/generator/config/layer_budget.py",
+      "sha256": "0d5f10f0765d5fed3f271692eb54f3bde668b59892a569d15458a8663386ceb6"
     },
     {
-      "byte_size": 7417,
+      "byte_size": 8089,
+      "path": "Prisma/generator/config/print_setup.py",
+      "sha256": "d7e2305c6decbebaf679dc0dd2cfe4f0f849393ae67149b701b9177f0d5d8ae3"
+    },
+    {
+      "byte_size": 6724,
+      "path": "Prisma/generator/config/resolution_schema.py",
+      "sha256": "760d6ef3254d300fa49f3d59842d9c24a7c5d2b3b555f407ec72695adc129716"
+    },
+    {
+      "byte_size": 9248,
+      "path": "Prisma/generator/config/settings_contract.py",
+      "sha256": "ef044fb9b7c3c06f2fec4e273f66598fb68279b614e1e24cb8e4d09c06166605"
+    },
+    {
+      "byte_size": 18284,
+      "path": "Prisma/generator/config/settings_evaluation.py",
+      "sha256": "6395507d8e193c856689b632dbc57022f3dba48f28d06df82c2becc903efcb59"
+    },
+    {
+      "byte_size": 1141,
+      "path": "Prisma/generator/config/settings_resolution.py",
+      "sha256": "c64d7115dcd41b06b81b291675ec6c69c787cc14f1a030deb0646b30c2684e19"
+    },
+    {
+      "byte_size": 8180,
       "path": "Prisma/generator/config/solve_settings.py",
-      "sha256": "41ffb4576b9fb9d806b0ef64ad58fe044f6452ccf6d72a83dd9d9f7dce01ba6f"
+      "sha256": "2f8006e30fd846e8e5e00aa224f141c9e2d7b2fff6892158ffa1275d125a83cd"
     },
     {
       "byte_size": 4343,
@@ -1170,9 +1260,9 @@
       "sha256": "76f8335f4780eb6a1763d56d9dc270fbc4b5dac23663eb4dea9d7bd019609dae"
     },
     {
-      "byte_size": 3676,
+      "byte_size": 3711,
       "path": "Prisma/generator/filament_policy.py",
-      "sha256": "75c0278a9441c0bd6264877f1849369676a66b51897dd425960e85d4d93a23a7"
+      "sha256": "bd27102bb01aeb568e94029f117fb7f8e08cbbc85cadafaf41aba76a9f43058b"
     },
     {
       "byte_size": 85,
@@ -1190,19 +1280,29 @@
       "sha256": "80f6f1d7a52c77f46cd5e6ed950ca7add65a008bbe9ac2c675a364be0bb9e7b2"
     },
     {
+      "byte_size": 11657,
+      "path": "Prisma/generator/guide_assets.py",
+      "sha256": "6ce59f50ace9df15a8a1f3c098b19ed094c9a7591904a9903a3ceb42c3d51493"
+    },
+    {
+      "byte_size": 26638,
+      "path": "Prisma/generator/guide_runtime.py",
+      "sha256": "d77cb1374356995b313459ac9cc9e1a27c6ee9e344065e9537619834a612a330"
+    },
+    {
       "byte_size": 6807,
       "path": "Prisma/generator/guide_state.py",
       "sha256": "331e580b8eeca323fa60b9e59caa4173d1de38d0e5958dfd3c1c4cafcb360f6b"
     },
     {
-      "byte_size": 9031,
+      "byte_size": 9270,
       "path": "Prisma/generator/image_ingress.py",
-      "sha256": "dbafea3654c3f2c2230f485c267908bcaeb8a64d719b3cd207513c2e0967c60d"
+      "sha256": "272e64c8c1749fa2234ff88c2393a624dbef91e5ffb6b2d7604f7274b3c1e0a8"
     },
     {
-      "byte_size": 66814,
+      "byte_size": 69269,
       "path": "Prisma/generator/lut.py",
-      "sha256": "854f192c9e9e8053d3045ef820d6f92bcac0883bf8dc0f80ad21b20dee85edd1"
+      "sha256": "5de0212919a50d645f156b8c7aff149f38b1eef7680c90be5f2a9a11b91571d5"
     },
     {
       "byte_size": 0,
@@ -1215,9 +1315,9 @@
       "sha256": "0bcbe2703ceb4f718844680db17a0b3d80e42a4b4be9c2af40ddfd91386ee06c"
     },
     {
-      "byte_size": 22953,
+      "byte_size": 23238,
       "path": "Prisma/generator/mesh/export_serializers.py",
-      "sha256": "ee60de42d9de10131eb90638ac796bfee4b3a69a3a0b8d6cf11eab8193c2dc59"
+      "sha256": "8f2f70a333b1faf9608cdaa2f22b61a412fc0a9978a6917e90497e2eea003f13"
     },
     {
       "byte_size": 12601,
@@ -1235,9 +1335,9 @@
       "sha256": "823300496e8a6c5efb27992c4a5ce8d6dcc5b8d2952ed73a10dfd6bcb88f447f"
     },
     {
-      "byte_size": 35124,
+      "byte_size": 35183,
       "path": "Prisma/generator/mesh/hybrid_white_cap.py",
-      "sha256": "512cd080e3f8d85fbad94b2c3407024e92ea62bdbbca90944f8ce8052ba8b42b"
+      "sha256": "e9a3692af4f3a10024cc10df4b5a4e013b1c7ae1eb12c96463f29050e07cf285"
     },
     {
       "byte_size": 772,
@@ -1245,9 +1345,9 @@
       "sha256": "f2772693f3c37935f7abf88ec9a3d7420891a16c350531ea21fef04bfac66510"
     },
     {
-      "byte_size": 119314,
+      "byte_size": 120071,
       "path": "Prisma/generator/mesh/post_solve_export.py",
-      "sha256": "25a316612a6e709913c7b1df83a7f7d84e90f0e40dbdb9241e356208d6696a82"
+      "sha256": "ead2593b665c8e728c80d21742ecc0042521cc662417746e45c745e1d3947bee"
     },
     {
       "byte_size": 1511,
@@ -1255,24 +1355,24 @@
       "sha256": "8a0defccc1ace5fcdd58451bb1f8d2091a76f7c7ddc6f559e497849f8e5fb747"
     },
     {
-      "byte_size": 1573,
+      "byte_size": 1578,
       "path": "Prisma/generator/mesh/quality.py",
-      "sha256": "57ae607458fe1e39fa07df34b4bf8cd144e13cc388682c3c7af90d4633e5ca0d"
+      "sha256": "af480eebcd380f5fcd6810ce767ceac753ca371a9aa47499a86dcd075e9444d1"
     },
     {
-      "byte_size": 44539,
+      "byte_size": 44808,
       "path": "Prisma/generator/mesh/rectilinear_interval.py",
-      "sha256": "0875d0623dca21c9da760c584a8b20e249dc43fd38a629b4257e210130e84353"
+      "sha256": "126b4ec8d5022f5c2c5852a99c488e2bc490ec1eb23d3614e293482f54749d1a"
     },
     {
-      "byte_size": 5533,
+      "byte_size": 5534,
       "path": "Prisma/generator/model.py",
-      "sha256": "2ec7e392fd6d087882eee213e8af0538b85b864bb298596a045eaff1f79c252f"
+      "sha256": "dceffc83cb7ee64fef4167f3d21c79b73b64488be5f65583baf43ea96be92cbe"
     },
     {
-      "byte_size": 4931,
+      "byte_size": 4932,
       "path": "Prisma/generator/model_domain_display.py",
-      "sha256": "66ceb285f690bd9434ee111d681df31d84cf97b99e9a5b7f6b0c6ec58a34755d"
+      "sha256": "e452b635589f6e555cbc2cc63179a790b71fb984459708a0c412de2585d3ee34"
     },
     {
       "byte_size": 0,
@@ -1280,14 +1380,14 @@
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "byte_size": 97005,
+      "byte_size": 85564,
       "path": "Prisma/generator/palette/suggest.py",
-      "sha256": "8863502cbaa178b6d6b9c738cd1759ab47f375ad41de56523eaea632b7ef8802"
+      "sha256": "7436912fea6fcb1240bb3cf75e7f774bcf6b90fe34ec45b21684d2b2971f3006"
     },
     {
-      "byte_size": 59783,
+      "byte_size": 60729,
       "path": "Prisma/generator/photo_stack_lut.py",
-      "sha256": "55380293a8d8a808a66ffb0223e21d834c1938a752b091ed15e1e978790a82a7"
+      "sha256": "fa21a381458df2b6319211d1cd8913ef10863817bf27142f134f9eca74e6d2d9"
     },
     {
       "byte_size": 564,
@@ -1295,14 +1395,14 @@
       "sha256": "0fb2bf4a98086e3dbdf45c1667a17eed71195240fc14e09fcd56d1efee444453"
     },
     {
-      "byte_size": 4200,
+      "byte_size": 5776,
       "path": "Prisma/generator/pipeline/base.py",
-      "sha256": "9312b57682a701f207a3d3e3ddaae15fd20f198fcc5a31b24aa3cbfd63c41541"
+      "sha256": "50513feabc6211498adfbd6add409d86522b3715c4a5d21202046293d15d72d3"
     },
     {
-      "byte_size": 3594,
+      "byte_size": 3602,
       "path": "Prisma/generator/pipeline/derived_views.py",
-      "sha256": "abee34fe23ec9c5ef013ca315b92c6009f5aacc5470d2b1bd0c6511889be9afb"
+      "sha256": "3f74fa561427ea415c122260ebadc8c0c41259f5a5c40f80233d46ee8e657232"
     },
     {
       "byte_size": 12869,
@@ -1310,9 +1410,9 @@
       "sha256": "a48f18f1853b366753d938bb2fbdeefcc1648d7e7feaa1f3e7411597cb8883c2"
     },
     {
-      "byte_size": 815,
+      "byte_size": 825,
       "path": "Prisma/generator/pipeline/height_budget.py",
-      "sha256": "9ca6d0cfae2c5ad3000717c0159cb2564e45b5d7f22cdcc8d9dc9b75a2e3e08b"
+      "sha256": "236bdd8e0aa844cbd04b79eff2ff85333b1f75a69c0cabbb31923fbd6ba6882d"
     },
     {
       "byte_size": 29210,
@@ -1335,14 +1435,14 @@
       "sha256": "8e9e80bf5eb86352f4b363eb121e7422527f06da3c25ed72e6a77b0537ca230a"
     },
     {
-      "byte_size": 53877,
+      "byte_size": 54116,
       "path": "Prisma/generator/pipeline/runner.py",
-      "sha256": "968a0eb68712e133d706c8c4ff7c53387d4f0157676a705377c79d4f9524bfe9"
+      "sha256": "7a94f9adbd30b9f704ff6ee4df66d362b4c3b2ec4ae05a42b71205630c9202a8"
     },
     {
-      "byte_size": 8233,
+      "byte_size": 8234,
       "path": "Prisma/generator/pipeline/solved_material_plan.py",
-      "sha256": "f4c8bbd20951ab486899fc021d3bccea2a3f53b17c95f6e38b6f3ca9b323de29"
+      "sha256": "40035ec666d0f92a307e1bc42d6a0eaeda89006d79e16eefbae4b06eed25a994"
     },
     {
       "byte_size": 163,
@@ -1375,9 +1475,9 @@
       "sha256": "83a5aa8083ab60079c761344c218647d82b4500e646be123426165d197cfbe02"
     },
     {
-      "byte_size": 41789,
+      "byte_size": 41773,
       "path": "Prisma/generator/pipeline/staged/postsolve_diagnostics.py",
-      "sha256": "1fc33759263e1ab55b480ee090c800b6b628178750e4f2630a216fa075fa7c3f"
+      "sha256": "e19c0d60af432c14583d05047603fbb42e64972606ab59a40fc07ae29a9c0484"
     },
     {
       "byte_size": 10959,
@@ -1395,9 +1495,9 @@
       "sha256": "780774b4b26d8ae4c2e72f00a766819dd87c1f02c95419151613dda7ba6b3c82"
     },
     {
-      "byte_size": 4854,
+      "byte_size": 5472,
       "path": "Prisma/generator/pipeline/staged/stage1_zones.py",
-      "sha256": "02470dfd7bfcfb27c351616426204536c53261c519f2e8819dbb78e94dcf3cb6"
+      "sha256": "7117d874161ff555ac770aa6532cd97372da35d8d1e0fb27ebb36153e1c9f5ea"
     },
     {
       "byte_size": 118,
@@ -1440,19 +1540,19 @@
       "sha256": "16d1627dbf40f3ac3b5e53090d888a4f3f560b14ad4474e59c05baf56764d875"
     },
     {
-      "byte_size": 63376,
+      "byte_size": 63344,
       "path": "Prisma/generator/pipeline/staged/stage2/printability.py",
-      "sha256": "53a1b9f98d54636a9a793ec95677b91b882daf5cebb6c4de2d776f4badb0dc1b"
+      "sha256": "9c3dc0ca3177053a740cf533f879cfc6f8187be786e495e3b475e09b054e63ad"
     },
     {
-      "byte_size": 40112,
+      "byte_size": 40025,
       "path": "Prisma/generator/pipeline/staged/stage2/refinement.py",
-      "sha256": "83248b149c12ae016b438ad4015007f3ceacfea74c70df48146e1b6972dbb9d2"
+      "sha256": "146b32b76bee192afd6f245190b689af65e1d96c03d3f23dd969985c630eb89b"
     },
     {
-      "byte_size": 73468,
+      "byte_size": 73492,
       "path": "Prisma/generator/pipeline/staged/stage2/service.py",
-      "sha256": "5df94aa96f183ca98f9e9e67a39ab84d64a51a97e5a09cac76f48115c0a44b9c"
+      "sha256": "d57401385f3ceabf2ca99c6e53e870dbfd6534594ed05a2a642295438d0f0255"
     },
     {
       "byte_size": 1274,
@@ -1470,9 +1570,9 @@
       "sha256": "dc9e6d990372cc6cf62b5dede2dda85262d25fe70ff40d1b6901d81611100514"
     },
     {
-      "byte_size": 29933,
+      "byte_size": 29925,
       "path": "Prisma/generator/pipeline/staged/stage4/detail.py",
-      "sha256": "d99cb9fe3ec4e38743ca43e58289f706d8ef9117f2ce406e23bc2db8e73dba34"
+      "sha256": "ce617eaff04f6330e7aad481f4908a44cc7029245f24df5bdfbc6c8231cad00b"
     },
     {
       "byte_size": 6436,
@@ -1480,9 +1580,9 @@
       "sha256": "5dc8af1ed54b5cf41bc34b62aa9fd4e76c625e0f105c14cb1cb3e68354a95b12"
     },
     {
-      "byte_size": 53687,
+      "byte_size": 53679,
       "path": "Prisma/generator/pipeline/staged/stage4/printability.py",
-      "sha256": "c0723fe9c80087f2bae6dab983d49c756c27def8cdac22ca504cc99db4e08855"
+      "sha256": "db909e9e22e672e5a7f55381de58bd87cbb5e8faab3f0e267b5a16507486e28e"
     },
     {
       "byte_size": 13261,
@@ -1495,9 +1595,9 @@
       "sha256": "51576e3fd2d2d851e564981a999680adc022a24d1bb346874e2b2d291aee5ca9"
     },
     {
-      "byte_size": 15872,
+      "byte_size": 15864,
       "path": "Prisma/generator/pipeline/staged/telemetry.py",
-      "sha256": "8750637cb5400ee1f81e75c88658daf7d616c52f9d1a6c6a159a2f9dbe780821"
+      "sha256": "78b52150f2444260e5e57ab21deb48658c8a47b418b838f867d420c702c18db9"
     },
     {
       "byte_size": 3314,
@@ -1505,9 +1605,9 @@
       "sha256": "df1ee7e9b2629cfcfc13e6601fd2ab5c76b0b333a57506b951f3ac90608e5b10"
     },
     {
-      "byte_size": 18528,
+      "byte_size": 18521,
       "path": "Prisma/generator/pipeline/staged_artifacts.py",
-      "sha256": "33df5d707ff1dd71ef52341b4b5eb95aecf8eeb7a7ebaa3c5fa32d9f0e9c8b85"
+      "sha256": "83657352df343975da4c90492e27a4d2bf9cb3c74d93ba75c6a26abb98c0c192"
     },
     {
       "byte_size": 17485,
@@ -1515,9 +1615,9 @@
       "sha256": "04c6ad293156d6452f49a26d6131e0fe70a93cf72772926dd23a1888637f0f9c"
     },
     {
-      "byte_size": 34253,
+      "byte_size": 34411,
       "path": "Prisma/generator/pipeline/staged_printability.py",
-      "sha256": "bab1b8e6a748134f81314a0322fdc2e4c6a748d9a68f4721d92ee4564d80256e"
+      "sha256": "50720e4b832f1cf32d81b6fc5089c2ad23a3247a4143716c590f102779616221"
     },
     {
       "byte_size": 167,
@@ -1525,34 +1625,34 @@
       "sha256": "70314c1dd3fd47fac9047c3431ef4d122da9257a060e96b5a31faef36d07cdde"
     },
     {
-      "byte_size": 12735,
+      "byte_size": 13406,
       "path": "Prisma/generator/pipeline/staged_solver_helpers.py",
-      "sha256": "50e0407e491cb2a4288f1c4b59b85b398b2cf55f54bfb022ff81d5baf8cd0b55"
+      "sha256": "ecc65c12c7caefa58de5cb0421d23aaf51e6c40ec72aa51f2b66aa88b12e6699"
     },
     {
-      "byte_size": 7181,
+      "byte_size": 7717,
       "path": "Prisma/generator/pipeline/state.py",
-      "sha256": "bf25f599871c6dd6ff4a87a8a476ded7339fe9a5960ae26d63eddf072102dd86"
+      "sha256": "317fd2850a2a54d138cb8ee32b8064ad8981a9e18402060b0a997e9d984290ae"
     },
     {
-      "byte_size": 4449,
+      "byte_size": 4450,
       "path": "Prisma/generator/pipeline/target_cloud.py",
-      "sha256": "897ea6797693a50ef6342d3f54673a6fc83471fb056ad8d37e857776314c3743"
+      "sha256": "340e31ab825f9073e7b97ffdff34efead8992ce1a97f9f4ddeb7b19df8155d8d"
     },
     {
-      "byte_size": 190,
+      "byte_size": 191,
       "path": "Prisma/generator/preprocessing/__init__.py",
-      "sha256": "cb72df238195e43474c407343a1b6fe49b52f39a1d590cfe1d43a73ec6c149e6"
+      "sha256": "a7ad6a74a288a12d0507afba7ee2f7d294b31b18f1e949caeb1e81b62a4e3875"
     },
     {
-      "byte_size": 4431,
+      "byte_size": 4433,
       "path": "Prisma/generator/preprocessing/color_convert.py",
-      "sha256": "802c87179d5e18a639ea50be2c518fff3c8d4da389dae6fd250ae4910c6a5887"
+      "sha256": "59a45c5eaaac777a3bb13c02b2cc6eaac18cce3eee3e8ee1f98db70567150f4d"
     },
     {
-      "byte_size": 3008,
+      "byte_size": 3069,
       "path": "Prisma/generator/preprocessing/feature_scale.py",
-      "sha256": "6c43c8b3e32c36cd28646a50e40af8080e7dd7b45bc2afe0e0a754249d50e015"
+      "sha256": "2b17a0a4cee4c6f39a3b284dd32659e9cb918ff234fa248fcc7f97c28e2f589a"
     },
     {
       "byte_size": 3337,
@@ -1565,44 +1665,44 @@
       "sha256": "14b0f2ce639c9dc5e93fa8cb58a104d2f0aae82c72e4d6892695b2af999f9d39"
     },
     {
-      "byte_size": 4946,
+      "byte_size": 6081,
       "path": "Prisma/generator/preprocessing/operators/a1_bilateral_denoise.py",
-      "sha256": "a47d2b6094f3b1ee756323fe89b978536348bb49afb080e8c83e3c1206c90fbd"
+      "sha256": "1b63ba6977801c4e530fb1872f3b313227a021a9787ed9f46cc355c68d04ed17"
     },
     {
-      "byte_size": 7901,
+      "byte_size": 9027,
       "path": "Prisma/generator/preprocessing/operators/b1_printscale_bilateral.py",
-      "sha256": "16d8f57737dfc27006f594662bb377dab42f495c372d7ff61cd44d7b1bd8de2d"
+      "sha256": "b1105e8e08901fe6586059c587ccc7190e0882495690581daac23e6022d15de7"
     },
     {
-      "byte_size": 8886,
+      "byte_size": 10482,
       "path": "Prisma/generator/preprocessing/operators/b3_tv_flatten.py",
-      "sha256": "bdb6e4ade59b412c754227a0301ac7aa54e6e3f2c028737df5eb05f99c29a68d"
+      "sha256": "9d1cde8459790258728558985c41a45db3ac4025fab2399ccc19ded0f2f99c02"
     },
     {
-      "byte_size": 13129,
+      "byte_size": 14232,
       "path": "Prisma/generator/preprocessing/operators/c1_achievable_tonemap.py",
-      "sha256": "2d490c2f57b753f4bed373d23a2183447594dafa83391e6116d6178561ea5b3c"
+      "sha256": "2db029809e97dd193cbb7e1dee474fa2e98479c5e6c31907e56c5f65f5dae56f"
     },
     {
-      "byte_size": 14831,
+      "byte_size": 15654,
       "path": "Prisma/generator/preprocessing/operators/c2_soft_gamut_compress.py",
-      "sha256": "1a63e035fefa67c8e57a8984528eeb2bf6a207277206df126c782fa70895d6ab"
+      "sha256": "2fef74c76278015c131e793f430c6170eb04c2954ae1184023a9a6464451b53e"
     },
     {
-      "byte_size": 24674,
+      "byte_size": 24678,
       "path": "Prisma/generator/preprocessing/palette_metadata.py",
-      "sha256": "74eb9b43f1422f109d5a84d432a6a4276f92c9f4e3b8f496661fd6e8867dfe41"
+      "sha256": "7fccf201c8c633dd13bc04dd80f80ef1368a45e8fe7f8721a603123a6b04b63e"
     },
     {
-      "byte_size": 9878,
+      "byte_size": 9887,
       "path": "Prisma/generator/preprocessing/runner.py",
-      "sha256": "0b3a45e52d928b69a6c550560d9c533a22565f001bae28f7f2b587046efba4e7"
+      "sha256": "f056c6e4db541c79e7483e9d44b6be9c7f6bf50165c56350662cb84aae60ab47"
     },
     {
-      "byte_size": 3151,
+      "byte_size": 3157,
       "path": "Prisma/generator/preprocessing/types.py",
-      "sha256": "8e999986ddd3fdea8e34386f57581381b98234d92f11b6e12e184b049605b580"
+      "sha256": "40737347ad14557acef4a1f315b76f46a885b7f22ca7315ea20b129430d57a8c"
     },
     {
       "byte_size": 8007,
@@ -1625,24 +1725,29 @@
       "sha256": "b9dbc706867a4c130764c83e30a8af29d88e93d309f3ac3ce1d335ca6cb855f1"
     },
     {
-      "byte_size": 3842,
+      "byte_size": 3843,
       "path": "Prisma/generator/run_store.py",
-      "sha256": "2409b22bf969ef9c575ee926f2e38523e7f55bca6aea2a43485a85e7d6950cc3"
+      "sha256": "a6b0f8483e04869879d5fe2241d57cc94eac7524534332dd897d496467cc7a67"
     },
     {
-      "byte_size": 3104,
+      "byte_size": 3148,
       "path": "Prisma/generator/scalar_palette.py",
-      "sha256": "48d0688e1e307f2928da62097231ecc06ccd914a64dfa6b6af2daee84198cd7f"
+      "sha256": "207a10ad692b6c9babf995424f818aa0d1eef6451300ca87ce76ea252aba5a48"
     },
     {
-      "byte_size": 373572,
+      "byte_size": 461153,
       "path": "Prisma/generator/server.py",
-      "sha256": "ce4d9fb7f31ac1b830b95f15e308a98e39ef649d27033b00398b6370e69a8aef"
+      "sha256": "6f825f66b1d802f94f04877514f3efd6f3db4d502491c250f33b2755ba121235"
     },
     {
-      "byte_size": 10453,
+      "byte_size": 10715,
       "path": "Prisma/generator/solve.py",
-      "sha256": "b0436af2665342438d934195da86dafcad770e9f4701decef2b00dd9e65f5655"
+      "sha256": "01984c87acb396f6ef1ef8b7ac5fd939ed4955bc5c899fa67129392cb9d37ee6"
+    },
+    {
+      "byte_size": 4347,
+      "path": "Prisma/generator/solve_grid.py",
+      "sha256": "9c9417229d470a9d63cdcc95e3bfc28967e7780729b900813b1485c1c93c1643"
     },
     {
       "byte_size": 47647,
@@ -1655,9 +1760,9 @@
       "sha256": "a50dc31d7d32b10ba5ab5acd529631a8f7a436920ff65639f151cc4bb704a1cb"
     },
     {
-      "byte_size": 5700,
+      "byte_size": 5709,
       "path": "Prisma/generator/thickness_maps.py",
-      "sha256": "d948253e983890dd26365aac80a8233a1ba13af98587fe24ae199eaff0ddbcf6"
+      "sha256": "9031e1f408550ad42f7f6a229d5dd14ba22bd05b783d1b958c584378e30ba240"
     },
     {
       "byte_size": 1397,
@@ -1665,9 +1770,9 @@
       "sha256": "2aebec319e4680aa853264144deb96d380c74b4d290b35eb762d1978ae8169d5"
     },
     {
-      "byte_size": 14331,
+      "byte_size": 14347,
       "path": "Prisma/launcher.py",
-      "sha256": "a0082f1cef831f2cb07e9e99a5846173bb22cd145396b23074b1236d017d6f0a"
+      "sha256": "5b8c36871e1a505e3cabe6e8ca855c857734449170e7251402c9df1281b8e15e"
     },
     {
       "byte_size": 88,
@@ -1745,9 +1850,9 @@
       "sha256": "9e3a232b9ebf57e6f0a7fe3da45abb310a3169031dc8d4fc7cbf1f0b0cab0659"
     },
     {
-      "byte_size": 81510,
+      "byte_size": 81511,
       "path": "Prisma/lib/photo_stack_model/predictor.py",
-      "sha256": "0a128faf6e1e4e11e2cd61ecec18051e68e6e45555629b689ff0d12c6fb1cfb6"
+      "sha256": "eec37aeebfe9c7d4d4e5f0d996345079ce44a3062312e230221375ca8d4c1416"
     },
     {
       "byte_size": 1889,
@@ -1755,9 +1860,9 @@
       "sha256": "81a983486e809247a209ef25bf8fd94c932143b70fe8a7799318fbabfaf4e629"
     },
     {
-      "byte_size": 3083,
+      "byte_size": 3188,
       "path": "Prisma/lib/platform_open.py",
-      "sha256": "592795f488278de1d0a78f18e5469e54511864051ab16feafa16b26b73299934"
+      "sha256": "28927e43540e0baaedb246e56c56a4d869b439be1f8e34aa6dcbe07458dccb7a"
     },
     {
       "byte_size": 18988,
@@ -1790,9 +1895,9 @@
       "sha256": "d067a95cee33dfe855d47a435753d52fe22c680b8e017072f0a95a16ed4c442d"
     },
     {
-      "byte_size": 2177,
+      "byte_size": 2223,
       "path": "THIRD_PARTY_NOTICES.md",
-      "sha256": "f537abe559b1df62a1e697dedb2e823980c9a30829f47d3dcbf66840090383af"
+      "sha256": "644a1f2198dd17f07bc8829cdd157640ab40b22c9bf775c651df4a569d007ea0"
     },
     {
       "byte_size": 3185,
@@ -1800,9 +1905,9 @@
       "sha256": "67396acb3a95b6f6aece9f4751c002e039917f0faae5abc9ba26617f89715cc3"
     },
     {
-      "byte_size": 3138,
+      "byte_size": 3253,
       "path": "packaging/PrismaCalibration.spec",
-      "sha256": "591f82a6acef63b37f7ebf0f80365a7666a09401c7d3bf1a54c18f61ed65db47"
+      "sha256": "3dfa4b049e571ecace1e68a16a1e5ded4a738ea026fbb117e3bf7ca5494a26d2"
     },
     {
       "byte_size": 5603,
@@ -1830,9 +1935,9 @@
       "sha256": "f6221705fd92f4ba404ae9d667c0905ce7abfbfd78431d232981e851d3ccd324"
     },
     {
-      "byte_size": 12374,
+      "byte_size": 12674,
       "path": "scripts/collect_third_party_licenses.py",
-      "sha256": "a4fefc2618f0e8e41e3a82544dae026507c502c2886802afd4798304d5c9f217"
+      "sha256": "5dac68dd15d192cfc7ad0cf2f73317fa10b0a2d9a6dc23fd7b54341f76f498a4"
     },
     {
       "byte_size": 15362,
@@ -1860,14 +1965,14 @@
       "sha256": "f810e8a875c3ea61803e2b063d829931f6130a7fddb6b7e588a33dbead64f587"
     },
     {
-      "byte_size": 1752,
+      "byte_size": 1753,
       "path": "tests/calibration/_image_import_kill_worker.py",
-      "sha256": "949e9db7fcc8baf57975f7ecab99bb30813b3f0d10278d643eab21bb3009d0a9"
+      "sha256": "29794f5e36fc40f098c1312bbe470f543eaa69455e2131e39f75fc59ae3da350"
     },
     {
-      "byte_size": 889,
+      "byte_size": 905,
       "path": "tests/calibration/conftest.py",
-      "sha256": "56f5496cc43540e83e287f5932975bad760df80806a8c09b0e280cee7cd68d88"
+      "sha256": "0f580996165340f00895b3f5a9b54260192a1e568c07659fa89d0810acf3807c"
     },
     {
       "byte_size": 55,
@@ -2305,6 +2410,16 @@
       "sha256": "d280a5ebc97baf34b324afd70d3e28bd6c9d86581affcbfe6736aab68e3a8ba9"
     },
     {
+      "byte_size": 153902,
+      "path": "tests/generator/fixtures/guide_contract_before_modular_cutover.json",
+      "sha256": "c796e060c397cc82860c6bbaffa85a1988b49a66165ad8dc92a179920343043e"
+    },
+    {
+      "byte_size": 1494,
+      "path": "tests/generator/fixtures/solve_grid_rounding_cases.json",
+      "sha256": "905cb99ebe4acba3b63a21b42055d3eb9f5abeece4439273c10b31720cbd43b3"
+    },
+    {
       "byte_size": 0,
       "path": "tests/generator/preprocessing/__init__.py",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -2320,19 +2435,19 @@
       "sha256": "c162b439ddab4b54bf213d6dc094def140096372f56ee6573e2e6899ed44c38f"
     },
     {
-      "byte_size": 8852,
+      "byte_size": 8845,
       "path": "tests/generator/preprocessing/test_b1_printscale_bilateral.py",
-      "sha256": "b8bc8f9465a668d651abf2b86cc2ae80312df0a9bf622ad97ae7fa016afab5d0"
+      "sha256": "a39c9d640ec2a96892d71071a23ef68e4893a217efa8a3e1d771e72dba54a05e"
     },
     {
-      "byte_size": 14058,
+      "byte_size": 14065,
       "path": "tests/generator/preprocessing/test_b3_tv_flatten.py",
-      "sha256": "36c4767d629485b4ae7f005266463c5bc9d12cecfff4b9447f6ceff7bf8dc3e0"
+      "sha256": "1d086afe81dd25a8043eff5fcb9c3961d33f2d9af5d19c08069ecfcc2d8e73fb"
     },
     {
-      "byte_size": 7407,
+      "byte_size": 7411,
       "path": "tests/generator/preprocessing/test_b7_resample_kernel.py",
-      "sha256": "de8c043f9e152ffc938185b5427136f682ff45f2ef1bf535de16887c33069f94"
+      "sha256": "5da3622d2378056d9f9be7559e754f6167135fada0f84672651a605641d0dbc4"
     },
     {
       "byte_size": 8698,
@@ -2350,19 +2465,19 @@
       "sha256": "ec746cf7cc058f8a9277fcd8d9be441c70b54bb3c0f0e2e6ab3cb0e6f25fe34f"
     },
     {
-      "byte_size": 5071,
+      "byte_size": 5076,
       "path": "tests/generator/preprocessing/test_f1_smoke.py",
-      "sha256": "cbe4bd89467c5ff6b049ceb54552fd44b048a839438a573b07200045b4dd5370"
+      "sha256": "45da0e8f9322161cc1adbcc10cbe23c72560edc6cc17591388b11fb0564e4fd0"
     },
     {
-      "byte_size": 9314,
+      "byte_size": 9330,
       "path": "tests/generator/preprocessing/test_facade_threading.py",
-      "sha256": "542020ad31c65399f91c307cbc5c258ff72c91371a51c9bc8b93562d031b4293"
+      "sha256": "a7aa92edfe3b00ce290fb84a6f7ffcfc8be4cc56aefc0692b1c293fcaf1bfa95"
     },
     {
-      "byte_size": 3034,
+      "byte_size": 2886,
       "path": "tests/generator/preprocessing/test_feature_scale_resolver.py",
-      "sha256": "cb593fb544d7416504474dc602f1266fb9a99f839fbfde00e058e4d448443fb3"
+      "sha256": "ff5fd7d88b515fa4f40f8716367d7e2bdee9fdd9f086573569f32b0be257b9ac"
     },
     {
       "byte_size": 8856,
@@ -2370,39 +2485,39 @@
       "sha256": "525920fb67ced99d95088a05f6ef9ce4f5c93fedec2ebbb0df11526509994433"
     },
     {
-      "byte_size": 24106,
+      "byte_size": 24111,
       "path": "tests/generator/preprocessing/test_palette_metadata.py",
-      "sha256": "09e79b2f48a9b505ee42fe4d90d6ed2285a2521258c8f5955e1c394fe4a3fb38"
+      "sha256": "9da59d24d588153d911c30b31866bc62031ed132133703b510ede50e2d963c61"
     },
     {
-      "byte_size": 7447,
+      "byte_size": 7455,
       "path": "tests/generator/preprocessing/test_palette_metadata_runner.py",
-      "sha256": "218673421dbfe2a3c2b4a3ac016ef6c2fc22b2c52f64a0bd704d39d378d93b2e"
+      "sha256": "2252169c74d16ab84e866a85bf08946dd0eab327bdcc23ecbc76ec2f61424e4f"
     },
     {
-      "byte_size": 4122,
+      "byte_size": 4127,
       "path": "tests/generator/preprocessing/test_pipeline_integration.py",
-      "sha256": "6ea2e5b7f9f6b7d1278b6aa65e589162f241c593ec486de1222e5dd2094078d8"
+      "sha256": "add0714359f791c28a33927b90df7b30faa4aa2d7e385c3db89051d1fe77e411"
     },
     {
-      "byte_size": 10014,
+      "byte_size": 10024,
       "path": "tests/generator/preprocessing/test_runner.py",
-      "sha256": "0b242bf84634aad186901151a64ca71b3fa8b47b7299b0cb6b601de40f2b6472"
+      "sha256": "611c1b844f4f2cb8f6b6d71f0b9ac557e631e66341a4a44e02299717890eb12d"
     },
     {
-      "byte_size": 12323,
+      "byte_size": 12344,
       "path": "tests/generator/preprocessing/test_wing_c_integration.py",
-      "sha256": "ffbfe152bd32a209247d79d32dfc4c3bb25da3356430a31706f31bbfafcd1737"
+      "sha256": "b03a1ad244be0b3f95a3ada104745792506f994c8c58a5aefae04263816a4118"
     },
     {
-      "byte_size": 238,
+      "byte_size": 247,
       "path": "tests/generator/profile_fixture.py",
-      "sha256": "d41d6b4615868532c7fd0cf09ca4d1aa1b783e4cce81555afadcc42bc4d34f14"
+      "sha256": "7fb0a4922c226e8e7bb0b4ad248b5ccdfe4cd726cf3315deff5c534f4cd3bb23"
     },
     {
-      "byte_size": 81410,
+      "byte_size": 81290,
       "path": "tests/generator/solver/test_stage1_stage2_backend.py",
-      "sha256": "33d5037a6f723ef8268a693d99cc9342467ef3fa554d1ba108a33f5fce08f4e3"
+      "sha256": "accfb5b1f868a484b20c54600faf1a560ea8844c5e985e34c0b75191bf902a23"
     },
     {
       "byte_size": 6862,
@@ -2410,14 +2525,14 @@
       "sha256": "e4495f35bad44aeda436b8fba589514f71e51ce1df204aa123b1a59d16fa298e"
     },
     {
-      "byte_size": 70346,
+      "byte_size": 70395,
       "path": "tests/generator/solver/test_stage4_white_cap_backend.py",
-      "sha256": "bfdb2c3519c39a75bc447e641ce7b91b4637148976e7e78a586c1013f471bbed"
+      "sha256": "018b664d1b6cb45dccf66745990cf1e7d68830757a9bc892aeef1790ef385a3d"
     },
     {
-      "byte_size": 43643,
+      "byte_size": 44290,
       "path": "tests/generator/solver/test_staged_pipeline_integration.py",
-      "sha256": "f36641fb593b9f61aaff08a2f77541b17ba3b6e6f6aafe931b6e912233070c96"
+      "sha256": "e429d146dd2290f8d4a011787c7be8d4e62340ee99aa7323e1c6e117829b56b3"
     },
     {
       "byte_size": 71,
@@ -2425,24 +2540,29 @@
       "sha256": "f1d75de6121bb7d098bf0d147b31bb469618846fde2dd96ec4d8b0e2b583f416"
     },
     {
-      "byte_size": 3951,
+      "byte_size": 7129,
       "path": "tests/generator/support/application_harness.cjs",
-      "sha256": "2c185c4b84e9ec290d30e2c45f2618e42633d9950e6c62634f6b6392b08c6141"
+      "sha256": "5aac983cdad33d1c08ccec23bdfb5f254b67265f06efa46f54bae72a948ec74c"
     },
     {
-      "byte_size": 3561,
+      "byte_size": 2438,
+      "path": "tests/generator/support/settings_contract_fixture.cjs",
+      "sha256": "fd8a1060a93bbd09e5f790aa0fcccf983155461b803292639f2fea6dbced7057"
+    },
+    {
+      "byte_size": 3665,
       "path": "tests/generator/support/staged_backend.py",
-      "sha256": "6d15fddcb5b718e603cbbfce8bf7e34ae3584d9005a407ffd20eb205471a428e"
+      "sha256": "1475b7785a706d19ed8454ff37fd515239f79dbdbcf74cee5e02fd911a798770"
     },
     {
-      "byte_size": 1985,
+      "byte_size": 3917,
       "path": "tests/generator/test_api_modules.js",
-      "sha256": "d641cfa7b35954afe36d1d4bb62cc2d220b148c0d638f397736c1db7639c3066"
+      "sha256": "c90c5b169a3139a865d60398e19818885fdcd45a66df3ab5d070d0fd5ac7dfc1"
     },
     {
-      "byte_size": 15066,
+      "byte_size": 15077,
       "path": "tests/generator/test_appearance_model_provider.py",
-      "sha256": "82f92ace9a9abaf8375243bdb3389bb1e29e67ff736883031aab354b41e876d4"
+      "sha256": "cdc5ba8aebc24024017e6cf6f6daf2048a0c216c87a64d12c6e27ad173d7cbd4"
     },
     {
       "byte_size": 4434,
@@ -2485,14 +2605,14 @@
       "sha256": "b73091a09a01b1d395720dab905225d9658f9a4f7da1169d840503978b394136"
     },
     {
-      "byte_size": 10011,
+      "byte_size": 8923,
       "path": "tests/generator/test_data_paths.py",
-      "sha256": "721deeb0f9e6cd0846230016d0c62c3b4ca51e5731fff5113e3082810c991cb2"
+      "sha256": "fd33e806cab50447af2ed937cdc331ca636b929b113eecb99248385434721333"
     },
     {
-      "byte_size": 3841,
+      "byte_size": 3851,
       "path": "tests/generator/test_derived_views.py",
-      "sha256": "48d010e149d11c199ba3387bca0dd046562e321627b0e7d112bb18f552a894d6"
+      "sha256": "80afecb9df3cc4895f31e9ac3e8a73d35586480786a70443d663c6490c80ab3e"
     },
     {
       "byte_size": 5476,
@@ -2510,14 +2630,14 @@
       "sha256": "f4ac201c6b2bd2cc4c4f6d380e3782085453f61808db1c428ce9aba2d6222596"
     },
     {
-      "byte_size": 17942,
+      "byte_size": 18015,
       "path": "tests/generator/test_export_3mf_filename.py",
-      "sha256": "7ef866edf5504c48d002f8b70eeec07a7317a2b368a51bd61dbf2bd02d0537ba"
+      "sha256": "0f06926a1ea470198032f6712a44576475bcd18b96c7f9f67d07a662a3133977"
     },
     {
-      "byte_size": 4826,
+      "byte_size": 4990,
       "path": "tests/generator/test_export_3mf_streaming.py",
-      "sha256": "210a43a260cf61e413c3c1c955b328e48fe3ef8e16895142b31559d87f91d794"
+      "sha256": "c927caaf6ac2fa579ae5a37075bbd8fea5045d35efb5761af8d2457c82118d37"
     },
     {
       "byte_size": 4840,
@@ -2535,29 +2655,29 @@
       "sha256": "812f371874018d963df6acb115c9fc6214501cc9257682b9feb874d777a48265"
     },
     {
-      "byte_size": 80784,
+      "byte_size": 135332,
       "path": "tests/generator/test_feature_controller_contracts.js",
-      "sha256": "6e7cb8ac90370b1fe3c00d7fd2f934f72b01f58cb28b2657d425c8541fc8a64d"
+      "sha256": "535e24b2f2187ba29cad7b41cb19342d7fa07a89d6858fa9523cb7ec8a91be44"
     },
     {
-      "byte_size": 6785,
+      "byte_size": 6807,
       "path": "tests/generator/test_filament_generation_policy.py",
-      "sha256": "99b2d469c9c5311664533cdf72ee865311c0b760fa6fc32f83657e4dec844259"
+      "sha256": "899fe30558de00b7b16774fa11ef628ad7ba8b67486438897caed1e9160b870b"
     },
     {
-      "byte_size": 12889,
+      "byte_size": 14317,
       "path": "tests/generator/test_fingerprint.py",
-      "sha256": "6e549258129f0fac1649a85c34b56ebd0f1f9ae5145e98a3cf15393432c034a9"
+      "sha256": "c278e7bffade2920947ee22abb18023e55d8456b8599fffd34bf9e4649ca9b1f"
     },
     {
-      "byte_size": 6578,
+      "byte_size": 6600,
       "path": "tests/generator/test_fingerprint_preprocessing.py",
-      "sha256": "fab0acafd6667867e584f4643691745f7889e033a0d3b129bbd3a4988d2dca6f"
+      "sha256": "160f7c772f2fb9f3d836a95993f135f18439f1a7236b46578ad747b0f435778d"
     },
     {
-      "byte_size": 15765,
+      "byte_size": 25909,
       "path": "tests/generator/test_frontend_module_graph.js",
-      "sha256": "391e136a62ac191760d8af62baf46647ce283b15f46df8a7239dad84fbeff715"
+      "sha256": "9bf6539107cd2035be31fa0386d94be4c3972986ad36939cb12a061199668ada"
     },
     {
       "byte_size": 17424,
@@ -2570,29 +2690,59 @@
       "sha256": "b0cc4d5f538811e579b021b66de75065a85e73b69f91febd692a4829c1189d8b"
     },
     {
-      "byte_size": 10231,
+      "byte_size": 10232,
       "path": "tests/generator/test_gamut_white_rescale.py",
-      "sha256": "9cc047e0a70aeda04f08d8ca4e9a5a05361d39c93d5d50cdab96a66aa855bc72"
+      "sha256": "9a5b762f6397406c3289e603bcf8ce1140a34d61eba3b86eeafd56acb368df22"
     },
     {
-      "byte_size": 78044,
+      "byte_size": 27388,
+      "path": "tests/generator/test_guide_actions.js",
+      "sha256": "6e034ce02ac65229367d1bb13dae2b22511a7b3dd3ff88189b3426f5b4bf9e5c"
+    },
+    {
+      "byte_size": 4734,
+      "path": "tests/generator/test_guide_assets.py",
+      "sha256": "0d0c7f5382bb7828c1bef827e2c1de908645bec55e24d73a329f5848be4694b2"
+    },
+    {
+      "byte_size": 5560,
+      "path": "tests/generator/test_guide_companion.js",
+      "sha256": "eda95d1cbcc9c55459509842ee9d80876050393066884ff25b074a6ebce76041"
+    },
+    {
+      "byte_size": 11769,
+      "path": "tests/generator/test_guide_contract_parity.js",
+      "sha256": "bc5e1f4bf7aa6deeeb04c24f9c2bc32485bab21bd7ab3a2bf24100c1b7a928e9"
+    },
+    {
+      "byte_size": 133068,
       "path": "tests/generator/test_guide_foundation.js",
-      "sha256": "ff4c37f2a3ba033cfeee78bb7bcd9f8c8139f4bd51e3daae763cfe67fd4f5536"
+      "sha256": "80c91d023ce652526bcd922ce6855cc345623a168a8ae6596a029f6347bb7848"
     },
     {
-      "byte_size": 11738,
+      "byte_size": 9123,
+      "path": "tests/generator/test_guide_runtime.py",
+      "sha256": "84b0deb604434faa670517d9b59a428ac5a7b45a86221e58783c3e2a68fe4e02"
+    },
+    {
+      "byte_size": 17820,
+      "path": "tests/generator/test_guide_runtime_endpoints.py",
+      "sha256": "459184a0a5f225becd3d4518e5360fcde41699d03fcc3ecfc81f6f18b0efd26f"
+    },
+    {
+      "byte_size": 8047,
       "path": "tests/generator/test_guide_state.py",
-      "sha256": "a57568984fc4953837e4c0f82ca9740d5fc9df474104f8a13b19d7845b3c917f"
+      "sha256": "9ca20841d4e11ea4ee4b792c6ecc8bca480c1570add3cb1ad110b6405f5620fa"
     },
     {
-      "byte_size": 394,
+      "byte_size": 399,
       "path": "tests/generator/test_height_budget.py",
-      "sha256": "038c20e6b411a9c91bc0eaedf9be6d6ce205d313ec1ceefc1155ad5b9dd16871"
+      "sha256": "1ed6afe18975085bf89d08cfaf303f28d5d0769a5b61bca634a3201eae202d54"
     },
     {
-      "byte_size": 8339,
+      "byte_size": 8417,
       "path": "tests/generator/test_hybrid_white_cap_mesh.py",
-      "sha256": "ce7be4bdac6dd9fb7fce60c1ca0ef064a757b432376e88e47de54b5171e2197e"
+      "sha256": "e6a74c47a0e7e0866cddd2d046c988c4182083ca32378b02eea02dd3e9302285"
     },
     {
       "byte_size": 4322,
@@ -2615,6 +2765,11 @@
       "sha256": "c6a4d6bba3bc9d2c472a26a83848b6df4c808d45048a399b17d626027090c778"
     },
     {
+      "byte_size": 4408,
+      "path": "tests/generator/test_layer_budget.py",
+      "sha256": "d56daeab153f89ee6e47d946ce991446f3c0f683ce8919f48f19df3cdfda97d7"
+    },
+    {
       "byte_size": 6900,
       "path": "tests/generator/test_luminance_banded_cap.py",
       "sha256": "81dea849655e8de56992dc6465f7b04e685829645c6840854560b8473783ebfe"
@@ -2625,29 +2780,29 @@
       "sha256": "1bfe7a9d0504d35d66b15150eadf1b46a2b5f796365523ee82d5cc09f9702d1c"
     },
     {
-      "byte_size": 2899,
+      "byte_size": 2983,
       "path": "tests/generator/test_mesh_quality_edge_counts.py",
-      "sha256": "c891d76c8a507c32354f80bb5a1849a757483e3dd83f10bab17be0ee19a126f1"
+      "sha256": "139e529851562130ad5d5f4cdfe049b72daf62f428ecc90b7e6150ed55e29ea4"
     },
     {
-      "byte_size": 10000,
+      "byte_size": 10005,
       "path": "tests/generator/test_model_domain_display.py",
-      "sha256": "439b0819ba12d2a5e4660fba11d62ce8680675ad919bcd995b450a2f8a8be8a5"
+      "sha256": "6e8bf0f7bfa1bf5e854f36fb161e27f772f0768aa57ef07afa303f453ebb6be9"
     },
     {
-      "byte_size": 5644,
+      "byte_size": 5646,
       "path": "tests/generator/test_model_domain_ingress.py",
-      "sha256": "5d3cb33661a7c7a984645f123274c1c885b7bb052a3cc0838828c9a4d483a85f"
+      "sha256": "07279d44d32b8a62fcadf5f4eba851d3cef9f572aa360d5d03427eb1a1285104"
     },
     {
-      "byte_size": 8954,
+      "byte_size": 8955,
       "path": "tests/generator/test_model_library_api.py",
-      "sha256": "5ae0bb60e6b7b15c8f86f1e02e69c826e70f2ae44c30bd264a5e957439bf9b4b"
+      "sha256": "682667552febd3192f219ca06658cb9daa674b17669e5fdf108ff91ea846a221"
     },
     {
-      "byte_size": 7390,
+      "byte_size": 7393,
       "path": "tests/generator/test_module_management.py",
-      "sha256": "4aaf6bd9021b9c5417bded4198a4b662479a1f953ea83241fffa530cf4db5a5e"
+      "sha256": "2bd87350d91ba016005bc158ce2ef2a0b874ea64d176721e35fa88ffc5d1df19"
     },
     {
       "byte_size": 3740,
@@ -2670,29 +2825,29 @@
       "sha256": "ca8726230405026f9be45315710b6ebd0b176016d9102f8cb8fbcc58fec8cc7b"
     },
     {
-      "byte_size": 22760,
+      "byte_size": 22891,
       "path": "tests/generator/test_palette_batch_api.py",
-      "sha256": "620c29ac6c40741728a1679b6ebf3bd2092faaa169b2aae2def668b5e8dd8c94"
+      "sha256": "df9710d9c60d6c14c4a2bae0a785144d62cba629c3247b5fb4f47e523e3afefd"
     },
     {
-      "byte_size": 2021,
+      "byte_size": 2022,
       "path": "tests/generator/test_palette_metric_eval.py",
-      "sha256": "ac276458bd0a041df83d913ccc6f2cb040e840605d083ff7f10d37a5327d8497"
+      "sha256": "7d077d61f4ba6cf745b706e54a44b93457369ad94d13080d1ab201c9e0bc3724"
     },
     {
-      "byte_size": 36619,
+      "byte_size": 30652,
       "path": "tests/generator/test_palette_suggest.py",
-      "sha256": "00edf4b490f189ae643c4f4170f71524f12a73d0706e5aa83c57653eb33d7571"
+      "sha256": "3913817dd9052a94e4bf6fad96bf08471a4633988f6c0f9ee6ba367dbb24778f"
     },
     {
-      "byte_size": 6814,
+      "byte_size": 6817,
       "path": "tests/generator/test_palette_suggest_domain_alignment.py",
-      "sha256": "c4d5e4ffb07a8ef1162b0149c84766e7562f4a68701f765619336613ed54dcf2"
+      "sha256": "9c29a08b433bd09f02b171fe4763119102e5a0cf09a04c6bcd41e92c2b8a012a"
     },
     {
-      "byte_size": 15405,
+      "byte_size": 18062,
       "path": "tests/generator/test_palette_suggest_endpoint.py",
-      "sha256": "ce0068fc3bfb127c53f3e9a5869e7d9b1944e2040a187f048a493ca13537bc2b"
+      "sha256": "f8efdf0b0f4caa18793d716bb1512abd7df71cd807fb689342cc3d5b064cb1d8"
     },
     {
       "byte_size": 3425,
@@ -2700,19 +2855,24 @@
       "sha256": "7d0ff74f9b470a501f84062b09185f59b29173fcd4b0b87f9a368d97f46fffd2"
     },
     {
-      "byte_size": 8374,
+      "byte_size": 3837,
+      "path": "tests/generator/test_persisted_setting_units.py",
+      "sha256": "e52fa0ceedcd9f0a687d2d38f1c0ff5a24eaa103227d0e8cd584eea7307f1f67"
+    },
+    {
+      "byte_size": 8960,
       "path": "tests/generator/test_phantom_settings_migration.py",
-      "sha256": "2c624a68d480d611c261c2915810dd09ec2d0bdb5ed06cb627c6a2737091692d"
+      "sha256": "7c95bc9dee3f288f06ca370fc6015f394c19051c835d2708f31f2ce94b008b13"
     },
     {
-      "byte_size": 6799,
+      "byte_size": 6810,
       "path": "tests/generator/test_photo_stack_cleanup_identity.py",
-      "sha256": "46a95dd7b9fe71879742e95e75f9a8eff5d15a9c55ee9df69a1100b5befef42d"
+      "sha256": "b71b800ca66baf439f9d638a0d8fa8188310f121adb98ea89ae4e4c4e9c9b5e3"
     },
     {
-      "byte_size": 16591,
+      "byte_size": 16592,
       "path": "tests/generator/test_photo_stack_context_term_regression.py",
-      "sha256": "53c72be47ffe0db645ce3a84e667112d7fc051f7f2cc08abfd1be4f80e51f761"
+      "sha256": "e996100bfedab59d441e1a9d29141ba077a8b2e4d89273b95ade01f8fc8d3ae9"
     },
     {
       "byte_size": 3341,
@@ -2720,9 +2880,9 @@
       "sha256": "fd313e26791df19f35eceb02db5bb9fa2c311ace1a3f6eeb2602dbe73945d8d8"
     },
     {
-      "byte_size": 11042,
+      "byte_size": 11187,
       "path": "tests/generator/test_photo_stack_server_config.py",
-      "sha256": "e04e104e3b35bfe7c6eeaf06d6433a3b151d0f4b591c593bef6889ae7683da47"
+      "sha256": "71cb677c8e0f29926ef78578bdcf8c316ac9e6f1534853c7e444cb3f894bb1b8"
     },
     {
       "byte_size": 5109,
@@ -2735,9 +2895,9 @@
       "sha256": "d9a05c96b012cacd8791c7de5d5a3f95257fd2df2d2defa4b9db627571d9df84"
     },
     {
-      "byte_size": 13404,
+      "byte_size": 16431,
       "path": "tests/generator/test_photo_stack_vectorized_runtime.py",
-      "sha256": "676c21403ac9fb09b0459f1c32c567939f448d0ace53c4e17d1c2f1b4b156fec"
+      "sha256": "aebc96fa2a02889aae85a4a63f019eb0b2f11bad0e36b8a6a47f29d3e55004c0"
     },
     {
       "byte_size": 2525,
@@ -2745,14 +2905,14 @@
       "sha256": "8d58bf8597df02f2bb0dadcbb08b012914847ef3d2bd82140aaccbf93cdf0c26"
     },
     {
-      "byte_size": 2194,
+      "byte_size": 2127,
       "path": "tests/generator/test_pipeline_config_cleanup_plumbing.py",
-      "sha256": "3df69e001c004ab12ebe4ac45ecb7a391a5d7bd59f4aaa7387a7afea25bb9e4c"
+      "sha256": "45c15bc9cf433487ac2728241a5935a95898e4ad02c4ee475d5d9148a992fe3b"
     },
     {
-      "byte_size": 4519,
+      "byte_size": 4642,
       "path": "tests/generator/test_pipeline_registry_preprocessing.py",
-      "sha256": "e73387a976edbe235e7359b1a0857fc89c365abb89149f0ff83aa471175f6811"
+      "sha256": "e513445ad7d19c3a3b3c67850931d67abc0fd7ba254b4214faed7171ac5fb55d"
     },
     {
       "byte_size": 13057,
@@ -2760,44 +2920,49 @@
       "sha256": "50b2170ef1caf520286c3e792952518ef01d109be5fc573c2e59356e284d8e8a"
     },
     {
-      "byte_size": 2512,
+      "byte_size": 2518,
       "path": "tests/generator/test_pipeline_state.py",
-      "sha256": "6eb9385190e2ba984962efef667df7ff8dc3807ef8bd3a12eb69db47909490c4"
+      "sha256": "5377284db422af77649b258c455fe3877b12e4d0b52ba96af26ceb844bcc071d"
     },
     {
-      "byte_size": 2277,
+      "byte_size": 2290,
       "path": "tests/generator/test_pipeline_state_preprocessing.py",
-      "sha256": "66930a22f2be71f752845da3a4eef17cf7d4252d43744f9b4d67a1c50b836925"
+      "sha256": "cc9e03e94d068e66043d206bb9d2c20d223096e4ee6371df8d0f90142f653a25"
     },
     {
-      "byte_size": 31259,
+      "byte_size": 32134,
       "path": "tests/generator/test_post_solve_export_preparation.py",
-      "sha256": "38dbedaa0cca3bf61c55907f55ef94004b87337fe34e3df56952b69d0fb88657"
+      "sha256": "abf7aa3e50decaecd4d7dcf963408e61e0e0068f922ecd09d212b439defee978"
     },
     {
-      "byte_size": 8158,
+      "byte_size": 8191,
       "path": "tests/generator/test_predict_color_only.py",
-      "sha256": "2aee973d68919fc1ca695aca5848f2827c449499e281d2b29161d096dbec4093"
+      "sha256": "edcf041a444cc9a8de43f7ac4169df5d8fc30b671a42eacae079d63cdf81e03f"
     },
     {
-      "byte_size": 9603,
+      "byte_size": 9659,
       "path": "tests/generator/test_preprocessing_evaluation_harness.py",
-      "sha256": "614c40ee3a88b22f9fb1b92eef99d628ac8829dd2688654c7849a19a930b3d4e"
+      "sha256": "5089561b5b32ecdcbed9be7f1becd03f3f427007f6f62f8ec9d9fe4f2c388f71"
     },
     {
-      "byte_size": 6961,
+      "byte_size": 6965,
       "path": "tests/generator/test_preprocessing_evaluation_metrics.py",
-      "sha256": "7a3f2367a90342320a4e9f2b69acb903ed45ee7c4a6d01ad426343e74c8f49de"
+      "sha256": "c459df030043072d926d53c22236af52ef79d085bee01bfbe349632d51db21e7"
     },
     {
-      "byte_size": 31816,
+      "byte_size": 15213,
+      "path": "tests/generator/test_print_setup_contract.py",
+      "sha256": "f916dd45542f8a7ec15c6f95e0d4ae5c5a5d7c72ce9710a87b9b526060d52cb4"
+    },
+    {
+      "byte_size": 31808,
       "path": "tests/generator/test_printability_vectorized_equivalence.py",
-      "sha256": "82901f8db5f0e63a0c4948bf420e3abb6a757e93e53fae87936bb4bc3f376231"
+      "sha256": "98992aa68450c50b12bd92e6ea8f0d9a9c74a36382daeebc08049eb9f638e78a"
     },
     {
-      "byte_size": 1948,
+      "byte_size": 1949,
       "path": "tests/generator/test_query_batch.py",
-      "sha256": "a1cf15756a2e3475d45f4cbbe00c18ef79ae355f3ae7a7657d5b8515bd6ba4ba"
+      "sha256": "e9419b3bcab184a270ce1c50d31af24993e03b9b4ff5b216a2a5062cb63bcefe"
     },
     {
       "byte_size": 6462,
@@ -2815,9 +2980,9 @@
       "sha256": "5fb7d10e083a19822ce4c5095b958134fa9e40f506cfb34471c9b41cb3643ca8"
     },
     {
-      "byte_size": 6056,
+      "byte_size": 6238,
       "path": "tests/generator/test_rectilinear_grouping_equivalence.py",
-      "sha256": "b947c91e43974df714ebd4d7a2178eb44de7010dbb22344d12ca30b537dfbe1d"
+      "sha256": "5aff3ff7c39f4470752f82eb7901fc7413abc857cd7f7accc96b8c2c0b26c150"
     },
     {
       "byte_size": 2596,
@@ -2850,14 +3015,14 @@
       "sha256": "2a7ceb6bf15ec8838e2debd802c49b599ac49ab00dd0964995fbc3176f709e07"
     },
     {
-      "byte_size": 38573,
+      "byte_size": 39643,
       "path": "tests/generator/test_runs_endpoints.py",
-      "sha256": "52de4954878b03426eafcfe5da0093647967175d9c589b301dd8ed3ec0194078"
+      "sha256": "f3a7ba255981af76825c55d4f624443700fe456bddc3627fb74f765ee13897e5"
     },
     {
-      "byte_size": 27188,
+      "byte_size": 27543,
       "path": "tests/generator/test_runs_load_roundtrip.py",
-      "sha256": "2bca40a301ab23814c2a48f5c969d4937e5bc29b77db8a010d34eaf254e79d29"
+      "sha256": "151f01ece31a06c40effed146d787569f791385b250a555933bc0c8cb72e1b2d"
     },
     {
       "byte_size": 2599,
@@ -2870,24 +3035,49 @@
       "sha256": "6e30a8727eade3f6c70b84be73dece07cfb62768f3cb8ea841efc89572e54151"
     },
     {
-      "byte_size": 16381,
+      "byte_size": 16786,
       "path": "tests/generator/test_server_resolution_ingress.py",
-      "sha256": "fb3b4072562e0f49b089679634185a6ee15cd67980011369f149b7b49083c9a2"
+      "sha256": "3875c036d0c7135c06716c2114e41dc5758bc421e657b8e8137a81b497baecbd"
     },
     {
-      "byte_size": 69675,
+      "byte_size": 2925,
+      "path": "tests/generator/test_settings_contract.py",
+      "sha256": "f96aded2ce57e315654fb0b036c087cf22cdd89b6ed7501de8e7cef1baf323ea"
+    },
+    {
+      "byte_size": 3137,
+      "path": "tests/generator/test_settings_drawer_baseline.py",
+      "sha256": "b63b1b8986142ee1c50f232dd6ca3fa306dcfeb09aff9ca033f1aa6da64998c8"
+    },
+    {
+      "byte_size": 9121,
+      "path": "tests/generator/test_settings_evaluation.py",
+      "sha256": "a01b8dcb7aab1a2a0a24d79fc2a2ad253dd8b4897faa2cf74d0a5c2cebab4365"
+    },
+    {
+      "byte_size": 83579,
       "path": "tests/generator/test_settings_regressions.py",
-      "sha256": "c7ed6d5226b7d1161554408c6e8ddb19db60adcb1da27d0230a7dcaacc3c6d0c"
+      "sha256": "3021c5a22a4686be7c36520f75bda7ba856fab47fae3c285b2ca8b86c8f8422b"
     },
     {
       "byte_size": 9214,
       "path": "tests/generator/test_solve_config_reconciliation.py",
-      "sha256": "0bb7681c37652bc2e7dfaf5a902b05c8a02dfcad395738f4a09a06160763342f"
+      "sha256": "1cd9d92152f835bb1c953d8af2870b4a28a50741a48a97f2af5eae77e9153d1b"
     },
     {
-      "byte_size": 5232,
+      "byte_size": 5233,
       "path": "tests/generator/test_solve_equivalence.py",
-      "sha256": "af70a00491036ce8ee98996a676b7c1790b409867559aa46b636f177d607a715"
+      "sha256": "59895a0f1bdee2b500602d5aada08681f58eb4c13523a14d44859795ceee316b"
+    },
+    {
+      "byte_size": 3951,
+      "path": "tests/generator/test_solve_grid.py",
+      "sha256": "92f73eff3c1abd4facb7214371f4d2594a1912d758348f174c829acdaa777ab5"
+    },
+    {
+      "byte_size": 16506,
+      "path": "tests/generator/test_solve_grid_controller.js",
+      "sha256": "6594c7f9ee5001a5b756823ecbea24f461f30729ee959826428a88c7e8d2b6c0"
     },
     {
       "byte_size": 5414,
@@ -2895,14 +3085,9 @@
       "sha256": "654d144a1efa7cacd0714000e1fc986ee785920a9d009e8e6d9d819a2011a211"
     },
     {
-      "byte_size": 3672,
+      "byte_size": 3668,
       "path": "tests/generator/test_solve_owned_fingerprint_cleanup.py",
-      "sha256": "96bc0b7de5097871ce6529154e2b33a86a82a0b6673cc6bf6588b8cc3f0d2121"
-    },
-    {
-      "byte_size": 1362,
-      "path": "tests/generator/test_solve_pitch_nozzle_guard.py",
-      "sha256": "8d75abba85f3bb4d131c9ee0fd52839ef9cf2726177badc94a041da26c33e7e6"
+      "sha256": "ef5d314f024db526a44a4e6a8f0904f9999e827d8dbeb55fae41824b79461623"
     },
     {
       "byte_size": 5996,
@@ -2910,14 +3095,14 @@
       "sha256": "283fb716da6af877ae5fa7c990ceb1fd7133af7d97bf00ee5287cbe619d8e45f"
     },
     {
-      "byte_size": 9661,
+      "byte_size": 9568,
       "path": "tests/generator/test_solve_start_diagnostics.py",
-      "sha256": "b3ef226f6263b0bfd14d6d93eb9484cad1383bc057f64c0c12295ae0ef431b58"
+      "sha256": "add4b378da96eb8bc11d6b01ade0457610db570a57c19b237aaa0a31edc42c1f"
     },
     {
-      "byte_size": 8960,
+      "byte_size": 8961,
       "path": "tests/generator/test_solved_material_plan.py",
-      "sha256": "3c1df608b3c7f58ce8381645ad199a7eab66b6d4995476a2cc067532d6aa6627"
+      "sha256": "a0d0c134afdeddb5164430b4034343650d5c6a7b5d425ce03d45f723af4d5e09"
     },
     {
       "byte_size": 4355,
@@ -2940,14 +3125,14 @@
       "sha256": "66e1ac2b748d1f26dee48950b068b1db8d66519e1d57ff445b3e12b3a042ad1e"
     },
     {
-      "byte_size": 22252,
+      "byte_size": 21977,
       "path": "tests/generator/test_staged_blueprint_printability.py",
-      "sha256": "b23b5e1e1dd57723f8a1ac4a6873e48f21d9c030e6f0378b8c0bd2422a7fdd03"
+      "sha256": "b8c27d2d2c68d5b60873f363a8f8498a248bcbc26a66abe311cce128e9f1eef7"
     },
     {
-      "byte_size": 14954,
+      "byte_size": 14980,
       "path": "tests/generator/test_staged_solver_helpers.py",
-      "sha256": "d08527fcc653c929046a39d49f57288690cf3a0337bed9f7450ef56f82e82099"
+      "sha256": "29af33e27327536dbb54bc6e69c0f6d1af0b0efb719f8e811a7d6f6e026f86d3"
     },
     {
       "byte_size": 2416,
@@ -2970,9 +3155,9 @@
       "sha256": "96ed210f7812445842353a7897207286200d6d5cd717614af1d989026a4e2645"
     },
     {
-      "byte_size": 14547,
+      "byte_size": 14549,
       "path": "tests/generator/test_swap_banded_export_unblock.py",
-      "sha256": "7f87825f6e1991ae45eae82bd96249796dad6f1bea0c351d561885778bcc31d9"
+      "sha256": "35db2e65023e481eba4225c2abf0df9c2875fa7df906e2e7146ea3ad7efce33d"
     },
     {
       "byte_size": 2531,
@@ -2980,14 +3165,14 @@
       "sha256": "0af95f6222928e70dfc81559c6a5f7c1d95873351d645bc8204b94d1286c9aa1"
     },
     {
-      "byte_size": 5438,
+      "byte_size": 5441,
       "path": "tests/generator/test_swap_banding_runner.py",
-      "sha256": "4166205ea1f20ddda46f509191301fe97cc484c2f55ed9c00357468e9b9f2dad"
+      "sha256": "f24785131ef4879e51251da3b61e24d354819b4e255625ec5f669668eb97264f"
     },
     {
-      "byte_size": 11872,
+      "byte_size": 11961,
       "path": "tests/generator/test_swap_photo_stack_artifact_fill.py",
-      "sha256": "006f04ef419a99534598b0508cbe5518a6f745f406df77072a78b726cc499dca"
+      "sha256": "6c5a577df4dd9c8d57ed4e82a5f614644daa7e2ce7c41dd2b4d4bb6c66f0f852"
     },
     {
       "byte_size": 14515,
@@ -2995,9 +3180,9 @@
       "sha256": "6e7554901e33a537e010084fd9d57fd6d291328e7221de416f6e3dc1cc8f77ce"
     },
     {
-      "byte_size": 5539,
+      "byte_size": 5541,
       "path": "tests/generator/test_swap_valid_g0.py",
-      "sha256": "4184a7cb1e9411104fd33da168043b9a11ed2e88502f5de6801d28262d446fa2"
+      "sha256": "4b8f19d2ff0adf5df505aa84e385a9a2dee07e800bdd6eeb2a7c0684ecc720fb"
     },
     {
       "byte_size": 6281,
@@ -3005,9 +3190,9 @@
       "sha256": "32deb456a9dd4935f563b914fd37cd77f8c9341132a63435c2fb052a0d95806b"
     },
     {
-      "byte_size": 6714,
+      "byte_size": 6718,
       "path": "tests/generator/test_thickness_maps_container.py",
-      "sha256": "6a481bb4e9be3cdd5162196c57a01c31bb8b821b32682e5d2ea4bf8618a4112d"
+      "sha256": "ca9bcd285fcc814a101c0f8edcdd0b885fc6c5681cb4667f322aee2e01a94ed3"
     },
     {
       "byte_size": 7046,
@@ -3015,14 +3200,14 @@
       "sha256": "3f5d9dd8bff88e0790573686637e9b629ed259ab3e1413575bb0a37fa46f1d54"
     },
     {
-      "byte_size": 44207,
+      "byte_size": 72025,
       "path": "tests/generator/web/test_browser_workflows.py",
-      "sha256": "82c1bf8fcac076a685ab351cca7d7cbad6e011ba7eb08529f37f5e2250d4c522"
+      "sha256": "1dea0784773f4e094d123658bd834e01d37a6214ba57693c9545f005e2dfa24b"
     },
     {
-      "byte_size": 6769,
+      "byte_size": 6974,
       "path": "tests/lib/test_calibration_launcher.py",
-      "sha256": "0c2bad839730b69c343fae60d49600a8e682a65b2398141b96bfe587eb19cc81"
+      "sha256": "ecb83c36de64d2bd1ef6eb0699dea4eea1a30c80794af0596c421ab37f87cdcf"
     },
     {
       "byte_size": 1171,
@@ -3050,14 +3235,14 @@
       "sha256": "12e175f1641a81023913d79c41c4283a004bbef1555b14527e07bb38aba37887"
     },
     {
-      "byte_size": 3005,
+      "byte_size": 3084,
       "path": "tests/lib/test_platform_open.py",
-      "sha256": "47d277e6ba59a5d6f39233288d8d0a1e83f8bdac364186112e20ef27d787cfc3"
+      "sha256": "540b845f04d01d6f413c74f384e71b9b809385d3094e4c522839a61b1e6fceae"
     },
     {
-      "byte_size": 14052,
+      "byte_size": 14054,
       "path": "tests/lib/test_runtime_layout.py",
-      "sha256": "999fb6a482d38c494ea3e4db7ba268762c898bc6603048f06d3225b3c8ea9d78"
+      "sha256": "edff4cf3b0196bf82e47a1f62ff53d8bd8791208b32713df6e6302e0a01da46c"
     },
     {
       "byte_size": 46320,
@@ -3075,9 +3260,9 @@
       "sha256": "eabcdae2bbcd4962a24cecb100aade669033c1e14b53130f3777f073f6bbbc99"
     },
     {
-      "byte_size": 1806,
+      "byte_size": 1862,
       "path": "tests/tools/release_license_fixture.py",
-      "sha256": "0eff49f8c2e9c9c5fd99e84612eaef823b2b0694138d4773783b2365a9b4bfb6"
+      "sha256": "7bba9690818893c1432ae0f1069ef2e21edb78df219bc4a5fef78380cc2a140f"
     },
     {
       "byte_size": 2093,
@@ -3100,14 +3285,19 @@
       "sha256": "f58e987bacf9c51f6120311f80c237128b81f3e4db2cce3dd50b6ae19203976c"
     },
     {
-      "byte_size": 3210,
+      "byte_size": 3289,
       "path": "tests/tools/test_generator_wave_fixture.py",
-      "sha256": "bdc8a892909c153371765cf32907d8e23ab9e7f39f5c3abfeaeaf69781310dd2"
+      "sha256": "72af8a4e1f7daaddb95f5ed7dd2eccc45fd9919961fb9d86c4752f2731a86779"
     },
     {
       "byte_size": 9978,
       "path": "tests/tools/test_linux_release_assembly.py",
       "sha256": "2d3d40a2e7c50a667e393d4714dcb0a07bbad9af2e52b0afe4b1933fc984383a"
+    },
+    {
+      "byte_size": 8426,
+      "path": "tests/tools/test_onboarding_image_benchmark.py",
+      "sha256": "fb37f61affcca1d9ae9e63772e369b36bd6318c30f679734815afd01634dbaf6"
     },
     {
       "byte_size": 1936,
@@ -3146,7 +3336,7 @@
     }
   ],
   "format": "prisma-github-source",
-  "release_version": "0.1.0-beta.12",
+  "release_version": "0.1.0-beta.14",
   "schema_version": 1,
   "selection": "explicit allowlist"
 }

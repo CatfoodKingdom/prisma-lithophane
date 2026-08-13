@@ -29,7 +29,11 @@ for _p in (_GEN_DIR, _PRISMA_DIR):
         sys.path.insert(0, str(_p))
 
 from appearance_model import PhotoStackBundleAppearanceProvider, StackRequest
-from photo_stack_lut import predict_combo_model_linear_rgb
+from photo_stack_lut import (
+    iter_photo_stack_lut_arrays,
+    predict_combo_model_linear_rgb,
+    predict_unique_stack_cap_oklab_grid,
+)
 from lut import build_luts_with_provider
 from pipeline.staged_solver_helpers import _precompute_cap_oklabs_vectorized
 from lib.photo_stack_model.default_bundle import DEFAULT_PHOTO_STACK_BUNDLE_PATH, load_default_photo_stack_bundle
@@ -152,14 +156,14 @@ def test_precompute_cap_oklabs_vectorized_covers_full_budget_grid(tmp_path) -> N
 
     # Scoring view: within-budget cells finite, over-budget cells inf so the
     # zone optimizer cannot choose unprintable combinations.
-    # budget = t_max - d_wb = 0.8mm; cap 0.4 leaves int(0.4/0.2) = 1 color step.
+    # budget = t_max - d_wb = 0.8mm; cap 0.4 leaves exactly 2 color steps.
     finite = np.isfinite(scoring_oklabs).all(axis=2)
     expected_finite = np.asarray(
         [
             [True, True],   # white-only
             [True, True],   # blue 0.2 (1 step)
-            [True, False],  # blue 0.4 (2 steps): beyond budget at cap 0.4
-            [True, False],  # blue+cyan 0.4 total: beyond budget at cap 0.4
+            [True, True],   # blue 0.4 (2 steps): exactly on the budget boundary
+            [True, True],   # blue+cyan 0.4 total: exactly on the budget boundary
         ]
     )
     np.testing.assert_array_equal(finite, expected_finite)
@@ -187,6 +191,91 @@ def test_precompute_cap_oklabs_vectorized_covers_full_budget_grid(tmp_path) -> N
                 atol=5e-6,
                 err_msg=f"uid={uid} cap={cap}",
             )
+
+
+def test_float32_cap_values_do_not_remove_valid_final_layer(tmp_path) -> None:
+    provider = PhotoStackBundleAppearanceProvider(bundle_path=_write_candidate(tmp_path))
+    dense, within_budget = predict_unique_stack_cap_oklab_grid(
+        provider,
+        unique_stacks={
+            0: {_BLUE: 2.55},  # 17 layers
+            1: {_BLUE: 2.40},  # 16 layers
+        },
+        palette=[_BLUE],
+        white_base=_WHITE,
+        d_wb=0.20,
+        white_cap=_WHITE,
+        layer_height=0.15,
+        max_layers=17,
+        cap_values_mm=np.asarray([0.30, 0.45], dtype=np.float32),
+        cap_layer_counts=np.asarray([2, 3], dtype=np.int64),
+        budget_steps=19,
+    )
+
+    np.testing.assert_array_equal(
+        within_budget,
+        np.asarray([[True, False], [True, True]]),
+    )
+    assert np.isfinite(dense).all()
+
+
+def test_cap_value_and_layer_count_mismatch_is_rejected(tmp_path) -> None:
+    provider = PhotoStackBundleAppearanceProvider(bundle_path=_write_candidate(tmp_path))
+
+    with np.testing.assert_raises_regex(ValueError, "cap values do not match"):
+        predict_unique_stack_cap_oklab_grid(
+            provider,
+            unique_stacks={0: {}},
+            palette=[_BLUE],
+            white_base=_WHITE,
+            d_wb=0.20,
+            white_cap=_WHITE,
+            layer_height=0.15,
+            max_layers=17,
+            cap_values_mm=np.asarray([0.30], dtype=np.float32),
+            cap_layer_counts=np.asarray([3], dtype=np.int64),
+            budget_steps=19,
+        )
+
+
+def test_fractional_cap_layer_counts_are_rejected_before_cast(tmp_path) -> None:
+    provider = PhotoStackBundleAppearanceProvider(bundle_path=_write_candidate(tmp_path))
+
+    with np.testing.assert_raises_regex(ValueError, "must contain integers"):
+        predict_unique_stack_cap_oklab_grid(
+            provider,
+            unique_stacks={0: {}},
+            palette=[_BLUE],
+            white_base=_WHITE,
+            d_wb=0.20,
+            white_cap=_WHITE,
+            layer_height=0.15,
+            max_layers=17,
+            cap_values_mm=np.asarray([0.30], dtype=np.float32),
+            cap_layer_counts=np.asarray([2.9], dtype=np.float64),
+            budget_steps=19,
+        )
+
+
+def test_photo_stack_lut_enumerates_decimal_budget_boundary(tmp_path) -> None:
+    provider = PhotoStackBundleAppearanceProvider(bundle_path=_write_candidate(tmp_path))
+    raw_entries = list(iter_photo_stack_lut_arrays(
+        provider,
+        filament_ids=[_BLUE],
+        white_base=_WHITE,
+        white_cap=_WHITE,
+        layer_height=0.10,
+        max_layers=26,
+        d_wb=0.20,
+        d_wc_min=0.20,
+        d_wc_max=0.20,
+        k_max=1,
+        t_max=2.80,
+    ))
+
+    assert len(raw_entries) == 1
+    thicknesses = raw_entries[0].thicknesses[:, 0]
+    assert np.any(np.isclose(thicknesses, 2.60, rtol=0.0, atol=1e-6))
 
 
 def _grid_thickness_maps() -> dict[str, np.ndarray]:

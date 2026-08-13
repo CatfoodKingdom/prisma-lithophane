@@ -172,18 +172,20 @@ def test_printer_defaults_bootstrap_into_missing_distribution_config_dir(tmp_pat
     assert printers["printers"]
     assert printers_path.is_file()
     persisted = json.loads(printers_path.read_text(encoding="utf-8"))
+    assert persisted["schema_version"] == 3
+    assert persisted["revision"] == 1
     for printer in persisted["printers"]:
         for nozzle in printer["nozzle_profiles"]:
-            assert nozzle["min_line_length_multiplier"] == 2
-            assert "min_line_width" not in nozzle
-            assert "min_line_length" not in nozzle
+            assert nozzle["minimum_line_length_multiplier"] == 2
+            state = persisted["printer_setup_state"][printer["id"]]["nozzle_width_state"][nozzle["id"]]
+            assert state["current_width_um"] >= nozzle["diameter_um"]
 
     before = printers_path.read_bytes()
     assert server._load_printers() == printers
     assert printers_path.read_bytes() == before
 
 
-def test_existing_printer_config_receives_tutorial_profile_once(tmp_path, monkeypatch):
+def test_retired_printer_schema_is_rejected_without_rewriting_user_data(tmp_path, monkeypatch):
     from Prisma.generator import server
 
     printers_path = tmp_path / "existing-user-data" / "config" / "printers.json"
@@ -214,44 +216,10 @@ def test_existing_printer_config_receives_tutorial_profile_once(tmp_path, monkey
     printers_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
     monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
 
-    migrated = server._load_printers()
-
-    assert migrated["active_printer_id"] == "custom-printer"
-    assert migrated["printers"][0]["name"] == "My Edited Printer"
-    tutorial = next(
-        printer
-        for printer in migrated["printers"]
-        if printer["id"] == "tutorial-printer"
-    )
-    assert tutorial["name"] == "Tutorial Printer"
-    assert (
-        migrated[server._BUILT_IN_PRINTER_PROFILES_REVISION_KEY]
-        == server._BUILT_IN_PRINTER_PROFILES_REVISION
-    )
     before = printers_path.read_bytes()
-    assert server._load_printers() == migrated
-    assert printers_path.read_bytes() == before
+    with pytest.raises(server.HTTPException) as exc_info:
+        server._load_printers()
 
-
-def test_migrated_printer_config_respects_tutorial_profile_deletion(
-    tmp_path, monkeypatch
-):
-    from Prisma.generator import server
-
-    printers_path = tmp_path / "existing-user-data" / "config" / "printers.json"
-    printers_path.parent.mkdir(parents=True)
-    x1c_only = {
-        "printers": [deepcopy(server._BAMBU_X1C_PRINTER_PROFILE)],
-        "active_printer_id": "bambu-x1c",
-        "active_nozzle_size": 0.2,
-        server._BUILT_IN_PRINTER_PROFILES_REVISION_KEY:
-            server._BUILT_IN_PRINTER_PROFILES_REVISION,
-    }
-    printers_path.write_text(json.dumps(x1c_only, indent=2), encoding="utf-8")
-    before = printers_path.read_bytes()
-    monkeypatch.setattr(server, "_PRINTERS_PATH", printers_path)
-
-    loaded = server._load_printers()
-
-    assert [printer["id"] for printer in loaded["printers"]] == ["bambu-x1c"]
+    assert exc_info.value.status_code == 422
+    assert "current schema version" in exc_info.value.detail["message"]
     assert printers_path.read_bytes() == before

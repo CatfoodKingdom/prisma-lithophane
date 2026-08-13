@@ -53,7 +53,7 @@ from white_cap_contract import (
 
 def _stage4_printability_settings() -> BlueprintPrintabilitySettings:
     return BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -177,7 +177,7 @@ def _stage4_boundary_plan_from_requested_cap(
         enforce_printability=enforce_printability,
         stage4_printability_gate_detail=not enforce_printability,
         emit_blueprint_printability=True,
-        printability_minimum_extrusion_width_mm=0.40,
+        printability_extrusion_width_mm=0.40,
         printability_minimum_line_length_mm=0.50,
         solver_fine_pitch_mm=0.20,
         image_sample_pitch_mm=0.20,
@@ -236,7 +236,7 @@ def _stage4_split_plan_from_requested_cap(
         enforce_printability=enforce_printability,
         stage4_printability_gate_detail=not enforce_printability,
         emit_blueprint_printability=True,
-        printability_minimum_extrusion_width_mm=0.40,
+        printability_extrusion_width_mm=0.40,
         printability_minimum_line_length_mm=0.50,
         solver_fine_pitch_mm=0.20,
         image_sample_pitch_mm=0.20,
@@ -1225,7 +1225,7 @@ def test_stage4_boundary_cap_enforce_on_repairs_cap_hard_fail(monkeypatch):
 
 def test_stage4_detail_printability_gate_removes_tiny_top_detail():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1255,7 +1255,7 @@ def test_stage4_detail_printability_gate_removes_tiny_top_detail():
 
 def test_stage4_detail_printability_gate_keeps_printable_detail_block():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1276,7 +1276,7 @@ def test_stage4_detail_printability_gate_keeps_printable_detail_block():
 
 def test_stage4_detail_printability_gate_removes_only_unprintable_top_layer():
     settings = BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=0.40,
+        extrusion_width_mm=0.40,
         minimum_line_length_mm=0.50,
         pitch_mm=0.20,
         layer_height_mm=0.08,
@@ -1467,7 +1467,7 @@ def test_stage4_luminance_authoring_flag_moves_detail_cleanup_earlier(monkeypatc
             luminance_detail_authoring_printability=authoring_mode,
             enforce_printability=True,
             emit_blueprint_printability=True,
-            printability_minimum_extrusion_width_mm=0.40,
+            printability_extrusion_width_mm=0.40,
             printability_minimum_line_length_mm=0.50,
             solver_fine_pitch_mm=0.20,
             image_sample_pitch_mm=0.20,
@@ -1569,6 +1569,8 @@ def test_stage4_luminance_uses_layer_limited_optical_detail(monkeypatch):
             enforce_printability=False,
             solver_fine_pitch_mm=0.20,
             image_sample_pitch_mm=0.20,
+            printability_extrusion_width_mm=0.20,
+            printability_minimum_line_length_mm=0.40,
             layer_height=0.08,
             d_wb=0.20,
             d_wc_min=0.08,
@@ -1650,7 +1652,7 @@ def test_stage4_luminance_uses_layer_limited_optical_detail(monkeypatch):
 def _stage4_dumbbell_mask() -> np.ndarray:
     """Two 2x2 lobes connected by a 1-pixel-wide bridge.
 
-    At pitch 0.20 mm and minimum extrusion width 0.40 mm, the bbox-based
+    At pitch 0.20 mm and active extrusion width 0.40 mm, the bbox-based
     grader passes (width 0.40 mm, length 1.40 mm, area 0.44 mm^2), but a 2x2
     morphological opening loses the 1-pixel-wide bridge — the same hard-fail
     criterion the diagnostic applies.

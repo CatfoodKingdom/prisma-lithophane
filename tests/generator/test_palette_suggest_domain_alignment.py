@@ -177,7 +177,7 @@ def test_historical_suggestion_model_threads_run_geometry():
         "layer_height": 0.04,
         "max_layers": 12,
         "d_wb": 0.24,
-        "d_wc_min": 0.12,
+        "min_cap_layers": 3,
         "t_max": 1.40,
     })
 
