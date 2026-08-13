@@ -101,7 +101,7 @@ def _prime_batch(payload: server.PaletteBatchStartPayload) -> None:
             "printer": {"id": "test"},
             "nozzle": {"size": 0.4, "min_line_length_multiplier": 2},
             "printability": {
-                "minimum_extrusion_width_mm": 0.4,
+                "extrusion_width_mm": 0.4,
                 "minimum_line_length_mm": 0.8,
                 "minimum_component_area_mm2": 0.32,
             },
@@ -233,7 +233,7 @@ def test_batch_start_captures_server_authority_and_materializes_before_reservati
     server_config = deepcopy(server._DEFAULT_CONFIG)
     server_config.update({
         "image_path": payload.image_path,
-        "t_max": 3.25,
+        "t_max": 3.24,
         "detail_cap_enabled": True,
         "image_sample_pitch_mm": 0.4,
         "solver_fine_pitch_mm": 0.4,
@@ -246,9 +246,10 @@ def test_batch_start_captures_server_authority_and_materializes_before_reservati
     }
     active_printer = {
         "printer": {"id": "printer-a", "ams_units": 2, "slots_per_ams": 4},
-        "nozzle": {"size": 0.4, "min_line_length_multiplier": 2},
+        "nozzle": {"id": "nozzle-400", "diameter_um": 400, "min_layer_height_um": 80, "max_layer_height_um": 320, "minimum_line_length_multiplier": 2},
+        "extrusion_width": {"width_um": 400},
         "printability": {
-            "minimum_extrusion_width_mm": 0.4,
+            "extrusion_width_mm": 0.4,
             "minimum_line_length_mm": 0.8,
             "minimum_component_area_mm2": 0.32,
         },
@@ -264,7 +265,7 @@ def test_batch_start_captures_server_authority_and_materializes_before_reservati
 
     def fake_materialize(**kwargs):
         captured["order"].append("validate")
-        assert kwargs["frozen_cfg"]["t_max"] == 3.25
+        assert kwargs["frozen_cfg"]["t_max"] == 3.24
         return [_item(1), _item(2)]
 
     def fake_reserve(state):
@@ -287,7 +288,7 @@ def test_batch_start_captures_server_authority_and_materializes_before_reservati
     assert response["job_kind"] == "palette_batch"
     assert response["items"][0]["deck_card_id"] == "deck-1"
     assert captured["started"] is True
-    assert state["config_snapshot"]["t_max"] == 3.25
+    assert state["config_snapshot"]["t_max"] == 3.24
     assert state["module_state"] == module_state
     assert state["active_printer"] == active_printer
     assert state["active_model_library_id"] == server._ACTIVE_MODEL_LIBRARY_ID
@@ -295,10 +296,10 @@ def test_batch_start_captures_server_authority_and_materializes_before_reservati
 
     server_config["t_max"] = 8.0
     module_state["a1_bilateral_denoise"]["params"]["sigma"] = 9.0
-    active_printer["nozzle"]["size"] = 0.8
-    assert state["config_snapshot"]["t_max"] == 3.25
+    active_printer["nozzle"]["diameter_um"] = 800
+    assert state["config_snapshot"]["t_max"] == 3.24
     assert state["module_state"]["a1_bilateral_denoise"]["params"]["sigma"] == 0.5
-    assert state["active_printer"]["nozzle"]["size"] == 0.4
+    assert state["active_printer"]["nozzle"]["diameter_um"] == 400
 
 
 def test_invalid_item_rejects_before_reservation(monkeypatch):

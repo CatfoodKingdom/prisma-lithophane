@@ -13,6 +13,7 @@ from typing import Dict, Iterable, Sequence, Tuple
 import numpy as np
 from skimage.segmentation import felzenszwalb, slic
 
+from config.layer_budget import ResolvedLayerBudget, resolve_layer_budget
 from model import compose_stack, to_oklab
 
 from .height_budget import max_cap_height_for_color_thickness
@@ -161,6 +162,7 @@ def _precompute_cap_oklabs_vectorized(
     cfg,
     palette: list,
     *,
+    layer_budget: ResolvedLayerBudget | None = None,
     white_fill_profile: dict | None = None,
     band_groups: Sequence[Sequence[str]] | None = None,
     band_layers: Sequence[int] | None = None,
@@ -179,6 +181,18 @@ def _precompute_cap_oklabs_vectorized(
     from photo_stack_lut import predict_unique_stack_cap_oklab_grid
 
     lh = max(float(cfg.layer_height), 1e-9)
+    if layer_budget is None:
+        resolver = getattr(cfg, "resolved_layer_budget", None)
+        if callable(resolver):
+            layer_budget = resolver()
+        else:
+            layer_budget = resolve_layer_budget(
+                t_max_mm=cfg.t_max,
+                d_wb_mm=cfg.d_wb,
+                d_wc_min_mm=getattr(cfg, "d_wc_min", lh),
+                layer_height_mm=lh,
+                max_layers=int(cfg.effective_max_layers()),
+            )
     lut_list = list(luts or [])
     cap_counts = sorted(
         {
@@ -200,7 +214,8 @@ def _precompute_cap_oklabs_vectorized(
         layer_height=lh,
         max_layers=int(cfg.effective_max_layers()),
         cap_values_mm=cap_values,
-        budget_mm=float(cfg.t_max) - float(cfg.d_wb),
+        cap_layer_counts=np.asarray(cap_counts, dtype=np.int64),
+        budget_steps=int(layer_budget.post_base_steps),
         white_fill_profile=white_fill_profile,
         band_groups=band_groups,
         band_layers=band_layers,

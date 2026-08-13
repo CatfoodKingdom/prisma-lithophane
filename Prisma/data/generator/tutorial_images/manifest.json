@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "id": "bubba-blanket",
+      "filename": "bubba_blanket.jpg",
+      "sha256": "1fb9f44492b9bb3cff94e9ecb52f0ef24e96825b83848dde24af6b43c2320cbb",
+      "public_seed_filename": "Bubba Blanket.jpg",
+      "guide_display_name": "Prisma Tutorial - Bubba Blanket.jpg",
+      "seed_public": true,
+      "license": "project-authored-gpl-3.0"
+    }
+  ]
+}

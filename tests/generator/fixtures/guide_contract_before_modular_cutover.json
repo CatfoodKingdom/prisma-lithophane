@@ -1,0 +1,3784 @@
+{
+  "captured_from": "pre-cutover definitions.js",
+  "definitions": [
+    {
+      "id": "guided-setup",
+      "version": 1,
+      "title": "Guided Setup",
+      "summary": "Configure Prisma Generator for your printer and learn its essential utility controls.",
+      "restore_presentation": false,
+      "catalog": {
+        "group": "Getting Started",
+        "order": 10
+      },
+      "chapters": [
+        {
+          "id": "setup",
+          "label": "Setup",
+          "step_ids": [
+            "printer-open",
+            "printer-configuration",
+            "active-nozzle",
+            "model-library",
+            "active-filaments",
+            "theme",
+            "temporary-files",
+            "help-and-guides",
+            "complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "printer-open",
+          "title": "Configure your printer",
+          "body": "Let's begin by configuring Prisma Generator for your printer. Open Printer Configuration.",
+          "target_id": "sidebar.printer",
+          "reveal_id": "sidebar.printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "printer-config.opened",
+            "predicate_id": "printer-config.open",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "printer-configuration",
+          "title": "Review printer setup",
+          "body": "Update the printer profile to match the bed dimensions and number of AMS units that your printer has, then close the Printer Configuration window.",
+          "target_id": "printer.configuration",
+          "reveal_id": "printer.configuration",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "printer-config.closed",
+            "predicate_id": "printer-config.closed"
+          },
+          "allow_previous": false,
+          "allow_skip": true
+        },
+        {
+          "id": "active-nozzle",
+          "title": "Select the active nozzle",
+          "body": "Confirm that the selected nozzle matches the nozzle installed on your printer, and change it if necessary. Prisma uses this choice when evaluating whether model features can be printed reliably.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "setup-sidebar",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "model-library",
+          "title": "Model Libraries",
+          "body": "A Model Library supplies Prisma with calibrated filament models. Prisma includes a library containing many common filaments. Use Manage later when you want to install a library published by Prisma Calibration or change the active Model Library. Changing the active library restarts Prisma Generator, so leave it unchanged during this guide.",
+          "target_id": "sidebar.model-library",
+          "reveal_id": "sidebar.model-library",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "setup-sidebar",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "active-filaments",
+          "title": "Active Filaments",
+          "body": "Active Filaments chooses which filaments Prisma may use. Mark filaments you do not own or use as inactive so they are excluded from palette tools. Your choices persist between sessions.",
+          "target_id": "sidebar.active-filaments",
+          "reveal_id": "sidebar.active-filaments",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "setup-sidebar",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "theme",
+          "title": "Choose a theme",
+          "body": "This button changes Prisma Generator’s color theme. If the current theme is not the one you prefer, choose another.",
+          "target_id": "topbar.theme",
+          "reveal_id": "topbar.theme",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "top",
+            "right",
+            "bottom"
+          ],
+          "placement_group": "setup-utilities",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "temporary-files",
+          "title": "Temporary files",
+          "body": "Prisma automatically clears temporary working data when a new session starts. Clear Temp Files lets you remove it manually during or at the end of the current session.",
+          "target_id": "topbar.clear-temp",
+          "reveal_id": "topbar.clear-temp",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "left",
+            "top",
+            "right"
+          ],
+          "placement_group": "setup-utilities",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "help-and-guides",
+          "title": "Help & Guides",
+          "body": "You can reopen Guided Setup and launch other available guides from Help & Guides.",
+          "target_id": "topbar.help-guides",
+          "reveal_id": "topbar.help-guides",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "left",
+            "top",
+            "right"
+          ],
+          "placement_group": "setup-utilities",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "complete",
+          "title": "Ready to create",
+          "body": "Guided Setup is complete, and Prisma Generator is ready to use. Happy printing!",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false,
+          "followup": {
+            "guide_id": "prisma-generator-basics",
+            "text": "If you are new to Prisma Generator, continue with the guided introduction to its features and workflow.",
+            "label": "Start Prisma Generator Basics"
+          }
+        }
+      ]
+    },
+    {
+      "id": "prisma-generator-basics",
+      "version": 9,
+      "title": "Prisma Generator Basics",
+      "summary": "Create, compare, inspect, and export a complete tutorial lithophane.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": true,
+        "tutorial_image": true,
+        "tutorial_settings": true,
+        "palette_controls": true
+      },
+      "catalog": {
+        "group": "Getting Started",
+        "order": 20
+      },
+      "chapters": [
+        {
+          "id": "introduction",
+          "label": "Introduction",
+          "step_ids": [
+            "introduction",
+            "core-terminology",
+            "workflow",
+            "printer-select",
+            "tutorial-nozzle"
+          ]
+        },
+        {
+          "id": "image",
+          "label": "Image",
+          "step_ids": [
+            "image-introduction",
+            "image-library",
+            "image-library-maintenance",
+            "choose-image",
+            "image-preview",
+            "reset-image-controls",
+            "tutorial-canvas",
+            "open-palette"
+          ]
+        },
+        {
+          "id": "palette",
+          "label": "Palette",
+          "step_ids": [
+            "palette-introduction",
+            "palette-methods",
+            "autosuggest-controls",
+            "suggest-palettes",
+            "add-suggestions",
+            "palette-deck",
+            "activate-first"
+          ]
+        },
+        {
+          "id": "settings",
+          "label": "Settings",
+          "step_ids": [
+            "settings-introduction",
+            "open-settings",
+            "settings-profile",
+            "close-settings",
+            "solve-first"
+          ]
+        },
+        {
+          "id": "preview",
+          "label": "Preview",
+          "step_ids": [
+            "preview-introduction",
+            "preview-arrival",
+            "activate-second",
+            "solve-second",
+            "compare-runs",
+            "open-export"
+          ]
+        },
+        {
+          "id": "export",
+          "label": "Export",
+          "step_ids": [
+            "export-introduction",
+            "select-export-run",
+            "export-options",
+            "generate-files",
+            "export-results",
+            "complete"
+          ]
+        }
+      ],
+      "detours": [
+        {
+          "id": "image-controls",
+          "label": "Image Controls",
+          "description": "Explore framing, appearance, borders, and physical-size controls.",
+          "offer_step_id": "image-preview",
+          "return_step_id": "reset-image-controls",
+          "return_predicate_id": null,
+          "steps": [
+            {
+              "id": "image-adjustments",
+              "title": "Adjustments panel",
+              "body": "The Adjustments panel sets the lithophane’s shape and physical size, how the photograph fits inside it, and the photograph’s appearance.\n\nWe will look at its Size and Image controls next.",
+              "target_id": "image.adjustments",
+              "reveal_id": "image.adjustments",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "aspect-ratios",
+              "title": "Aspect-ratio choices",
+              "body": "The Size tab offers W×H for independent dimensions, Ratio for a custom ratio, Image for the source ratio, and common 3:2, 4:3, 5:4, and 1:1 ratios.\n\nLandscape and Portrait set the canvas orientation. Feel free to try these controls; the guide does not require a particular choice at this point.",
+              "target_id": "image.aspect-experiment",
+              "reveal_id": "image.aspect-experiment",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "crop-fit",
+              "title": "Crop-fit shortcuts",
+              "body": "The first Crop Fit button resets the image zoom and centers it. The other two resize the frame to use the source image’s full width or full height.\n\nEach button provides a quick way to establish an initial crop; you can continue refining the framing afterward. Feel free to try all three.",
+              "target_id": "image.crop-fit",
+              "reveal_id": "image.crop-fit",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "interactive-framing",
+              "title": "Interactive framing",
+              "body": "Use the mouse wheel over the editor to zoom, then drag the image to choose what remains inside the frame.\n\nScale and Rotate provide precise controls, and the nearby buttons rotate by 90 degrees or flip the source. Experiment if you like; Reset will remove these changes.",
+              "target_id": "image.framing",
+              "reveal_id": "image.framing",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "physical-dimensions",
+              "title": "Physical dimensions",
+              "body": "Width and Height set the lithophane’s physical dimensions in millimeters. The lock buttons determine whether changing one dimension also updates the other.\n\nYou do not need to change these values yet. The guide will ask you to set the tutorial dimensions after this tour.",
+              "target_id": "image.physical-dimensions",
+              "reveal_id": "image.physical-dimensions",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "border",
+              "title": "Optional printed border",
+              "body": "The Border control adds a raised frame around the lithophane, printed in the same color as the cap. It can provide a finished edge and extra support.\n\nTurn the border on if you want to preview it, then turn it off before continuing.",
+              "target_id": "image.border",
+              "reveal_id": "image.border",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "image-summary",
+              "title": "Resolution summary",
+              "body": "Image Size is the source image’s resolution. Print Size is the physical size of the lithophane. Rendered Size is the pixel grid that Prisma will solve.\n\nA larger canvas or a smaller Solve Pitch (the physical spacing between pixels in Prisma’s solver grid) creates more solve pixels and requires more time.",
+              "target_id": "image.summary",
+              "reveal_id": "image.summary",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "right",
+                "bottom",
+                "left",
+                "top"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "open-image-adjustments",
+              "title": "Open the Image controls",
+              "body": "Select Image at the top of the Adjustments panel to open the image-adjustment controls. The guide will continue automatically.",
+              "target_id": "image.adjustment-image-tab",
+              "reveal_id": "image.adjustment-image-tab",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "event",
+                "event": "image.adjustment-tab.changed",
+                "predicate_id": "image.adjustment-tab-image",
+                "accept_preexisting": true
+              },
+              "allow_previous": true,
+              "allow_skip": false
+            },
+            {
+              "id": "appearance",
+              "title": "Image appearance",
+              "body": "B/W and Color choose the overall image mode.\n\nExposure changes brightness; Contrast separates light and dark values; Highlight and Shadow target the brightest and darkest areas. Tint, Saturation, and Temperature adjust color balance and intensity.\n\nFeel free to experiment with these controls. You will reset them before setting the tutorial canvas.",
+              "target_id": "image.appearance",
+              "reveal_id": "image.appearance",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-image-adjustments",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            }
+          ]
+        },
+        {
+          "id": "palette-tools",
+          "label": "Palette Tools",
+          "description": "Explore filament eligibility and build a temporary Manual palette.",
+          "offer_step_id": "palette-deck",
+          "return_step_id": "activate-first",
+          "return_predicate_id": null,
+          "steps": [
+            {
+              "id": "candidate-filaments",
+              "title": "Auto-Suggest filaments",
+              "body": "Every active filament that can be used for color is already selected here.\n\nThis does not add every selected filament to one palette. It tells Auto-Suggest which filaments it may combine when building suggestions.\n\nThe filament reserved for the white base and cap cannot also be selected as a color. Leave the current selection unchanged for this guide.",
+              "target_id": "palette.candidates",
+              "reveal_id": "palette.candidates",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "right",
+                "bottom",
+                "top",
+                "left"
+              ],
+              "placement_group": "basics-palette-suggestions",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "manual-palette-add",
+              "title": "Build a Manual palette",
+              "body": "The Manual builder is now open.\n\nChoose one or more colored filaments in any order, then select Add to Deck. The guide will continue after your new palette appears in the sidebar Deck.",
+              "target_id": "palette.manual",
+              "reveal_id": "palette.manual",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "right",
+                "bottom",
+                "top",
+                "left"
+              ],
+              "completion": {
+                "kind": "event",
+                "event": "palette.deck.updated",
+                "predicate_id": "basics.manual-card-added"
+              },
+              "allow_previous": true,
+              "allow_skip": false
+            },
+            {
+              "id": "manual-palette-remove",
+              "title": "Remove the Manual palette",
+              "body": "This is the temporary palette you just added.\n\nSelect its × button once; it changes to ! to ask for confirmation. Select it a second time to remove the card.\n\nThe two suggested tutorial palettes will remain.",
+              "target_id": "basics.manual-card",
+              "reveal_id": "basics.manual-card",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "right",
+                "bottom",
+                "top",
+                "left"
+              ],
+              "placement_group": "basics-palette-deck",
+              "completion": {
+                "kind": "event",
+                "event": "palette.deck.updated",
+                "predicate_id": "basics.manual-card-removed"
+              },
+              "allow_previous": true,
+              "allow_skip": false
+            }
+          ]
+        },
+        {
+          "id": "settings-tools",
+          "label": "Settings",
+          "description": "Explore solver, White Cap, and Advanced settings without changing the tutorial profile.",
+          "offer_step_id": "settings-profile",
+          "return_step_id": "close-settings",
+          "return_predicate_id": "basics.settings-detour-ready",
+          "steps": [
+            {
+              "id": "preprocessing-solver",
+              "title": "Solver settings",
+              "body": "Preprocessing can reduce noise, smooth printable-scale features, or reshape tone and saturation before solving.\n\nThe Color Solver controls how Prisma divides the image and searches for printable filament recipes.\n\nDifficult photographs may benefit from these tools. Leave them unchanged for this tutorial image.",
+              "target_id": "settings.preprocessing-solver",
+              "reveal_id": "settings.preprocessing-solver",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-settings",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "white-cap",
+              "title": "White Cap",
+              "body": "The White Cap covers the color stack.\n\nIts boundary portion keeps the print structurally covered; its detail portion can restore fine appearance information. Smoothing and depth determine how that material is distributed.\n\nKeep the tutorial profile’s White Cap settings unchanged for this guide.",
+              "target_id": "settings.white-cap",
+              "reveal_id": "settings.white-cap",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-settings",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "advanced-settings",
+              "title": "Advanced settings",
+              "body": "Turn Advanced on.\n\nIt reveals less frequently changed controls without changing their values. Look around, then turn Advanced off again to continue.",
+              "target_id": "settings.advanced",
+              "reveal_id": "settings.advanced",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-settings",
+              "completion": {
+                "kind": "event",
+                "event": "settings.advanced-changed",
+                "predicate_id": "basics.settings-detour-ready"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            }
+          ]
+        },
+        {
+          "id": "preview-tools",
+          "label": "Preview",
+          "description": "Explore Solve History, result views, inspection, and captured settings.",
+          "offer_step_id": "compare-runs",
+          "return_step_id": "open-export",
+          "return_predicate_id": null,
+          "steps": [
+            {
+              "id": "solve-history",
+              "title": "Solve History",
+              "body": "Solve History contains one card for each completed run. Selecting cards controls which results appear in the comparison area.\n\nEach card also provides captured settings and actions for saving or removing the run.",
+              "target_id": "preview.history",
+              "reveal_id": "preview.history",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-preview",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "preview-views",
+              "title": "Preview views",
+              "body": "Predicted estimates the illuminated result. White Cap separates the Total, Boundary, and Detail cap geometry. Color Regions contains Color Ceiling and Recipe Viewer.\n\nTop Surface shows the final combined surface. Explorer examines materials around a selected height. Advanced contains the diagnostic Thickness Maps and Highpass views.\n\nVisit any view you like. A later guide will explain these tools in depth.",
+              "target_id": "preview.views",
+              "reveal_id": "preview.views",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "bottom",
+                "left",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-preview",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "closer-inspection",
+              "title": "Inspect the previews",
+              "body": "Preview images can be opened for larger inspection.\n\nSubview controls change which part of a solve is shown, and contextual controls appear only where relevant. Feel free to inspect the runs or move among views.",
+              "target_id": "preview.comparison",
+              "reveal_id": "preview.comparison",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "right",
+                "top",
+                "bottom",
+                "left"
+              ],
+              "placement_group": "basics-preview",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            },
+            {
+              "id": "captured-settings",
+              "title": "Run settings and saves",
+              "body": "A run’s Settings view records exactly what was captured when its solve began.\n\nUse These Settings applies that snapshot as the current temporary Settings Profile for a future solve.\n\nSolve History is session-only unless a run is explicitly saved; Load opens Saved Runs.\n\nYou do not need to save or load a run during this guide.",
+              "target_id": "preview.history",
+              "reveal_id": "preview.history",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-preview",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            }
+          ]
+        },
+        {
+          "id": "export-choices",
+          "label": "Export Choices",
+          "description": "Learn what output format, mesh method, and mesh detail control.",
+          "offer_step_id": "export-introduction",
+          "return_step_id": "select-export-run",
+          "return_predicate_id": null,
+          "steps": [
+            {
+              "id": "export-choices-overview",
+              "title": "Export choices",
+              "body": "Output format chooses one bundled 3MF or separate STL files. Mesh method controls how the solved surface becomes printable geometry, and Mesh detail controls reconstruction scale for the field-derived method.\n\nThese choices affect file packaging and mesh construction; they do not repeat or change the solve.",
+              "target_id": "export.options",
+              "reveal_id": "export.options",
+              "overlay_mode": "spotlight",
+              "preferred_placements": [
+                "left",
+                "bottom",
+                "top",
+                "right"
+              ],
+              "placement_group": "basics-export",
+              "completion": {
+                "kind": "manual"
+              },
+              "allow_previous": true,
+              "allow_skip": true
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "introduction",
+          "title": "Prisma Generator Basics",
+          "body": "This guide will show you the basic steps for converting an image into the 3D meshes used to print a color lithophane.\n\nAlong the way, you will learn how Prisma Generator organizes images, palettes, settings, solve results, and print files. You can end this guide at any time.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": false,
+          "allow_skip": false,
+          "next_label": "Begin"
+        },
+        {
+          "id": "core-terminology",
+          "title": "Terminology",
+          "body": "There are two terms you should know before continuing:\n\n• A **palette** is a small set of colored filaments that can be layered together to produce the colors in a finished lithophane. They act like “primary colors” that Prisma combines to reproduce the colors in the source image.\n\n• A **solve** is Prisma’s process for deciding how to layer the filaments in a palette to recreate the appearance of an image.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "workflow",
+          "title": "The Generator workflow",
+          "body": "Prisma’s numbered workflow moves from a source image to printable files:\n\nImage → Palette → Preview → Export\n\nSettings are available throughout the workflow and affect the next solve. You can start a solve from any workflow page; it uses the prepared image, active palette, and current settings at the moment it begins.\n\nEach stage will be explained in more detail as you move through this guide.",
+          "target_id": "workflow.overview",
+          "reveal_id": "workflow.overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "printer-select",
+          "title": "Select the Tutorial Printer profile",
+          "body": "This guide uses the Tutorial Printer profile to ensure that all learners get the same experience.\n\nSelect Tutorial Printer from the Active printer list. If it is already active, the guide will continue automatically.",
+          "target_id": "sidebar.active-printer",
+          "reveal_id": "sidebar.active-printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "event",
+            "event": "printer.active-changed",
+            "predicate_id": "basics.tutorial-printer-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "tutorial-nozzle",
+          "title": "Confirm the tutorial nozzle",
+          "body": "Smaller nozzles can produce higher-quality lithophanes, but they take longer to solve and print. This guide uses a 0.4 mm nozzle to save time while you learn the basics.\n\nConfirm that the nozzle selector is set to 0.4 mm. If necessary, change the selection, then select Next.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-nozzle-active"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "image-introduction",
+          "title": "Image: prepare the source",
+          "body": "The Image page is where you prepare the source image Prisma will reproduce as a lithophane.\n\nHere you choose an image, frame it within a physical canvas, and adjust its appearance.\n\nThe adjusted image represents how you want the finished lithophane to look. Prisma uses it when recommending palettes and as the visual target it attempts to recreate during a solve.",
+          "target_id": null,
+          "reveal_id": "workflow.image-page",
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-library",
+          "title": "Adding images to the library",
+          "body": "The Image Library contains the source images you can use to create lithophanes.\n\nUse Add Image to import one or more images, or copy image files directly into Prisma’s Images folder. Open Folder opens that folder in your file browser.",
+          "target_id": "image.library-import",
+          "reveal_id": "image.library-import",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-library-maintenance",
+          "title": "Updating and expanding the library",
+          "body": "Prisma Generator checks the Images folder for changes whenever it starts.\n\nIf you add, remove, or replace files in that folder while Prisma Generator is running, select Refresh to update the Image Library.\n\nUse the button to the right of Refresh to expand or collapse the library when you need more room to browse.",
+          "target_id": "image.library-maintenance",
+          "reveal_id": "image.library-maintenance",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "choose-image",
+          "title": "Select the tutorial image",
+          "body": "For this guide, we will use **{{tutorialImage}}** as the source image.\n\nSelect it to continue.",
+          "target_id": "basics.tutorial-image",
+          "reveal_id": "basics.tutorial-image",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "event",
+            "event": "image.selected",
+            "predicate_id": "basics.tutorial-image-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-preview",
+          "title": "Preview and Adjustments",
+          "body": "Preview shows how the source image is framed and updates as you change the canvas, crop, or appearance.\n\nAdjustments controls the lithophane’s shape, physical size, framing, and image appearance.\n\nThese changes affect future solves but never modify the original image.",
+          "target_id": "image.preview-adjustments",
+          "reveal_id": "image.preview-adjustments",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "reset-image-controls",
+          "title": "Reset the image controls",
+          "body": "Reset restores the Size and Image controls in the Adjustments panel to their defaults.\n\nPlease click Reset to clear any changes you may have tried and to continue in this guide.",
+          "target_id": "image.reset-framing",
+          "reveal_id": "image.reset-framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.controls-reset",
+            "predicate_id": "basics.image-reset",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "tutorial-canvas",
+          "title": "Set the tutorial canvas",
+          "body": "Set the physical canvas to exactly 90 × 120 mm (Width 90, Height 120). You may use either the W×H or Image options for Aspect Ratio for this tutorial image. Using the same canvas size keeps the tutorial results consistent for everyone.\n\nIf you experimented with the border, please turn it off before continuing.\n\nSelect Next when the canvas is 90 × 120 mm and the border is off.",
+          "target_id": "image.tutorial-canvas",
+          "reveal_id": "image.tutorial-canvas",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.canvas-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-palette",
+          "title": "Continue to Palette",
+          "body": "The source image is ready. Open Palette to choose the colored filaments Prisma may use.",
+          "target_id": "workflow.palette",
+          "reveal_id": "workflow.palette",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.creation",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-introduction",
+          "title": "Palette: choose your filaments",
+          "body": "A **palette** is the set of filaments Prisma will use to recreate the colors in an image.\n\nYou can use the tools found on the Palette page to build palettes manually or to have Prisma automatically create palettes tailored to your image.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "palette-methods",
+          "title": "Building a palette",
+          "body": "Auto-Suggest recommends palettes whose filaments will do a good job of reproducing the colors in the source image when they are combined.\n\nIts recommendations can only include filaments that have been selected in this panel. Deselecting a filament prevents Auto-Suggest from including it in the palettes.\n\nPlease note that whichever filament is currently assigned to be used for the base and white cap of your lithophane cannot be included in palettes. You will learn more about this later in the guide.",
+          "target_id": "palette.autosuggest-overview",
+          "reveal_id": "palette.autosuggest-overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "autosuggest-controls",
+          "title": "Auto-Suggest controls",
+          "body": "**Palette colors** specifies the exact number of colored filaments in each suggested palette, while **Suggestions** controls how many palettes Auto-Suggest will return.\n\nThe Solve mode selector changes the type of palette that Auto-Suggest will recommend. You should only change this to Luminance if you are also using Prisma’s Luminance solve mode. You will learn more about solve modes later.",
+          "target_id": "palette.autosuggest-controls",
+          "reveal_id": "palette.autosuggest-controls",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "suggest-palettes",
+          "title": "Suggest palettes",
+          "body": "Auto-Suggest will compare combinations of the selected filaments with the source image and return ranked palette cards. This may take some time; the progress display shows its status and lets you cancel if needed.\n\nFor this guide, confirm that Palette colors is set to exactly 3 and Suggestions is at least 2.\n\nSelect Suggest Palettes to continue.",
+          "target_id": "palette.suggest",
+          "reveal_id": "palette.suggest",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.suggestions.completed",
+            "predicate_id": "basics.two-suggestions-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "add-suggestions",
+          "title": "Suggested palettes",
+          "body": "Suggested cards show their filaments and image-specific metrics. Metrics help rank palettes under the model, but only partly correspond to whether a real lithophane looks good.\n\nFor this guide, use the two highest-ranked results: {{paletteA}} and {{paletteB}}. Add both to the Palette Deck.",
+          "target_id": "palette.suggestions",
+          "reveal_id": "palette.suggestions",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.tutorial-palettes-in-deck"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-deck",
+          "title": "The Palette Deck",
+          "body": "The sidebar Deck contains palettes ready to solve.\n\nLoad retrieves a saved palette, and Clear removes all Deck cards after confirmation.\n\nSelecting a card makes it active. A card menu can create a Manual variant or save it; × removes only that card.",
+          "target_id": "palette.deck",
+          "reveal_id": "palette.deck",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "activate-first",
+          "title": "Activate first palette",
+          "body": "Select {{paletteA}} in the Deck. The highlighted card is the active palette used by the next solve.",
+          "target_id": "basics.palette-a",
+          "reveal_id": "basics.palette-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-deck",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-a-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "settings-introduction",
+          "title": "Settings: control the solve",
+          "body": "Settings controls how Prisma converts the prepared image and active palette into a printable layer plan.\n\nIt covers physical structure, image preprocessing, solver behavior, and the white cap.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "open-settings",
+          "title": "Open Settings",
+          "body": "This guide uses the prepared tutorial defaults.\n\nOpen Settings to review them and continue.",
+          "target_id": "topbar.settings",
+          "reveal_id": "topbar.settings",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "settings.opened",
+            "predicate_id": "settings.drawer-open"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-profile",
+          "title": "Profiles and Essentials",
+          "body": "A Settings Profile is a reusable collection of solve settings. Tutorial Basics is a temporary copy of the built-in Basic profile with Solve Pitch set to 0.4 mm for faster tutorial solves.\n\nEssentials contains Solve Mode, Solve Pitch, Max Total Thickness, Layer Height, White Base/Cap Filament, and Base Thickness. The diagram shows the base, color layers, and white cap.\n\nProfiles… is where you load other Settings Profiles. Leave Tutorial Basics unchanged and select Next.",
+          "target_id": "settings.profile-essentials",
+          "reveal_id": "settings.profile-essentials",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-profile-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "close-settings",
+          "title": "Close Settings",
+          "body": "Settings are captured when a solve begins, so every run retains the values that produced it.\n\nClose Settings to continue.",
+          "target_id": "settings.drawer",
+          "reveal_id": "settings.drawer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "event",
+            "event": "settings.closed",
+            "predicate_id": "settings.drawer-closed"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "solve-first",
+          "title": "Solve: first palette",
+          "body": "Select Solve.\n\nA solve can be started from any workflow page. It uses the prepared image, active palette, and current settings at the moment it begins. Prisma will move to Preview while it works.",
+          "target_id": "topbar.solve",
+          "reveal_id": "topbar.solve",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "solve.completed",
+            "predicate_id": "basics.first-solve-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "preview-introduction",
+          "title": "Preview: compare and inspect results",
+          "body": "Preview is where Prisma collects completed solve runs so you can compare their predicted appearance, inspect their printable structures, and review the settings that produced them.\n\nA run is one solve result created from a particular image, palette, and collection of settings.\n\nWe will create a second run before exploring the available inspection tools.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "preview-arrival",
+          "title": "First solve result",
+          "body": "You are now in Preview. The completed run appears in Solve History, while its predicted result appears in the comparison area.\n\nThese two regions stay linked as you add and select runs.",
+          "target_id": "preview.overview",
+          "reveal_id": "preview.overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "activate-second",
+          "title": "Activate the second palette",
+          "body": "Without leaving Preview, select {{paletteB}} in the Deck. The guide will continue when it becomes the active palette.",
+          "target_id": "basics.palette-b",
+          "reveal_id": "basics.palette-b",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-b-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "solve-second",
+          "title": "Solve the second palette",
+          "body": "Select Solve again.\n\nSolve is available throughout the workflow and uses the active palette, so you do not need to leave Preview. This second run will give you two results to compare.",
+          "target_id": "topbar.solve",
+          "reveal_id": "topbar.solve",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "solve.completed",
+            "predicate_id": "basics.second-solve-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "compare-runs",
+          "title": "Compare the solves",
+          "body": "Both guide runs should now be selected and displayed side by side in the comparison area.\n\nThis is where you judge the visible differences between palettes. Select Next after looking at both results.",
+          "target_id": "preview.comparison",
+          "reveal_id": "preview.comparison",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.both-runs-selected"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-export",
+          "title": "Open Export",
+          "body": "Export creates files for one completed run at a time. Open Export.",
+          "target_id": "workflow.export",
+          "reveal_id": "workflow.export",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.export",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "export-introduction",
+          "title": "Export: create print files",
+          "body": "Export converts one completed run into files for slicing and printing.\n\nHere you choose the run and how its geometry should be packaged. Prisma then creates the meshes, filament instructions, and mesh report from that run’s stored data.\n\nExporting does not repeat the solve or change the completed run.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "select-export-run",
+          "title": "Select the export run",
+          "body": "Export begins with one completed run.\n\nSelect the run made with {{paletteA}}. Its preview and dimensions confirm which solve will be exported.",
+          "target_id": "basics.export-run-a",
+          "reveal_id": "basics.export-run-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "event",
+            "event": "export.run-selected",
+            "predicate_id": "basics.export-run-a-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "export-options",
+          "title": "Print-file options",
+          "body": "Output format chooses one bundled 3MF or individual STL files. Mesh method chooses how the solved surface becomes geometry. Mesh detail controls reconstruction scale for the field-derived method.\n\nUse Single 3MF file, Field-derived white cap, and 4x balanced, then select Next.",
+          "target_id": "export.options",
+          "reveal_id": "export.options",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.export-options-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "generate-files",
+          "title": "Generate Print Files",
+          "body": "Select Generate Print Files.\n\nPrisma builds 3D model files and filament-loading or swap instructions from the selected run’s stored data.",
+          "target_id": "export.generate",
+          "reveal_id": "export.generate",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "event",
+            "event": "export.completed",
+            "predicate_id": "basics.export-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "export-results",
+          "title": "Files are already saved",
+          "body": "The export record preserves its options and lists generated files, filament-loading or swap instructions, and the mesh report.\n\nThese files are already saved in the Output folder shown below. Use Open Folder to view them.\n\nDownload .zip creates a packaged copy in a location you choose. Use it only when you want a copy outside the workspace.",
+          "target_id": "export.results",
+          "reveal_id": "export.results",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "top",
+            "bottom",
+            "right"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "complete",
+          "title": "Project complete",
+          "body": "You completed Prisma Generator’s normal workflow: selected the Tutorial Printer profile, prepared a source image, built and compared palettes, reviewed settings, made two solves, inspected Preview, and generated print files.\n\nYour previous Settings Profile will be restored when this guide closes. The Tutorial Printer profile and its 0.4 mm nozzle will remain active. Before starting your own project, select the profile and nozzle for your printer.\n\nHappy printing!",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "image-guide",
+      "version": 3,
+      "title": "Image Guide",
+      "summary": "Prepare and frame the tutorial image while exploring Image controls.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": true,
+        "tutorial_image": true,
+        "tutorial_settings": true,
+        "palette_controls": false
+      },
+      "catalog": {
+        "group": "Page Guides",
+        "order": 10
+      },
+      "chapters": [
+        {
+          "id": "preparation",
+          "label": "Preparation",
+          "step_ids": [
+            "printer-select",
+            "tutorial-nozzle"
+          ]
+        },
+        {
+          "id": "image",
+          "label": "Image",
+          "step_ids": [
+            "image-introduction",
+            "image-library",
+            "image-library-maintenance",
+            "choose-image",
+            "image-preview",
+            "image-adjustments",
+            "aspect-ratios",
+            "crop-fit",
+            "interactive-framing",
+            "physical-dimensions",
+            "border",
+            "image-summary",
+            "open-image-adjustments",
+            "appearance",
+            "reset-image-controls",
+            "tutorial-canvas",
+            "image-guide-complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "printer-select",
+          "title": "Select the Tutorial Printer profile",
+          "body": "This guide uses the Tutorial Printer profile to ensure that all learners get the same experience.\n\nSelect Tutorial Printer from the Active printer list. If it is already active, the guide will continue automatically.",
+          "target_id": "sidebar.active-printer",
+          "reveal_id": "sidebar.active-printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "event",
+            "event": "printer.active-changed",
+            "predicate_id": "basics.tutorial-printer-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "tutorial-nozzle",
+          "title": "Confirm the tutorial nozzle",
+          "body": "Smaller nozzles can produce higher-quality lithophanes, but they take longer to solve and print. This guide uses a 0.4 mm nozzle to save time while you learn the basics.\n\nConfirm that the nozzle selector is set to 0.4 mm. If necessary, change the selection, then select Next.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-nozzle-active"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "image-introduction",
+          "title": "Image: prepare the source",
+          "body": "The Image page is where you prepare the source image Prisma will reproduce as a lithophane.\n\nHere you choose an image, frame it within a physical canvas, and adjust its appearance.\n\nThe adjusted image represents how you want the finished lithophane to look. Prisma uses it when recommending palettes and as the visual target it attempts to recreate during a solve.",
+          "target_id": null,
+          "reveal_id": "workflow.image-page",
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-library",
+          "title": "Adding images to the library",
+          "body": "The Image Library contains the source images you can use to create lithophanes.\n\nUse Add Image to import one or more images, or copy image files directly into Prisma’s Images folder. Open Folder opens that folder in your file browser.",
+          "target_id": "image.library-import",
+          "reveal_id": "image.library-import",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-library-maintenance",
+          "title": "Updating and expanding the library",
+          "body": "Prisma Generator checks the Images folder for changes whenever it starts.\n\nIf you add, remove, or replace files in that folder while Prisma Generator is running, select Refresh to update the Image Library.\n\nUse the button to the right of Refresh to expand or collapse the library when you need more room to browse.",
+          "target_id": "image.library-maintenance",
+          "reveal_id": "image.library-maintenance",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "choose-image",
+          "title": "Select the tutorial image",
+          "body": "For this guide, we will use **{{tutorialImage}}** as the source image.\n\nSelect it to continue.",
+          "target_id": "basics.tutorial-image",
+          "reveal_id": "basics.tutorial-image",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "event",
+            "event": "image.selected",
+            "predicate_id": "basics.tutorial-image-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-preview",
+          "title": "Preview and Adjustments",
+          "body": "Preview shows how the source image is framed and updates as you change the canvas, crop, or appearance.\n\nAdjustments controls the lithophane’s shape, physical size, framing, and image appearance.\n\nThese changes affect future solves but never modify the original image.",
+          "target_id": "image.preview-adjustments",
+          "reveal_id": "image.preview-adjustments",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-adjustments",
+          "title": "Adjustments panel",
+          "body": "The Adjustments panel sets the lithophane’s shape and physical size, how the photograph fits inside it, and the photograph’s appearance.\n\nWe will look at its Size and Image controls next.",
+          "target_id": "image.adjustments",
+          "reveal_id": "image.adjustments",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "aspect-ratios",
+          "title": "Aspect-ratio choices",
+          "body": "The Size tab offers W×H for independent dimensions, Ratio for a custom ratio, Image for the source ratio, and common 3:2, 4:3, 5:4, and 1:1 ratios.\n\nLandscape and Portrait set the canvas orientation. Feel free to try these controls; the guide does not require a particular choice at this point.",
+          "target_id": "image.aspect-experiment",
+          "reveal_id": "image.aspect-experiment",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "crop-fit",
+          "title": "Crop-fit shortcuts",
+          "body": "The first Crop Fit button resets the image zoom and centers it. The other two resize the frame to use the source image’s full width or full height.\n\nEach button provides a quick way to establish an initial crop; you can continue refining the framing afterward. Feel free to try all three.",
+          "target_id": "image.crop-fit",
+          "reveal_id": "image.crop-fit",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "interactive-framing",
+          "title": "Interactive framing",
+          "body": "Use the mouse wheel over the editor to zoom, then drag the image to choose what remains inside the frame.\n\nScale and Rotate provide precise controls, and the nearby buttons rotate by 90 degrees or flip the source. Experiment if you like; Reset will remove these changes.",
+          "target_id": "image.framing",
+          "reveal_id": "image.framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "physical-dimensions",
+          "title": "Physical dimensions",
+          "body": "Width and Height set the lithophane’s physical dimensions in millimeters. The lock buttons determine whether changing one dimension also updates the other.\n\nYou do not need to change these values yet. The guide will ask you to set the tutorial dimensions after this tour.",
+          "target_id": "image.physical-dimensions",
+          "reveal_id": "image.physical-dimensions",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "border",
+          "title": "Optional printed border",
+          "body": "The Border control adds a raised frame around the lithophane, printed in the same color as the cap. It can provide a finished edge and extra support.\n\nTurn the border on if you want to preview it, then turn it off before continuing.",
+          "target_id": "image.border",
+          "reveal_id": "image.border",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-summary",
+          "title": "Resolution summary",
+          "body": "Image Size is the source image’s resolution. Print Size is the physical size of the lithophane. Rendered Size is the pixel grid that Prisma will solve.\n\nA larger canvas or a smaller Solve Pitch (the physical spacing between pixels in Prisma’s solver grid) creates more solve pixels and requires more time.",
+          "target_id": "image.summary",
+          "reveal_id": "image.summary",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "open-image-adjustments",
+          "title": "Open the Image controls",
+          "body": "Select Image at the top of the Adjustments panel to open the image-adjustment controls. The guide will continue automatically.",
+          "target_id": "image.adjustment-image-tab",
+          "reveal_id": "image.adjustment-image-tab",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.adjustment-tab.changed",
+            "predicate_id": "image.adjustment-tab-image",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "appearance",
+          "title": "Image appearance",
+          "body": "B/W and Color choose the overall image mode.\n\nExposure changes brightness; Contrast separates light and dark values; Highlight and Shadow target the brightest and darkest areas. Tint, Saturation, and Temperature adjust color balance and intensity.\n\nFeel free to experiment with these controls. You will reset them before setting the tutorial canvas.",
+          "target_id": "image.appearance",
+          "reveal_id": "image.appearance",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "reset-image-controls",
+          "title": "Reset the image controls",
+          "body": "Reset restores the Size and Image controls in the Adjustments panel to their defaults.\n\nPlease click Reset to clear any changes you may have tried and to continue in this guide.",
+          "target_id": "image.reset-framing",
+          "reveal_id": "image.reset-framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.controls-reset",
+            "predicate_id": "basics.image-reset",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "tutorial-canvas",
+          "title": "Set the tutorial canvas",
+          "body": "Set the physical canvas to exactly 90 × 120 mm (Width 90, Height 120). You may use either the W×H or Image options for Aspect Ratio for this tutorial image. Using the same canvas size keeps the tutorial results consistent for everyone.\n\nIf you experimented with the border, please turn it off before continuing.\n\nSelect Next when the canvas is 90 × 120 mm and the border is off.",
+          "target_id": "image.tutorial-canvas",
+          "reveal_id": "image.tutorial-canvas",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.canvas-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "image-guide-complete",
+          "title": "Image Guide complete",
+          "body": "You explored Prisma’s image framing and appearance controls and restored the tutorial image to its 90 × 120 mm borderless canvas.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "palette-guide",
+      "version": 3,
+      "title": "Palette Guide",
+      "summary": "Prepare suggested palettes and explore the Deck and Manual builder.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": true,
+        "tutorial_image": true,
+        "tutorial_settings": true,
+        "palette_controls": true
+      },
+      "catalog": {
+        "group": "Page Guides",
+        "order": 20
+      },
+      "chapters": [
+        {
+          "id": "preparation",
+          "label": "Preparation",
+          "step_ids": [
+            "printer-select",
+            "tutorial-nozzle",
+            "choose-image",
+            "reset-image-controls",
+            "tutorial-canvas",
+            "open-palette"
+          ]
+        },
+        {
+          "id": "palette",
+          "label": "Palette",
+          "step_ids": [
+            "palette-introduction",
+            "palette-methods",
+            "candidate-filaments",
+            "autosuggest-controls",
+            "suggest-palettes",
+            "add-suggestions",
+            "palette-deck",
+            "manual-palette-add",
+            "manual-palette-remove",
+            "activate-first",
+            "palette-guide-complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "printer-select",
+          "title": "Select the Tutorial Printer profile",
+          "body": "This guide uses the Tutorial Printer profile to ensure that all learners get the same experience.\n\nSelect Tutorial Printer from the Active printer list. If it is already active, the guide will continue automatically.",
+          "target_id": "sidebar.active-printer",
+          "reveal_id": "sidebar.active-printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "event",
+            "event": "printer.active-changed",
+            "predicate_id": "basics.tutorial-printer-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "tutorial-nozzle",
+          "title": "Confirm the tutorial nozzle",
+          "body": "Smaller nozzles can produce higher-quality lithophanes, but they take longer to solve and print. This guide uses a 0.4 mm nozzle to save time while you learn the basics.\n\nConfirm that the nozzle selector is set to 0.4 mm. If necessary, change the selection, then select Next.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-nozzle-active"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "choose-image",
+          "title": "Select the tutorial image",
+          "body": "For this guide, we will use **{{tutorialImage}}** as the source image.\n\nSelect it to continue.",
+          "target_id": "basics.tutorial-image",
+          "reveal_id": "basics.tutorial-image",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "event",
+            "event": "image.selected",
+            "predicate_id": "basics.tutorial-image-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "reset-image-controls",
+          "title": "Reset the image controls",
+          "body": "Reset restores the Size and Image controls in the Adjustments panel to their defaults.\n\nPlease click Reset to clear any changes you may have tried and to continue in this guide.",
+          "target_id": "image.reset-framing",
+          "reveal_id": "image.reset-framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.controls-reset",
+            "predicate_id": "basics.image-reset",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "tutorial-canvas",
+          "title": "Set the tutorial canvas",
+          "body": "Set the physical canvas to exactly 90 × 120 mm (Width 90, Height 120). You may use either the W×H or Image options for Aspect Ratio for this tutorial image. Using the same canvas size keeps the tutorial results consistent for everyone.\n\nIf you experimented with the border, please turn it off before continuing.\n\nSelect Next when the canvas is 90 × 120 mm and the border is off.",
+          "target_id": "image.tutorial-canvas",
+          "reveal_id": "image.tutorial-canvas",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.canvas-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-palette",
+          "title": "Continue to Palette",
+          "body": "The source image is ready. Open Palette to choose the colored filaments Prisma may use.",
+          "target_id": "workflow.palette",
+          "reveal_id": "workflow.palette",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.creation",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-introduction",
+          "title": "Palette: choose your filaments",
+          "body": "A **palette** is the set of filaments Prisma will use to recreate the colors in an image.\n\nYou can use the tools found on the Palette page to build palettes manually or to have Prisma automatically create palettes tailored to your image.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "palette-methods",
+          "title": "Building a palette",
+          "body": "Auto-Suggest recommends palettes whose filaments will do a good job of reproducing the colors in the source image when they are combined.\n\nIts recommendations can only include filaments that have been selected in this panel. Deselecting a filament prevents Auto-Suggest from including it in the palettes.\n\nPlease note that whichever filament is currently assigned to be used for the base and white cap of your lithophane cannot be included in palettes. You will learn more about this later in the guide.",
+          "target_id": "palette.autosuggest-overview",
+          "reveal_id": "palette.autosuggest-overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "candidate-filaments",
+          "title": "Auto-Suggest filaments",
+          "body": "Every active filament that can be used for color is already selected here.\n\nThis does not add every selected filament to one palette. It tells Auto-Suggest which filaments it may combine when building suggestions.\n\nThe filament reserved for the white base and cap cannot also be selected as a color. Leave the current selection unchanged for this guide.",
+          "target_id": "palette.candidates",
+          "reveal_id": "palette.candidates",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "autosuggest-controls",
+          "title": "Auto-Suggest controls",
+          "body": "**Palette colors** specifies the exact number of colored filaments in each suggested palette, while **Suggestions** controls how many palettes Auto-Suggest will return.\n\nThe Solve mode selector changes the type of palette that Auto-Suggest will recommend. You should only change this to Luminance if you are also using Prisma’s Luminance solve mode. You will learn more about solve modes later.",
+          "target_id": "palette.autosuggest-controls",
+          "reveal_id": "palette.autosuggest-controls",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "suggest-palettes",
+          "title": "Suggest palettes",
+          "body": "Auto-Suggest will compare combinations of the selected filaments with the source image and return ranked palette cards. This may take some time; the progress display shows its status and lets you cancel if needed.\n\nFor this guide, confirm that Palette colors is set to exactly 3 and Suggestions is at least 2.\n\nSelect Suggest Palettes to continue.",
+          "target_id": "palette.suggest",
+          "reveal_id": "palette.suggest",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.suggestions.completed",
+            "predicate_id": "basics.two-suggestions-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "add-suggestions",
+          "title": "Suggested palettes",
+          "body": "Suggested cards show their filaments and image-specific metrics. Metrics help rank palettes under the model, but only partly correspond to whether a real lithophane looks good.\n\nFor this guide, use the two highest-ranked results: {{paletteA}} and {{paletteB}}. Add both to the Palette Deck.",
+          "target_id": "palette.suggestions",
+          "reveal_id": "palette.suggestions",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.tutorial-palettes-in-deck"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-deck",
+          "title": "The Palette Deck",
+          "body": "The sidebar Deck contains palettes ready to solve.\n\nLoad retrieves a saved palette, and Clear removes all Deck cards after confirmation.\n\nSelecting a card makes it active. A card menu can create a Manual variant or save it; × removes only that card.",
+          "target_id": "palette.deck",
+          "reveal_id": "palette.deck",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "manual-palette-add",
+          "title": "Build a Manual palette",
+          "body": "The Manual builder is now open.\n\nChoose one or more colored filaments in any order, then select Add to Deck. The guide will continue after your new palette appears in the sidebar Deck.",
+          "target_id": "palette.manual",
+          "reveal_id": "palette.manual",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.manual-card-added"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "manual-palette-remove",
+          "title": "Remove the Manual palette",
+          "body": "This is the temporary palette you just added.\n\nSelect its × button once; it changes to ! to ask for confirmation. Select it a second time to remove the card.\n\nThe two suggested tutorial palettes will remain.",
+          "target_id": "basics.manual-card",
+          "reveal_id": "basics.manual-card",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-deck",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.manual-card-removed"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "activate-first",
+          "title": "Activate first palette",
+          "body": "Select {{paletteA}} in the Deck. The highlighted card is the active palette used by the next solve.",
+          "target_id": "basics.palette-a",
+          "reveal_id": "basics.palette-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-deck",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-a-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-guide-complete",
+          "title": "Palette Guide complete",
+          "body": "You prepared two suggested palettes, explored the Palette Deck and Manual builder, and left Palette A active.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "settings-guide",
+      "version": 2,
+      "title": "Settings Guide",
+      "summary": "Explore Settings Profiles, solver controls, White Cap, and Advanced options.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": false,
+        "tutorial_image": false,
+        "tutorial_settings": true,
+        "palette_controls": false
+      },
+      "catalog": {
+        "group": "Page Guides",
+        "order": 30
+      },
+      "chapters": [
+        {
+          "id": "settings",
+          "label": "Settings",
+          "step_ids": [
+            "settings-introduction",
+            "open-settings",
+            "settings-profile",
+            "preprocessing-solver",
+            "white-cap",
+            "advanced-settings",
+            "close-settings",
+            "settings-guide-complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "settings-introduction",
+          "title": "Settings: control the solve",
+          "body": "Settings controls how Prisma converts the prepared image and active palette into a printable layer plan.\n\nIt covers physical structure, image preprocessing, solver behavior, and the white cap.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "open-settings",
+          "title": "Open Settings",
+          "body": "This guide uses the prepared tutorial defaults.\n\nOpen Settings to review them and continue.",
+          "target_id": "topbar.settings",
+          "reveal_id": "topbar.settings",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "settings.opened",
+            "predicate_id": "settings.drawer-open"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-profile",
+          "title": "Profiles and Essentials",
+          "body": "A Settings Profile is a reusable collection of solve settings. Tutorial Basics is a temporary copy of the built-in Basic profile with Solve Pitch set to 0.4 mm for faster tutorial solves.\n\nEssentials contains Solve Mode, Solve Pitch, Max Total Thickness, Layer Height, White Base/Cap Filament, and Base Thickness. The diagram shows the base, color layers, and white cap.\n\nProfiles… is where you load other Settings Profiles. Leave Tutorial Basics unchanged and select Next.",
+          "target_id": "settings.profile-essentials",
+          "reveal_id": "settings.profile-essentials",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-profile-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "preprocessing-solver",
+          "title": "Solver settings",
+          "body": "Preprocessing can reduce noise, smooth printable-scale features, or reshape tone and saturation before solving.\n\nThe Color Solver controls how Prisma divides the image and searches for printable filament recipes.\n\nDifficult photographs may benefit from these tools. Leave them unchanged for this tutorial image.",
+          "target_id": "settings.preprocessing-solver",
+          "reveal_id": "settings.preprocessing-solver",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "white-cap",
+          "title": "White Cap",
+          "body": "The White Cap covers the color stack.\n\nIts boundary portion keeps the print structurally covered; its detail portion can restore fine appearance information. Smoothing and depth determine how that material is distributed.\n\nKeep the tutorial profile’s White Cap settings unchanged for this guide.",
+          "target_id": "settings.white-cap",
+          "reveal_id": "settings.white-cap",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "advanced-settings",
+          "title": "Advanced settings",
+          "body": "Turn Advanced on.\n\nIt reveals less frequently changed controls without changing their values. Look around, then turn Advanced off again to continue.",
+          "target_id": "settings.advanced",
+          "reveal_id": "settings.advanced",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "event",
+            "event": "settings.advanced-changed",
+            "predicate_id": "basics.settings-detour-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "close-settings",
+          "title": "Close Settings",
+          "body": "Settings are captured when a solve begins, so every run retains the values that produced it.\n\nClose Settings to continue.",
+          "target_id": "settings.drawer",
+          "reveal_id": "settings.drawer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "event",
+            "event": "settings.closed",
+            "predicate_id": "settings.drawer-closed"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-guide-complete",
+          "title": "Settings Guide complete",
+          "body": "You explored the major Settings groups and returned Advanced to Off. Your previous Settings Profile will be restored when this guide closes.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "preview-guide",
+      "version": 3,
+      "title": "Preview Guide",
+      "summary": "Create two tutorial solves, then compare and inspect their results.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": true,
+        "tutorial_image": true,
+        "tutorial_settings": true,
+        "palette_controls": true
+      },
+      "catalog": {
+        "group": "Page Guides",
+        "order": 40,
+        "note": "Creates two tutorial solves."
+      },
+      "chapters": [
+        {
+          "id": "preparation",
+          "label": "Preparation",
+          "step_ids": [
+            "printer-select",
+            "tutorial-nozzle",
+            "choose-image",
+            "reset-image-controls",
+            "tutorial-canvas",
+            "open-palette",
+            "palette-methods",
+            "autosuggest-controls",
+            "suggest-palettes",
+            "add-suggestions",
+            "activate-first",
+            "open-settings",
+            "settings-profile",
+            "close-settings",
+            "solve-first"
+          ]
+        },
+        {
+          "id": "preview",
+          "label": "Preview",
+          "step_ids": [
+            "preview-introduction",
+            "preview-arrival",
+            "activate-second",
+            "solve-second",
+            "compare-runs",
+            "solve-history",
+            "preview-views",
+            "closer-inspection",
+            "captured-settings",
+            "preview-guide-complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "printer-select",
+          "title": "Select the Tutorial Printer profile",
+          "body": "This guide uses the Tutorial Printer profile to ensure that all learners get the same experience.\n\nSelect Tutorial Printer from the Active printer list. If it is already active, the guide will continue automatically.",
+          "target_id": "sidebar.active-printer",
+          "reveal_id": "sidebar.active-printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "event",
+            "event": "printer.active-changed",
+            "predicate_id": "basics.tutorial-printer-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "tutorial-nozzle",
+          "title": "Confirm the tutorial nozzle",
+          "body": "Smaller nozzles can produce higher-quality lithophanes, but they take longer to solve and print. This guide uses a 0.4 mm nozzle to save time while you learn the basics.\n\nConfirm that the nozzle selector is set to 0.4 mm. If necessary, change the selection, then select Next.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-nozzle-active"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "choose-image",
+          "title": "Select the tutorial image",
+          "body": "For this guide, we will use **{{tutorialImage}}** as the source image.\n\nSelect it to continue.",
+          "target_id": "basics.tutorial-image",
+          "reveal_id": "basics.tutorial-image",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "event",
+            "event": "image.selected",
+            "predicate_id": "basics.tutorial-image-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "reset-image-controls",
+          "title": "Reset the image controls",
+          "body": "Reset restores the Size and Image controls in the Adjustments panel to their defaults.\n\nPlease click Reset to clear any changes you may have tried and to continue in this guide.",
+          "target_id": "image.reset-framing",
+          "reveal_id": "image.reset-framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.controls-reset",
+            "predicate_id": "basics.image-reset",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "tutorial-canvas",
+          "title": "Set the tutorial canvas",
+          "body": "Set the physical canvas to exactly 90 × 120 mm (Width 90, Height 120). You may use either the W×H or Image options for Aspect Ratio for this tutorial image. Using the same canvas size keeps the tutorial results consistent for everyone.\n\nIf you experimented with the border, please turn it off before continuing.\n\nSelect Next when the canvas is 90 × 120 mm and the border is off.",
+          "target_id": "image.tutorial-canvas",
+          "reveal_id": "image.tutorial-canvas",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.canvas-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-palette",
+          "title": "Continue to Palette",
+          "body": "The source image is ready. Open Palette to choose the colored filaments Prisma may use.",
+          "target_id": "workflow.palette",
+          "reveal_id": "workflow.palette",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.creation",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-methods",
+          "title": "Building a palette",
+          "body": "Auto-Suggest recommends palettes whose filaments will do a good job of reproducing the colors in the source image when they are combined.\n\nIts recommendations can only include filaments that have been selected in this panel. Deselecting a filament prevents Auto-Suggest from including it in the palettes.\n\nPlease note that whichever filament is currently assigned to be used for the base and white cap of your lithophane cannot be included in palettes. You will learn more about this later in the guide.",
+          "target_id": "palette.autosuggest-overview",
+          "reveal_id": "palette.autosuggest-overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "autosuggest-controls",
+          "title": "Auto-Suggest controls",
+          "body": "**Palette colors** specifies the exact number of colored filaments in each suggested palette, while **Suggestions** controls how many palettes Auto-Suggest will return.\n\nThe Solve mode selector changes the type of palette that Auto-Suggest will recommend. You should only change this to Luminance if you are also using Prisma’s Luminance solve mode. You will learn more about solve modes later.",
+          "target_id": "palette.autosuggest-controls",
+          "reveal_id": "palette.autosuggest-controls",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "suggest-palettes",
+          "title": "Suggest palettes",
+          "body": "Auto-Suggest will compare combinations of the selected filaments with the source image and return ranked palette cards. This may take some time; the progress display shows its status and lets you cancel if needed.\n\nFor this guide, confirm that Palette colors is set to exactly 3 and Suggestions is at least 2.\n\nSelect Suggest Palettes to continue.",
+          "target_id": "palette.suggest",
+          "reveal_id": "palette.suggest",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.suggestions.completed",
+            "predicate_id": "basics.two-suggestions-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "add-suggestions",
+          "title": "Suggested palettes",
+          "body": "Suggested cards show their filaments and image-specific metrics. Metrics help rank palettes under the model, but only partly correspond to whether a real lithophane looks good.\n\nFor this guide, use the two highest-ranked results: {{paletteA}} and {{paletteB}}. Add both to the Palette Deck.",
+          "target_id": "palette.suggestions",
+          "reveal_id": "palette.suggestions",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.tutorial-palettes-in-deck"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "activate-first",
+          "title": "Activate first palette",
+          "body": "Select {{paletteA}} in the Deck. The highlighted card is the active palette used by the next solve.",
+          "target_id": "basics.palette-a",
+          "reveal_id": "basics.palette-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-deck",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-a-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-settings",
+          "title": "Open Settings",
+          "body": "This guide uses the prepared tutorial defaults.\n\nOpen Settings to review them and continue.",
+          "target_id": "topbar.settings",
+          "reveal_id": "topbar.settings",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "settings.opened",
+            "predicate_id": "settings.drawer-open"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-profile",
+          "title": "Profiles and Essentials",
+          "body": "A Settings Profile is a reusable collection of solve settings. Tutorial Basics is a temporary copy of the built-in Basic profile with Solve Pitch set to 0.4 mm for faster tutorial solves.\n\nEssentials contains Solve Mode, Solve Pitch, Max Total Thickness, Layer Height, White Base/Cap Filament, and Base Thickness. The diagram shows the base, color layers, and white cap.\n\nProfiles… is where you load other Settings Profiles. Leave Tutorial Basics unchanged and select Next.",
+          "target_id": "settings.profile-essentials",
+          "reveal_id": "settings.profile-essentials",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-profile-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "close-settings",
+          "title": "Close Settings",
+          "body": "Settings are captured when a solve begins, so every run retains the values that produced it.\n\nClose Settings to continue.",
+          "target_id": "settings.drawer",
+          "reveal_id": "settings.drawer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "event",
+            "event": "settings.closed",
+            "predicate_id": "settings.drawer-closed"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "solve-first",
+          "title": "Solve: first palette",
+          "body": "Select Solve.\n\nA solve can be started from any workflow page. It uses the prepared image, active palette, and current settings at the moment it begins. Prisma will move to Preview while it works.",
+          "target_id": "topbar.solve",
+          "reveal_id": "topbar.solve",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "solve.completed",
+            "predicate_id": "basics.first-solve-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "preview-introduction",
+          "title": "Preview: compare and inspect results",
+          "body": "Preview is where Prisma collects completed solve runs so you can compare their predicted appearance, inspect their printable structures, and review the settings that produced them.\n\nA run is one solve result created from a particular image, palette, and collection of settings.\n\nWe will create a second run before exploring the available inspection tools.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "preview-arrival",
+          "title": "First solve result",
+          "body": "You are now in Preview. The completed run appears in Solve History, while its predicted result appears in the comparison area.\n\nThese two regions stay linked as you add and select runs.",
+          "target_id": "preview.overview",
+          "reveal_id": "preview.overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "activate-second",
+          "title": "Activate the second palette",
+          "body": "Without leaving Preview, select {{paletteB}} in the Deck. The guide will continue when it becomes the active palette.",
+          "target_id": "basics.palette-b",
+          "reveal_id": "basics.palette-b",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-b-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "solve-second",
+          "title": "Solve the second palette",
+          "body": "Select Solve again.\n\nSolve is available throughout the workflow and uses the active palette, so you do not need to leave Preview. This second run will give you two results to compare.",
+          "target_id": "topbar.solve",
+          "reveal_id": "topbar.solve",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "solve.completed",
+            "predicate_id": "basics.second-solve-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "compare-runs",
+          "title": "Compare the solves",
+          "body": "Both guide runs should now be selected and displayed side by side in the comparison area.\n\nThis is where you judge the visible differences between palettes. Select Next after looking at both results.",
+          "target_id": "preview.comparison",
+          "reveal_id": "preview.comparison",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.both-runs-selected"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "solve-history",
+          "title": "Solve History",
+          "body": "Solve History contains one card for each completed run. Selecting cards controls which results appear in the comparison area.\n\nEach card also provides captured settings and actions for saving or removing the run.",
+          "target_id": "preview.history",
+          "reveal_id": "preview.history",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "preview-views",
+          "title": "Preview views",
+          "body": "Predicted estimates the illuminated result. White Cap separates the Total, Boundary, and Detail cap geometry. Color Regions contains Color Ceiling and Recipe Viewer.\n\nTop Surface shows the final combined surface. Explorer examines materials around a selected height. Advanced contains the diagnostic Thickness Maps and Highpass views.\n\nVisit any view you like. A later guide will explain these tools in depth.",
+          "target_id": "preview.views",
+          "reveal_id": "preview.views",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "left",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "closer-inspection",
+          "title": "Inspect the previews",
+          "body": "Preview images can be opened for larger inspection.\n\nSubview controls change which part of a solve is shown, and contextual controls appear only where relevant. Feel free to inspect the runs or move among views.",
+          "target_id": "preview.comparison",
+          "reveal_id": "preview.comparison",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "top",
+            "bottom",
+            "left"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "captured-settings",
+          "title": "Run settings and saves",
+          "body": "A run’s Settings view records exactly what was captured when its solve began.\n\nUse These Settings applies that snapshot as the current temporary Settings Profile for a future solve.\n\nSolve History is session-only unless a run is explicitly saved; Load opens Saved Runs.\n\nYou do not need to save or load a run during this guide.",
+          "target_id": "preview.history",
+          "reveal_id": "preview.history",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-preview",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "preview-guide-complete",
+          "title": "Preview Guide complete",
+          "body": "You created two tutorial solves and explored comparison, Solve History, result views, and captured settings.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "export-guide",
+      "version": 3,
+      "title": "Export Guide",
+      "summary": "Create a tutorial solve and generate its print files.",
+      "restore_presentation": false,
+      "prepare_id": "basics",
+      "preparation": {
+        "tutorial_printer": true,
+        "tutorial_image": true,
+        "tutorial_settings": true,
+        "palette_controls": true
+      },
+      "catalog": {
+        "group": "Page Guides",
+        "order": 50,
+        "note": "Creates one tutorial solve and print files."
+      },
+      "chapters": [
+        {
+          "id": "preparation",
+          "label": "Preparation",
+          "step_ids": [
+            "printer-select",
+            "tutorial-nozzle",
+            "choose-image",
+            "reset-image-controls",
+            "tutorial-canvas",
+            "open-palette",
+            "palette-methods",
+            "autosuggest-controls",
+            "suggest-palettes",
+            "add-suggestions",
+            "activate-first",
+            "open-settings",
+            "settings-profile",
+            "close-settings",
+            "solve-first"
+          ]
+        },
+        {
+          "id": "export",
+          "label": "Export",
+          "step_ids": [
+            "open-export",
+            "export-introduction",
+            "select-export-run",
+            "export-choices-overview",
+            "export-options",
+            "generate-files",
+            "export-results",
+            "export-guide-complete"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "printer-select",
+          "title": "Select the Tutorial Printer profile",
+          "body": "This guide uses the Tutorial Printer profile to ensure that all learners get the same experience.\n\nSelect Tutorial Printer from the Active printer list. If it is already active, the guide will continue automatically.",
+          "target_id": "sidebar.active-printer",
+          "reveal_id": "sidebar.active-printer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "event",
+            "event": "printer.active-changed",
+            "predicate_id": "basics.tutorial-printer-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "tutorial-nozzle",
+          "title": "Confirm the tutorial nozzle",
+          "body": "Smaller nozzles can produce higher-quality lithophanes, but they take longer to solve and print. This guide uses a 0.4 mm nozzle to save time while you learn the basics.\n\nConfirm that the nozzle selector is set to 0.4 mm. If necessary, change the selection, then select Next.",
+          "target_id": "sidebar.active-nozzle",
+          "reveal_id": "sidebar.active-nozzle",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-printer",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-nozzle-active"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "choose-image",
+          "title": "Select the tutorial image",
+          "body": "For this guide, we will use **{{tutorialImage}}** as the source image.\n\nSelect it to continue.",
+          "target_id": "basics.tutorial-image",
+          "reveal_id": "basics.tutorial-image",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-image-library",
+          "completion": {
+            "kind": "event",
+            "event": "image.selected",
+            "predicate_id": "basics.tutorial-image-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "reset-image-controls",
+          "title": "Reset the image controls",
+          "body": "Reset restores the Size and Image controls in the Adjustments panel to their defaults.\n\nPlease click Reset to clear any changes you may have tried and to continue in this guide.",
+          "target_id": "image.reset-framing",
+          "reveal_id": "image.reset-framing",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "event",
+            "event": "image.controls-reset",
+            "predicate_id": "basics.image-reset",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "tutorial-canvas",
+          "title": "Set the tutorial canvas",
+          "body": "Set the physical canvas to exactly 90 × 120 mm (Width 90, Height 120). You may use either the W×H or Image options for Aspect Ratio for this tutorial image. Using the same canvas size keeps the tutorial results consistent for everyone.\n\nIf you experimented with the border, please turn it off before continuing.\n\nSelect Next when the canvas is 90 × 120 mm and the border is off.",
+          "target_id": "image.tutorial-canvas",
+          "reveal_id": "image.tutorial-canvas",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-image-adjustments",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.canvas-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-palette",
+          "title": "Continue to Palette",
+          "body": "The source image is ready. Open Palette to choose the colored filaments Prisma may use.",
+          "target_id": "workflow.palette",
+          "reveal_id": "workflow.palette",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.creation",
+            "accept_preexisting": false
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "palette-methods",
+          "title": "Building a palette",
+          "body": "Auto-Suggest recommends palettes whose filaments will do a good job of reproducing the colors in the source image when they are combined.\n\nIts recommendations can only include filaments that have been selected in this panel. Deselecting a filament prevents Auto-Suggest from including it in the palettes.\n\nPlease note that whichever filament is currently assigned to be used for the base and white cap of your lithophane cannot be included in palettes. You will learn more about this later in the guide.",
+          "target_id": "palette.autosuggest-overview",
+          "reveal_id": "palette.autosuggest-overview",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "autosuggest-controls",
+          "title": "Auto-Suggest controls",
+          "body": "**Palette colors** specifies the exact number of colored filaments in each suggested palette, while **Suggestions** controls how many palettes Auto-Suggest will return.\n\nThe Solve mode selector changes the type of palette that Auto-Suggest will recommend. You should only change this to Luminance if you are also using Prisma’s Luminance solve mode. You will learn more about solve modes later.",
+          "target_id": "palette.autosuggest-controls",
+          "reveal_id": "palette.autosuggest-controls",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "suggest-palettes",
+          "title": "Suggest palettes",
+          "body": "Auto-Suggest will compare combinations of the selected filaments with the source image and return ranked palette cards. This may take some time; the progress display shows its status and lets you cancel if needed.\n\nFor this guide, confirm that Palette colors is set to exactly 3 and Suggestions is at least 2.\n\nSelect Suggest Palettes to continue.",
+          "target_id": "palette.suggest",
+          "reveal_id": "palette.suggest",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.suggestions.completed",
+            "predicate_id": "basics.two-suggestions-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "add-suggestions",
+          "title": "Suggested palettes",
+          "body": "Suggested cards show their filaments and image-specific metrics. Metrics help rank palettes under the model, but only partly correspond to whether a real lithophane looks good.\n\nFor this guide, use the two highest-ranked results: {{paletteA}} and {{paletteB}}. Add both to the Palette Deck.",
+          "target_id": "palette.suggestions",
+          "reveal_id": "palette.suggestions",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-suggestions",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.updated",
+            "predicate_id": "basics.tutorial-palettes-in-deck"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "activate-first",
+          "title": "Activate first palette",
+          "body": "Select {{paletteA}} in the Deck. The highlighted card is the active palette used by the next solve.",
+          "target_id": "basics.palette-a",
+          "reveal_id": "basics.palette-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-palette-deck",
+          "completion": {
+            "kind": "event",
+            "event": "palette.deck.activated",
+            "predicate_id": "basics.palette-a-active",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-settings",
+          "title": "Open Settings",
+          "body": "This guide uses the prepared tutorial defaults.\n\nOpen Settings to review them and continue.",
+          "target_id": "topbar.settings",
+          "reveal_id": "topbar.settings",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "settings.opened",
+            "predicate_id": "settings.drawer-open"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-profile",
+          "title": "Profiles and Essentials",
+          "body": "A Settings Profile is a reusable collection of solve settings. Tutorial Basics is a temporary copy of the built-in Basic profile with Solve Pitch set to 0.4 mm for faster tutorial solves.\n\nEssentials contains Solve Mode, Solve Pitch, Max Total Thickness, Layer Height, White Base/Cap Filament, and Base Thickness. The diagram shows the base, color layers, and white cap.\n\nProfiles… is where you load other Settings Profiles. Leave Tutorial Basics unchanged and select Next.",
+          "target_id": "settings.profile-essentials",
+          "reveal_id": "settings.profile-essentials",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.tutorial-profile-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "close-settings",
+          "title": "Close Settings",
+          "body": "Settings are captured when a solve begins, so every run retains the values that produced it.\n\nClose Settings to continue.",
+          "target_id": "settings.drawer",
+          "reveal_id": "settings.drawer",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-settings",
+          "completion": {
+            "kind": "event",
+            "event": "settings.closed",
+            "predicate_id": "settings.drawer-closed"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "solve-first",
+          "title": "Solve: first palette",
+          "body": "Select Solve.\n\nA solve can be started from any workflow page. It uses the prepared image, active palette, and current settings at the moment it begins. Prisma will move to Preview while it works.",
+          "target_id": "topbar.solve",
+          "reveal_id": "topbar.solve",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "solve.completed",
+            "predicate_id": "basics.first-solve-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "open-export",
+          "title": "Open Export",
+          "body": "Export creates files for one completed run at a time. Open Export.",
+          "target_id": "workflow.export",
+          "reveal_id": "workflow.export",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "tab.changed",
+            "predicate_id": "tab.export",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "export-introduction",
+          "title": "Export: create print files",
+          "body": "Export converts one completed run into files for slicing and printing.\n\nHere you choose the run and how its geometry should be packaged. Prisma then creates the meshes, filament instructions, and mesh report from that run’s stored data.\n\nExporting does not repeat the solve or change the completed run.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "full-scrim",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "select-export-run",
+          "title": "Select the export run",
+          "body": "Export begins with one completed run.\n\nSelect the run made with {{paletteA}}. Its preview and dimensions confirm which solve will be exported.",
+          "target_id": "basics.export-run-a",
+          "reveal_id": "basics.export-run-a",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "event",
+            "event": "export.run-selected",
+            "predicate_id": "basics.export-run-a-selected",
+            "accept_preexisting": true
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "export-choices-overview",
+          "title": "Export choices",
+          "body": "Output format chooses one bundled 3MF or separate STL files. Mesh method controls how the solved surface becomes printable geometry, and Mesh detail controls reconstruction scale for the field-derived method.\n\nThese choices affect file packaging and mesh construction; they do not repeat or change the solve.",
+          "target_id": "export.options",
+          "reveal_id": "export.options",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "export-options",
+          "title": "Print-file options",
+          "body": "Output format chooses one bundled 3MF or individual STL files. Mesh method chooses how the solved surface becomes geometry. Mesh detail controls reconstruction scale for the field-derived method.\n\nUse Single 3MF file, Field-derived white cap, and 4x balanced, then select Next.",
+          "target_id": "export.options",
+          "reveal_id": "export.options",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "manual",
+            "predicate_id": "basics.export-options-ready"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "generate-files",
+          "title": "Generate Print Files",
+          "body": "Select Generate Print Files.\n\nPrisma builds 3D model files and filament-loading or swap instructions from the selected run’s stored data.",
+          "target_id": "export.generate",
+          "reveal_id": "export.generate",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "event",
+            "event": "export.completed",
+            "predicate_id": "basics.export-complete"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        },
+        {
+          "id": "export-results",
+          "title": "Files are already saved",
+          "body": "The export record preserves its options and lists generated files, filament-loading or swap instructions, and the mesh report.\n\nThese files are already saved in the Output folder shown below. Use Open Folder to view them.\n\nDownload .zip creates a packaged copy in a location you choose. Use it only when you want a copy outside the workspace.",
+          "target_id": "export.results",
+          "reveal_id": "export.results",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "top",
+            "bottom",
+            "right"
+          ],
+          "placement_group": "basics-export",
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "export-guide-complete",
+          "title": "Export Guide complete",
+          "body": "You created a tutorial solve, generated its print files, and reviewed where Prisma stores the resulting files and instructions.",
+          "target_id": null,
+          "reveal_id": null,
+          "overlay_mode": "spotlight",
+          "preferred_placements": [],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "guided-setup-help-pointer",
+      "version": 1,
+      "title": "Find guides later",
+      "summary": "Point to Help & Guides after Guided Setup is declined.",
+      "restore_presentation": false,
+      "internal": true,
+      "chapters": [
+        {
+          "id": "help",
+          "label": "Help",
+          "step_ids": [
+            "help-and-guides"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "help-and-guides",
+          "title": "Help is always available",
+          "body": "You can reopen Guided Setup and launch other available guides here whenever you need them.",
+          "target_id": "topbar.help-guides",
+          "reveal_id": "topbar.help-guides",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "interaction"
+          },
+          "allow_previous": true,
+          "allow_skip": false
+        }
+      ]
+    },
+    {
+      "id": "interface-preview",
+      "version": 1,
+      "title": "Explore the Interface",
+      "summary": "Preview how Prisma can identify controls without changing them.",
+      "restore_presentation": true,
+      "catalog": {
+        "group": "Preview",
+        "order": 10,
+        "badge": "Preview"
+      },
+      "chapters": [
+        {
+          "id": "interface",
+          "label": "Interface",
+          "step_ids": [
+            "workflow-tabs",
+            "settings-button",
+            "white-point-rescale",
+            "image-library"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "id": "workflow-tabs",
+          "title": "Prisma's workflow",
+          "body": "These numbered tabs follow the normal path from choosing an image through exporting a finished lithophane.",
+          "target_id": "workflow.tabs",
+          "reveal_id": "workflow.tabs",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "right",
+            "top",
+            "left"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "settings-button",
+          "title": "Open Settings",
+          "body": "Select Settings. This guide continues after Prisma confirms that the drawer opened.",
+          "target_id": "topbar.settings",
+          "reveal_id": "topbar.settings",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "bottom",
+            "left",
+            "top",
+            "right"
+          ],
+          "completion": {
+            "kind": "event",
+            "event": "settings.opened",
+            "predicate_id": "settings.drawer-open"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "white-point-rescale",
+          "title": "Settings can be identified in place",
+          "body": "This is White-point rescale. The guide frames the existing row without changing the setting or layout.",
+          "target_id": "settings.white-point-rescale",
+          "reveal_id": "settings.white-point-rescale",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "left",
+            "bottom",
+            "top",
+            "right"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        },
+        {
+          "id": "image-library",
+          "title": "Guides can follow the workflow",
+          "body": "Prisma can reveal another part of the interface and keep the explanation attached across different window sizes and zoom levels.",
+          "target_id": "image.library",
+          "reveal_id": "image.library",
+          "overlay_mode": "spotlight",
+          "preferred_placements": [
+            "right",
+            "bottom",
+            "left",
+            "top"
+          ],
+          "completion": {
+            "kind": "manual"
+          },
+          "allow_previous": true,
+          "allow_skip": true
+        }
+      ]
+    }
+  ]
+}

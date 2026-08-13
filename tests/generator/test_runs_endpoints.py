@@ -123,6 +123,30 @@ def test_save_then_list(tmp_path):
     assert any(s["save_id"] == save_id and s["label"] == "My Run" for s in listed)
 
 
+def test_protected_guide_image_is_embedded_and_saved_run_no_longer_depends_on_mount():
+    _seed_cached_solve("guide-run")
+    asset = server._GUIDE_ASSET_CATALOG.get("bubba-blanket")
+    cached = server.session["solve_cache"]["guide-run"]
+    cached["config"]["image_path"] = asset["guide_display_name"]
+    cached["config"]["image_source_ref"] = "guide-image:bubba-blanket"
+    server.session["guide"]["mounted_asset_ids"].add("bubba-blanket")
+
+    saved = client.post(
+        "/api/runs/save",
+        json={"card_id": "guide-run", "label": "Portable tutorial run"},
+    )
+    assert saved.status_code == 200, saved.text
+    save_id = saved.json()["save_id"]
+
+    server.session["guide"]["mounted_asset_ids"].discard("bubba-blanket")
+    server.session["solve_cache"].clear()
+    loaded = client.post("/api/runs/load", json={"save_id": save_id})
+
+    assert loaded.status_code == 200, loaded.text
+    assert loaded.json()["source_image"]["source_ref"].startswith("loaded-run:")
+    assert "guide-image:" not in str(loaded.json()["config"])
+
+
 @pytest.mark.parametrize("label", ["Run 7", " run 007 ", "rUn 9"])
 def test_save_rejects_reserved_automatic_run_labels(label):
     _seed_cached_solve("run-1")

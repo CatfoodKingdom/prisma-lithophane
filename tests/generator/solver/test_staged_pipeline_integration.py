@@ -119,7 +119,7 @@ def test_pressure_diagnostics_are_flag_gated():
     ] == 0
 
 
-def test_neutral_field_protection_off_preserves_output_and_modes_emit_telemetry():
+def test_neutral_field_protection_disabled_preserves_output_and_enabled_emits_telemetry():
     image = np.full((8, 8, 3), 190, dtype=np.uint8)
     base_kwargs = dict(
         palette=["bambu-basic-cyan", "bambu-basic-magenta"],
@@ -133,14 +133,15 @@ def test_neutral_field_protection_off_preserves_output_and_modes_emit_telemetry(
         image,
         _offline_solve_config(
             **base_kwargs,
-            neutral_field_protection_mode="off",
+            neutral_field_protection_enabled=False,
         ),
     )
     standard = solve_preview(
         image,
         _offline_solve_config(
             **base_kwargs,
-            neutral_field_protection_mode="standard",
+            neutral_field_protection_enabled=True,
+            neutral_field_protection_cutoff=0.020,
         ),
     )
 
@@ -151,16 +152,11 @@ def test_neutral_field_protection_off_preserves_output_and_modes_emit_telemetry(
             explicit_off.thickness_maps[key],
         )
     off_perf = explicit_off.staged_result.performance_profile
-    assert off_perf.counters["stage2_neutral_field_protection_mode"] == "off"
     assert off_perf.counters["stage2_neutral_field_protection_enabled"] is False
     assert off_perf.counters["stage2_neutral_field_candidate_evaluations"] == 0
     assert off_perf.timings_s["stage2_neutral_field_protection_s"] == 0.0
 
     standard_perf = standard.staged_result.performance_profile
-    assert (
-        standard_perf.counters["stage2_neutral_field_protection_mode"]
-        == "standard"
-    )
     assert (
         standard_perf.counters["stage2_neutral_field_protection_enabled"]
         is True
@@ -332,10 +328,12 @@ def test_preview_legacy_maps_are_stage5_bridge_outputs():
 
 def test_stage4_authored_detail_zones_filter_tiny_components():
     state = SimpleNamespace(
-        config=SimpleNamespace(
-            solver_fine_pitch_mm=0.20,
-            nozzle_diameter=0.20,
-        ),
+            config=SimpleNamespace(
+                solver_fine_pitch_mm=0.20,
+                nozzle_diameter=0.20,
+                printability_extrusion_width_mm=0.20,
+                printability_minimum_line_length_mm=0.40,
+            ),
     )
     detail_mask = np.zeros((4, 4), dtype=bool)
     detail_mask[0, 0] = True
@@ -383,10 +381,12 @@ def test_stage4_authored_detail_zones_filter_tiny_components():
 
 def test_stage4_authored_detail_zones_accept_and_reject_as_whole_zones():
     state = SimpleNamespace(
-        config=SimpleNamespace(
-            solver_fine_pitch_mm=0.20,
-            nozzle_diameter=0.20,
-        ),
+            config=SimpleNamespace(
+                solver_fine_pitch_mm=0.20,
+                nozzle_diameter=0.20,
+                printability_extrusion_width_mm=0.20,
+                printability_minimum_line_length_mm=0.40,
+            ),
     )
     detail_mask = np.zeros((4, 5), dtype=bool)
     detail_mask[0, 0] = True
@@ -434,10 +434,12 @@ def test_stage4_authored_detail_zones_accept_and_reject_as_whole_zones():
 
 def test_stage4_detail_recipe_boundary_support_can_rescue_moderate_signal():
     state = SimpleNamespace(
-        config=SimpleNamespace(
-            solver_fine_pitch_mm=0.20,
-            nozzle_diameter=0.20,
-        ),
+            config=SimpleNamespace(
+                solver_fine_pitch_mm=0.20,
+                nozzle_diameter=0.20,
+                printability_extrusion_width_mm=0.20,
+                printability_minimum_line_length_mm=0.40,
+            ),
     )
     detail_mask = np.zeros((3, 4), dtype=bool)
     detail_mask[1, 1:3] = True
@@ -802,6 +804,8 @@ def test_stage4_detail_tier_keeps_boundary_screen_stable():
         cap_mode="smooth_variable",
         smooth_kernel=1.5,
         t_max=4.0,
+        printability_extrusion_width_mm=0.20,
+        printability_minimum_line_length_mm=0.40,
     )
     boundary_only = solve_preview(
         image,
@@ -961,6 +965,8 @@ def test_stage4_detail_tier_raises_top_without_moving_boundary():
         cap_mode="smooth_variable",
         smooth_kernel=1.5,
         t_max=4.0,
+        printability_extrusion_width_mm=0.20,
+        printability_minimum_line_length_mm=0.40,
     )
     boundary_only = solve_preview(
         image,
@@ -1009,6 +1015,8 @@ def test_stage4_detail_tier_selects_detail_above_boundary():
         model_domain_ingress=False,
         cap_mode="smooth_variable",
         smooth_kernel=1.5,
+        printability_extrusion_width_mm=0.20,
+        printability_minimum_line_length_mm=0.40,
     )
     boundary_only = solve_preview(
         image,
@@ -1078,6 +1086,8 @@ def test_stage4_detail_tier_cannot_be_disabled_through_facade():
         cap_mode="smooth_variable",
         smooth_kernel=1.5,
         detail_cap_enabled=False,
+        printability_extrusion_width_mm=0.20,
+        printability_minimum_line_length_mm=0.40,
     )
 
     result = solve_preview(image, config)

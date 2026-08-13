@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
+from config.layer_budget import ResolvedLayerBudget, resolve_layer_budget
 from config.solve_settings import SolveSettings, shared_solve_settings_values
 
 if TYPE_CHECKING:
@@ -97,6 +98,17 @@ class PipelineConfig(SolveSettings):
             return configured
         return min(configured, int(self.preset.max_layers))
 
+    def resolved_layer_budget(self) -> ResolvedLayerBudget:
+        """Resolve the preset-limited budget carried by one pipeline run."""
+
+        return resolve_layer_budget(
+            t_max_mm=self.t_max,
+            d_wb_mm=self.d_wb,
+            d_wc_min_mm=self.d_wc_min,
+            layer_height_mm=self.layer_height,
+            max_layers=self.effective_max_layers(),
+        )
+
     def effective_boundary_d_wc_max(self) -> float:
         cap = super().effective_boundary_d_wc_max()
         if self.runtime.luminance_boundary_cap_authority_mm is not None:
@@ -114,6 +126,7 @@ class PipelineState:
     """Shared state passed through all pipeline stages."""
     image: np.ndarray
     config: PipelineConfig
+    resolved_layer_budget: ResolvedLayerBudget | None = None
 
     profiles: ProfileSet | None = None
     appearance_provider: Any | None = None

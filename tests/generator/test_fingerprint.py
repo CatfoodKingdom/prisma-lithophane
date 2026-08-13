@@ -36,7 +36,7 @@ def _base_config() -> dict:
         "base_filament": "panchroma-matte-cotton-white",
         "cap_filament": "__same__",
         "d_wb": 0.20,
-        "d_wc_min": 0.08,
+        "min_cap_layers": 1,
         "t_max": 2.5,
         "k_max": 3,
         "de_threshold": 0.05,
@@ -44,14 +44,13 @@ def _base_config() -> dict:
         "chroma_weight": 1.0,
         "use_corrections": True,
         "layer_height": 0.08,
-        "image_sample_pitch_mm": 0.20,
-        "solver_fine_pitch_mm": 0.20,
+        "solve_pitch_extrusion_width_multiplier": 1,
         "color_region_target_mm": 0.60,
         "image_path": "test.jpg",
         "image_adjust": None,
         "max_dim_mm": 130.0,
         "frame": None,
-        "smooth_kernel": 15.0,
+        "boundary_cap_smoothing_radius_mm": 3.0,
         "border": False,
         "border_width_mm": 3.0,
     }
@@ -62,21 +61,46 @@ def test_solve_owned_key_change_invalidates(_patched_modules):
     from server import _solve_owned_fingerprint
 
     cfg1 = _base_config()
-    cfg2 = {**cfg1, "image_sample_pitch_mm": 0.25, "solver_fine_pitch_mm": 0.25}
+    cfg2 = {**cfg1, "solve_pitch_extrusion_width_multiplier": 2}
 
     fp1 = _solve_owned_fingerprint(cfg1)
     fp2 = _solve_owned_fingerprint(cfg2)
     assert fp1 != fp2
 
 
-def test_neutral_field_protection_mode_change_invalidates(_patched_modules):
+def test_requested_and_effective_unit_changes_invalidate(_patched_modules):
+    """Both editable values and their resolved solver units are fingerprinted."""
+    from server import _solve_owned_fingerprint
+
+    base = _base_config()
+    more_cap_layers = {**base, "min_cap_layers": 2}
+    taller_layers = {**base, "layer_height": 0.10}
+    wider_smoothing = {**base, "boundary_cap_smoothing_radius_mm": 4.0}
+    coarser_pitch = {**base, "solve_pitch_extrusion_width_multiplier": 2}
+
+    fingerprint = _solve_owned_fingerprint(base)
+    assert _solve_owned_fingerprint(more_cap_layers) != fingerprint
+    assert _solve_owned_fingerprint(taller_layers) != fingerprint
+    assert _solve_owned_fingerprint(wider_smoothing) != fingerprint
+    assert _solve_owned_fingerprint(coarser_pitch) != fingerprint
+
+
+def test_neutral_field_protection_effective_state_controls_identity(_patched_modules):
     """Neutral-field protection changes the Stage 2 recipe assignment."""
     import server
 
-    off = {**_base_config(), "neutral_field_protection_mode": "off"}
-    standard = {**off, "neutral_field_protection_mode": "standard"}
+    off = {
+        **_base_config(),
+        "neutral_field_protection_enabled": False,
+        "neutral_field_protection_cutoff": 0.020,
+    }
+    disabled_custom = {**off, "neutral_field_protection_cutoff": 0.023}
+    standard = {**off, "neutral_field_protection_enabled": True}
 
-    assert "neutral_field_protection_mode" in server._SOLVE_OWNED_KEYS
+    assert "neutral_field_protection_enabled" in server._SOLVE_OWNED_KEYS
+    assert server._solve_owned_fingerprint(off) == server._solve_owned_fingerprint(
+        disabled_custom
+    )
     assert server._solve_owned_fingerprint(off) != server._solve_owned_fingerprint(
         standard
     )
@@ -280,10 +304,10 @@ def test_debug_artifact_flags_default_off_but_api_toggleable(_patched_modules):
     assert sc_enabled.emit_blueprint_printability is True
 
 
-def test_solve_config_derives_printability_from_active_nozzle(
+def test_solve_config_derives_printability_from_active_extrusion_width(
     _patched_modules, monkeypatch
 ):
-    """Client thresholds cannot override nozzle-derived printer printability."""
+    """Client thresholds cannot override width-derived printer printability."""
     import server
     from server import _DEFAULT_CONFIG, _build_solve_config
 
@@ -292,30 +316,35 @@ def test_solve_config_derives_printability_from_active_nozzle(
         "get_active_printer",
         lambda: {
             "printer": {"id": "test-printer"},
-            "nozzle": {
-                "size": 0.20,
-                "line_width": 0.22,
-                "max_line_width": 0.25,
-                "min_line_length_multiplier": 3,
+                "nozzle": {
+                    "id": "nozzle-200",
+                    "diameter_um": 200,
+                    "min_layer_height_um": 40,
+                    "max_layer_height_um": 200,
+                    "minimum_line_length_multiplier": 3,
+            },
+            "extrusion_width": {"width_um": 200},
+            "printability": {
+                "extrusion_width_mm": 0.2,
+                "minimum_line_length_mm": 0.6,
             },
         },
     )
     cfg = {
         **_DEFAULT_CONFIG,
         "palette": ["bambu-basic-cyan"],
-        "printability_minimum_extrusion_width_mm": 9.0,
+        "printability_extrusion_width_mm": 9.0,
         "printability_minimum_line_length_mm": 9.0,
     }
 
     sc = _build_solve_config(cfg)
 
     assert sc.nozzle_diameter == 0.20
-    assert sc.printer_min_line_width_mm == 0.20
-    assert sc.printability_minimum_extrusion_width_mm == 0.20
+    assert sc.printability_extrusion_width_mm == 0.20
     assert sc.printability_minimum_line_length_mm == pytest.approx(0.60)
 
 
-def test_active_nozzle_printability_change_invalidates(_patched_modules, monkeypatch):
+def test_active_extrusion_width_printability_change_invalidates(_patched_modules, monkeypatch):
     """Printer-profile printability thresholds are solve-owned even though
     they no longer live in Settings Profile values."""
     import server
@@ -323,21 +352,16 @@ def test_active_nozzle_printability_change_invalidates(_patched_modules, monkeyp
 
     active = {
         "printer": {"id": "test-printer"},
-        "nozzle": {
-            "size": 0.20,
-            "line_width": 0.22,
-            "max_line_width": 0.25,
-            "min_line_length_multiplier": 2,
-        },
+        "nozzle": {"id": "nozzle-200", "diameter_um": 200, "min_layer_height_um": 40, "max_layer_height_um": 200, "minimum_line_length_multiplier": 2},
+        "extrusion_width": {"width_um": 200},
+        "printability": {"extrusion_width_mm": 0.2, "minimum_line_length_mm": 0.4},
     }
     monkeypatch.setattr(server, "get_active_printer", lambda: active)
     cfg = _base_config()
     fp1 = _solve_owned_fingerprint(cfg)
 
-    active["nozzle"] = {
-        **active["nozzle"],
-        "min_line_length_multiplier": 3,
-    }
+    active["nozzle"]["minimum_line_length_multiplier"] = 3
+    active["printability"]["minimum_line_length_mm"] = 0.6
     fp2 = _solve_owned_fingerprint(cfg)
 
     assert fp1 != fp2

@@ -535,8 +535,6 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0 8px;
-  border-radius: 4px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
 }
 .rail-model-library-header .panel-kicker,
 .rail-library-header .panel-kicker { margin-bottom: 0; }
@@ -591,9 +589,13 @@
 
 .rail-printer { padding-top: 8px; border-top: 1px solid var(--line); }
 .rail-printer .panel-kicker { margin-bottom: 4px; }
-.rail-printer-control-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rail-printer-control-row { display: grid; gap: 4px; min-width: 0; }
+.rail-print-setup-field { display: grid; grid-template-columns: 46px minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
+.rail-print-setup-label { color: var(--muted); font-size: 11px; font-weight: 600; }
 .rail-printer-selector { flex: 1 1 auto; min-width: 0; }
 .rail-printer-selector .rail-select { width: 100%; min-width: 0; }
+.rail-nozzle-selector { min-width: 0; }
+.rail-nozzle-selector .rail-select { width: 100%; min-width: 0; }
 .rail-printer-name {
   min-width: 0;
   overflow: hidden;
@@ -603,7 +605,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rail-nozzle-select { flex: 0 0 66px; width: 66px; min-width: 66px; max-width: 66px; }
 .rail-select { font-size: 12px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 3px; background: var(--panel); }
 .rail-printer-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .rail-printer-header .panel-kicker { margin-bottom: 0; }

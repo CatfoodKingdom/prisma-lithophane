@@ -29,6 +29,7 @@ export function initializeApplicationState(app) {
   app.state.ui.themePreference = "system";
   app.state.ui.themeResolved = "light";
   app.state.guides.runtimeState = "idle";
+  app.state.guides.targetUnavailable = false;
   app.state.guides.onboardingState = {
     schema_version: 2,
     revision: 0,
@@ -41,6 +42,9 @@ export function initializeApplicationState(app) {
   app.state.guides.completedStepIds = new Set();
   app.state.guides.reviewingCompletedStep = false;
   app.state.guides.runtimeContext = null;
+  app.state.guides.workspaceLeaseId = null;
+  app.state.guides.workspaceSessionId = null;
+  app.state.guides.actionLedger = new Set();
   app.state.guides.presentationSnapshot = null;
   app.state.guides.dockIndex = null;
   app.state.settings.settingsDrawerOpen = false;
@@ -80,6 +84,7 @@ export function initializeApplicationState(app) {
   app.state.palette.enabledFilamentRuntimeLibraryId = null;
   app.state.palette.enabledFilamentPersistenceReady = false;
   app.state.image.availableImages = [];
+  app.state.image.guideImages = [];
   app.state.image.selectedImage = null;
   app.state.image.pendingSelectedFilename = null;
   app.state.image.activeImportBatchId = null;
@@ -124,7 +129,6 @@ export function initializeApplicationState(app) {
   app.state.palette.composerPalette = [];
   app.state.palette.deck = [];
   app.state.palette.stagingDeck = [];
-  app.state.palette.suggestCapacityNote = "";
   app.state.palette.stagingClearConfirmPending = false;
   app.state.palette.stagingClearConfirmTimer = null;
   app.state.palette.activeDeckId = null;
@@ -158,6 +162,9 @@ export function initializeApplicationState(app) {
   app.state.palette.railDeckHoverPendingCardId = null;
   app.state.session.printerConfigOriginTab = null;
   app.state.session.printerConfigEditingId = null;
+  app.state.session.printerConfigDraft = null;
+  app.state.session.printerConfigOriginal = null;
+  app.state.session.printerConfigDeletedNozzles = [];
   app.state.session.printerDeleteConfirmPending = false;
   app.state.session.printerDeleteConfirmTimer = null;
   app.state.session.printerConfig = {
@@ -171,8 +178,17 @@ export function initializeApplicationState(app) {
 };
   app.state.session.printersData = null;
   app.state.session.activeNozzle = null;
+  app.state.session.activeExtrusionWidth = null;
   app.state.session.activePrintability = null;
+  app.state.session.resolvedPrintSetup = null;
   app.state.settings.settingsProfiles = [];
+  app.state.settings.settingsContract = null;
+  app.state.settings.settingsSpecs = {};
+  app.state.settings.settingsContractAvailable = false;
+  app.state.settings.settingsEvaluation = null;
+  app.state.settings.settingsEvaluationFingerprint = null;
+  app.state.settings.settingsEvaluationGeneration = 0;
+  app.state.settings.settingsEvaluationPresentationCurrent = false;
   app.state.settings.temporarySettingsProfile = null;
   app.state.settings.loadedProfileRef = null;
   app.state.settings.loadedProfileSnapshot = null;
@@ -200,200 +216,44 @@ export function initializeApplicationState(app) {
     tooltip: "Softly reduces colors the selected palette cannot reproduce while preserving hue.",
   },
 };
-  app.state.ui.PREPROCESSING_PRESET_UI = {
-  a1_bilateral_denoise: {
-    controlLabel: "Noise reduction",
-    defaultPreset: "medium",
-    paramLabels: {
-      radius_px: "Filter radius",
-      sigma_range: "Color similarity",
-      sigma_spatial: "Spatial reach",
-    },
-    paramTooltips: {
-      radius_px: "Pixel radius of the local bilateral filter window.",
-      sigma_range: "Higher values allow smoothing across larger color differences.",
-      sigma_spatial: "Higher values allow smoothing influence to extend farther inside the filter radius.",
-    },
-    presets: [
-      { key: "off", label: "Off", enabled: false },
-      { key: "light", label: "Light", values: { radius_px: 3, sigma_range: 0.01, sigma_spatial: 0.5 } },
-      { key: "medium", label: "Medium", values: { radius_px: 3, sigma_range: 0.04, sigma_spatial: 0.5 } },
-      { key: "strong", label: "Strong", values: { radius_px: 8, sigma_range: 0.04, sigma_spatial: 2.0 } },
-      { key: "very_strong", label: "Very Strong", values: { radius_px: 8, sigma_range: 0.15, sigma_spatial: 2.0 } },
-      { key: "custom", label: "Custom", custom: true },
-    ],
-  },
-  b1_printscale_bilateral: {
-    controlLabel: "Print-scale smoothing",
-    defaultPreset: "medium",
-    paramLabels: {
-      feature_scale_multiplier: "Feature scale",
-      sigma_range: "Color similarity",
-      passes: "Passes",
-    },
-    paramTooltips: {
-      feature_scale_multiplier: "Multiplier against the configured printable feature width.",
-      sigma_range: "Higher values smooth across larger color differences.",
-      passes: "Repeating the filter increases flattening and region simplification.",
-    },
-    presets: [
-      { key: "off", label: "Off", enabled: false },
-      { key: "light", label: "Light", values: { feature_scale_multiplier: 0.5, sigma_range: 0.01, passes: 1 } },
-      { key: "medium", label: "Medium", values: { feature_scale_multiplier: 1.0, sigma_range: 0.05, passes: 1 } },
-      { key: "strong", label: "Strong", values: { feature_scale_multiplier: 1.0, sigma_range: 0.05, passes: 2 } },
-      { key: "very_strong", label: "Very Strong", values: { feature_scale_multiplier: 2.0, sigma_range: 0.05, passes: 2 } },
-      { key: "custom", label: "Custom", custom: true },
-    ],
-  },
-  b3_tv_flatten: {
-    controlLabel: "Flat-area smoothing",
-    defaultPreset: "balanced",
-    paramLabels: {
-      tv_weight: "Flattening strength",
-      weight_autoscale: "Scale strength to print width",
-      channel_axis: "Flattening mode",
-      n_iter_max: "Iteration limit",
-    },
-    paramTooltips: {
-      tv_weight: "Higher values push the image toward broader smooth regions.",
-      weight_autoscale: "Keeps flattening strength tied to the configured printable feature width.",
-      channel_axis: "Controls whether flattening operates in RGB, perceptual lightness/chroma, or lightness only.",
-      n_iter_max: "Advanced convergence cap for the flattening operation.",
-    },
-    choiceLabels: {
-      channel_axis: {
-        srgb_rgb: "RGB channels",
-        oklab_L_ab: "Lightness and chroma",
-        oklab_L_only: "Lightness only",
-      },
-    },
-    presets: [
-      { key: "off", label: "Off", enabled: false },
-      { key: "subtle", label: "Subtle", values: { tv_weight: 0.01, weight_autoscale: true, channel_axis: "oklab_L_only", n_iter_max: 20 } },
-      { key: "balanced", label: "Balanced", values: { tv_weight: 0.04, weight_autoscale: true, channel_axis: "oklab_L_only", n_iter_max: 20 } },
-      { key: "bold", label: "Bold", values: { tv_weight: 0.16, weight_autoscale: true, channel_axis: "oklab_L_only", n_iter_max: 20 } },
-      { key: "graphic", label: "Graphic", values: { tv_weight: 0.16, weight_autoscale: true, channel_axis: "oklab_L_ab", n_iter_max: 20 } },
-      { key: "custom", label: "Custom", custom: true },
-    ],
-  },
-  c1_achievable_tonemap: {
-    controlLabel: "Palette tone fit",
-    defaultPreset: "balanced",
-    paramLabels: {
-      strength: "Tone fit strength",
-      shadow_percentile: "Shadow anchor",
-      highlight_percentile: "Highlight anchor",
-      midtone_contrast: "Midtone curve",
-    },
-    paramTooltips: {
-      strength: "Blend amount between source tone and palette-achievable remap.",
-      shadow_percentile: "Source luminance percentile used as the dark anchor.",
-      highlight_percentile: "Source luminance percentile used as the bright anchor.",
-      midtone_contrast: "Controls midpoint placement in the tone curve.",
-    },
-    presets: [
-      { key: "off", label: "Off", enabled: false },
-      { key: "subtle", label: "Subtle", values: { strength: 0.15, shadow_percentile: 0.0, highlight_percentile: 97.5, midtone_contrast: 1.0 } },
-      { key: "balanced", label: "Balanced", values: { strength: 0.25, shadow_percentile: 0.25, highlight_percentile: 99.5, midtone_contrast: 0.75 } },
-      { key: "strong", label: "Strong", values: { strength: 0.40, shadow_percentile: 0.25, highlight_percentile: 99.5, midtone_contrast: 0.75 } },
-      { key: "custom", label: "Custom", custom: true },
-    ],
-  },
-  c2_soft_gamut_compress: {
-    controlLabel: "Palette saturation fit",
-    defaultPreset: "medium",
-    paramLabels: {
-      knee_start_ratio: "Compression start",
-      knee_softness: "Compression softness",
-    },
-    paramTooltips: {
-      knee_start_ratio: "Lower values begin compressing saturation earlier and affect more pixels.",
-      knee_softness: "Controls the shape of the soft-knee transition.",
-    },
-    presets: [
-      { key: "off", label: "Off", enabled: false },
-      { key: "light", label: "Light", values: { knee_start_ratio: 0.98, knee_softness: 0.50 } },
-      { key: "medium", label: "Medium", values: { knee_start_ratio: 0.85, knee_softness: 0.50 } },
-      { key: "strong", label: "Strong", values: { knee_start_ratio: 0.75, knee_softness: 0.30 } },
-      { key: "custom", label: "Custom", custom: true },
-    ],
-  },
-};
   app.state.settings.config = {
-  base_filament: "bambu-tough-white",
-  cap_filament: "__same__",
   max_dim_mm: 130,
-  // Canonical solve-resolution fields
+  solve_pitch_extrusion_width_multiplier: 1,
   image_sample_pitch_mm: 0.20,
   solver_fine_pitch_mm: 0.20,
   detail_cap_enabled: true,
-  detail_cap_max_layers: 5,
-  detail_cap_smoothing_enabled: true,
-  detail_cap_smoothing_exact_speckle_max_px: 1,
-  detail_cap_smoothing_cumulative_component_max_px: 2,
-  detail_cap_smoothing_cumulative_hole_max_px: 2,
-  color_region_target_mm: 0.60,
-  stage1_coarsening_factor: 1,
   emit_pressure_diagnostics: false,
   emit_geometry_attribution: false,
   emit_blueprint_printability: true,
-  printability_minimum_extrusion_width_mm: null,
+  printability_extrusion_width_mm: null,
   printability_minimum_line_length_mm: null,
   enforce_printability: true,
   color_region_target_from_printability: true,
   color_region_target_width_multiplier: 2.0,
-  neutral_field_protection_mode: "off",
-  stage2_fine_override_enabled: true,
   stage2_final_printability_gate_fine_override: true,
   stage2_printability_gate_fine_override: true,
   stage2_printability_repair_fine_override: true,
-  stage2_boundary_mutation_enabled: true,
-  stage2_boundary_mutation_min_gain: null,
-  stage2_boundary_mutation_min_component_mm: null,
-  stage2_boundary_mutation_current_de_percentile: null,
-  stage2_boundary_mutation_max_passes: 1,
   stage4_printability_gate_detail: true,
-  layer_height: 0.08,
-  d_wb: 0.20,
-  d_wc_min: 0.16,
-  t_max: 3.0,
-  k_max: 3,
-  cell_mode: "felzenszwalb",
-  de_threshold: 0.01,
-  smooth_kernel: 5.0,
   border: false,
   border_width_mm: 3.0,
   border_height_mm: 3.0,
+  // Color corrections are mandatory in the Generator-facing product contract.
   use_corrections: true,
-  appearance_model_provider: "photo_stack_bundle",
-  photo_stack_bundle_path: null,
-  cap_mode: "appearance_bounded_smooth",
-  boundary_cap_de_budget: 0.004,
   cap_continuity_cleanup: true,
-  gamut_mode: "hull",
-  gamut_white_rescale: false,
   // Camera Transform ingress is mandatory for current solves.
   model_domain_ingress: true,
-  chroma_weight: 1.0,
-  luminance_mode: "standard",
   luminance_handler_enabled: false,
   luminance_handler_mode: "boundary_prior",
   luminance_handler_strength: 1.0,
   luminance_handler_optical_authority_fraction: 0.75,
-  luminance_base_shading_limit_fraction: 0.75,
   luminance_handler_boundary_percentile: 95.0,
   luminance_handler_boundary_sigma_px: null,
   luminance_handler_response_curve: "linear",
   luminance_handler_response_gamma: 1.0,
   luminance_handler_detail_residual: true,
   luminance_handler_include_solver_detail: true,
-  luminance_detail_authoring_printability: "off",
-  source_resample_kernel: "lanczos",
-  preprocessing_params: {},
-  swap_improvement_threshold: 2.0,
-  force_all_tiers: false,
 };
-  app.state.settings.lastColorCapMode = app.commands.loadLastColorCapMode(app.state.settings.config.cap_mode || "appearance_bounded_smooth");
+  app.state.settings.lastColorCapMode = null;
   app.state.settings.capModeForcedByLuminance = false;
   app.state.ui.CHROMA_WEIGHT_SLIDER_MIN = -3;
   app.state.ui.CHROMA_WEIGHT_SLIDER_MAX = 3;
@@ -430,46 +290,11 @@ export function initializeApplicationState(app) {
   app.state.export.activeExportJobId = "";
   app.state.export.exportCancelPending = false;
   app.state.ui.IMAGE_ASPECT_SHORT_SIDE_MM = 120;
-  app.state.ui.DECK_GENERATION_FIELD_MAP = [
-  { configKey: "swap_improvement_threshold", paletteId: "paletteSwapThreshold", prop: "value" },
-  { configKey: "force_all_tiers", paletteId: "paletteForceAllTiers", prop: "checked" },
-];
   app.state.solve._lightboxIdx = -1;
   app.state.ui.SYSTEM_SETTINGS_PROFILE_ID = "system-default";
   app.state.ui.SYSTEM_SETTINGS_PROFILE_NAME = "Basic";
   app.state.settings.SETTINGS_PROFILE_FORBIDDEN_NAME_CHARS = new Set('<>:"/\\|?*'.split(""));
-  app.state.settings.SETTINGS_PROFILE_KEYS = [
-  // session-owned canonical settings
-  "base_filament", "cap_filament",
-  "layer_height",
-  "image_sample_pitch_mm", "solver_fine_pitch_mm",
-  "detail_cap_max_layers",
-  "detail_cap_smoothing_enabled",
-  "detail_cap_smoothing_exact_speckle_max_px",
-  "detail_cap_smoothing_cumulative_component_max_px",
-  "detail_cap_smoothing_cumulative_hole_max_px",
-  "color_region_target_mm",
-  "cell_mode",
-  "stage1_coarsening_factor",
-  "neutral_field_protection_mode",
-  "stage2_fine_override_enabled",
-  "stage2_boundary_mutation_enabled",
-  "stage2_boundary_mutation_min_gain",
-  "stage2_boundary_mutation_min_component_mm",
-  "stage2_boundary_mutation_current_de_percentile",
-  "stage2_boundary_mutation_max_passes",
-  "d_wb", "d_wc_min", "t_max",
-  "k_max", "de_threshold", "smooth_kernel",
-  "use_corrections",
-  "appearance_model_provider", "photo_stack_bundle_path",
-  "gamut_mode", "gamut_white_rescale", "model_domain_ingress_lut_path", "chroma_weight",
-  "luminance_mode",
-  "luminance_base_shading_limit_fraction",
-  "luminance_detail_authoring_printability",
-  "source_resample_kernel",
-  "preprocessing_params",
-  "cap_mode", "boundary_cap_de_budget",
-];
+  app.state.settings.SETTINGS_PROFILE_KEYS = [];
   app.state.settings.SETTINGS_PROFILE_DEFAULTS = {};
   app.state.settings._configSyncChain = Promise.resolve();
   app.state.ui.surfaceDataCache = {};
@@ -478,19 +303,19 @@ export function initializeApplicationState(app) {
   app.state.ui.capThicknessCache = {};
   app.state.ui.filamentThicknessCache = {};
   app.state.ui.SOLVE_DIFF_SETTING_LABELS = {
-  image_sample_pitch_mm: "Solve Pitch",
-  solver_fine_pitch_mm: "Solve Pitch",
+  solve_pitch_extrusion_width_multiplier: "Solve Pitch",
   layer_height: "Layer Height",
   d_wb: "White Base Thickness",
-  d_wc_min: "Min White Cap",
-  t_max: "Max Total Thickness",
+  min_cap_layers: "Min Cap Layers",
+  t_max: "Max Thickness",
   k_max: "Max Colors per Region",
   de_threshold: "Color Mismatch Tolerance",
   chroma_weight: "Chroma Weight",
   luminance_mode: "Luminance Mode",
   cell_mode: "Region Method",
   stage1_coarsening_factor: "Region Planning Scale",
-  neutral_field_protection_mode: "Neutral-field Protection",
+  neutral_field_protection_enabled: "Neutral-field protection",
+  neutral_field_protection_cutoff: "Neutral Chroma Cutoff",
   color_region_target_mm: "Color Region Target",
   smooth_radius_mm: "Cliff Smooth Radius",
   hybrid_split_ratio: "Hybrid Split Ratio",
@@ -498,9 +323,9 @@ export function initializeApplicationState(app) {
   detail_cap_smoothing_exact_speckle_max_px: "Detail Exact Speckle Cleanup",
   detail_cap_smoothing_cumulative_component_max_px: "Detail Island Cleanup",
   detail_cap_smoothing_cumulative_hole_max_px: "Detail Hole Cleanup",
-  cap_mode: "Boundary Cap Mode",
+  cap_mode: "Boundary Cap Style",
   boundary_cap_de_budget: "Boundary Cap Appearance Budget",
-  smooth_kernel: "Smoothing Radius",
+  boundary_cap_smoothing_radius_mm: "Smoothing Radius",
 };
   app.state.ui.SOLVE_DIFF_CATEGORY_ORDER = [
   "geometry",
@@ -521,62 +346,60 @@ export function initializeApplicationState(app) {
     key: "essentials",
     title: "Essentials",
     rows: [
-      { key: "luminance_mode", label: "Solve Mode", format: "solve-mode" },
-      { key: "solver_fine_pitch_mm", fallbackKey: "image_sample_pitch_mm", label: "Solve Pitch", unit: "mm" },
-      { key: "t_max", label: "Max Total Thickness", unit: "mm" },
-      { key: "layer_height", label: "Layer Height", unit: "mm" },
-      { key: "base_filament", label: "White Base/Cap Filament", format: "filament" },
-      { key: "d_wb", label: "Base Thickness", unit: "mm" },
+      { key: "luminance_mode", controlId: "cfgLuminanceMode", label: "Solve Mode", format: "solve-mode" },
+      { key: "solve_pitch_extrusion_width_multiplier", runKey: "solver_fine_pitch_mm", controlId: "cfgSolvePitch", fallbackKey: "image_sample_pitch_mm", label: "Solve Pitch", unit: "mm" },
+      { key: "layer_height", controlId: "cfgLayerHeight", label: "Layer Height", unit: "mm" },
+      { key: "t_max", controlId: "cfgTMax", label: "Max Thickness", unit: "mm" },
+      { key: "d_wb", controlId: "cfgDWb", label: "Base Thickness", unit: "mm" },
+      { key: "min_cap_layers", controlId: "cfgDWcMin", label: "Min Cap Layers", unit: "layers" },
+      { key: "base_filament", controlId: "cfgBaseFilament", label: "Base/Cap Filament", format: "filament" },
     ],
   },
   {
     key: "preprocessing",
-    title: "Pre-processing",
+    title: "Preprocessing",
     rows: [
-      { key: "source_resample_kernel", label: "Resample Kernel", format: "title", advanced: true },
+      { key: "source_resample_kernel", controlId: "cfgSourceResampleKernel", label: "Resample kernel", format: "title", advanced: true },
     ],
   },
   {
     key: "solver",
     title: "Color Solver",
     rows: [
-      { key: "appearance_model_provider", label: "Appearance Model", format: "appearance-model" },
-      { key: "use_corrections", label: "Color Corrections" },
-      { key: "k_max", label: "Max Colors per Region" },
-      { key: "color_region_target_mm", label: "Color Region Target", unit: "mm" },
-      { key: "gamut_white_rescale", label: "White-point Rescale" },
-      { key: "gamut_mode", label: "Out-of-gamut Handling", format: "gamut-mode", advanced: true, group: "Recipe Search" },
-      { key: "de_threshold", label: "Color Mismatch Tolerance", unit: "dE", advanced: true, group: "Recipe Search" },
-      { key: "chroma_weight", label: "Chroma Weight", advanced: true, group: "Recipe Search" },
-      { key: "cell_mode", label: "Region Method", format: "region-method", advanced: true, group: "Region Construction" },
-      { key: "stage1_coarsening_factor", label: "Region Planning Scale", format: "region-scale", advanced: true, group: "Region Construction" },
-      { key: "neutral_field_protection_mode", label: "Neutral-field Protection", format: "title", advanced: true, group: "Region Construction" },
-      { key: "stage2_fine_override_enabled", label: "Local Recipe Corrections", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_enabled", label: "Boundary Mutation", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_max_passes", label: "Mutation Passes", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_current_de_percentile", label: "Mutation Current-dE Percentile", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_min_gain", label: "Mutation Min Gain", unit: "dE", advanced: true, group: "Region Construction" },
-      { key: "stage2_boundary_mutation_min_component_mm", label: "Mutation Min Contact", unit: "mm", advanced: true, group: "Region Construction" },
-      { key: "luminance_base_shading_limit_fraction", label: "Shading Balance", format: "percent", advanced: true, group: "Luminance" },
-      { key: "luminance_detail_authoring_printability", label: "Detail Printability", advanced: true, group: "Luminance" },
+      { key: "appearance_model_provider", controlId: "cfgAppearanceModelProvider", label: "Appearance Model", format: "appearance-model", advanced: true },
+      { key: "gamut_white_rescale", controlId: "cfgGamutWhiteRescale", label: "White-point rescale" },
+      { key: "k_max", controlId: "cfgKMax", label: "Max colors per region" },
+      { key: "gamut_mode", controlId: "cfgGamutMode", label: "Out-of-gamut handling", format: "gamut-mode", advanced: true, group: "Color Matching" },
+      { key: "de_threshold", controlId: "cfgDeThreshold", label: "Color mismatch tolerance", unit: "dE", advanced: true, group: "Color Matching" },
+      { key: "chroma_weight", controlId: "cfgChromaWeight", label: "Chroma weight", inputTransform: "log2", advanced: true, group: "Color Matching" },
+      { key: "cell_mode", controlId: "cfgCellMode", label: "Region method", format: "region-method", advanced: true, group: "Region Planning" },
+      { key: "stage1_coarsening_factor", controlId: "cfgStage1Coarsening", label: "Region planning scale", format: "region-scale", advanced: true, group: "Region Planning" },
+      { key: "color_region_target_mm", controlId: "cfgColorRegionTarget", label: "Color region target", unit: "mm", group: "Region Planning" },
+      { key: "neutral_field_protection_enabled", controlId: "cfgNeutralFieldProtectionEnabled", label: "Neutral-field protection", format: "enabled", group: "Region Refinement" },
+      { key: "neutral_field_protection_cutoff", controlId: "cfgNeutralFieldProtectionCutoff", label: "Neutral chroma cutoff", advanced: true, group: "Region Refinement" },
+      { key: "stage2_fine_override_enabled", controlId: "cfgStage2FineOverride", label: "Local recipe corrections", advanced: true, group: "Region Refinement" },
+      { key: "stage2_boundary_mutation_enabled", controlId: "cfgStage2BoundaryMutation", label: "Boundary mutation", advanced: true, group: "Region Refinement" },
+      { key: "stage2_boundary_mutation_max_passes", controlId: "cfgStage2BoundaryMutationMaxPasses", label: "Mutation passes", advanced: true, group: "Region Refinement" },
+      { key: "stage2_boundary_mutation_min_gain", controlId: "cfgStage2BoundaryMutationMinGain", label: "Mutation min gain", unit: "dE", advanced: true, group: "Region Refinement" },
     ],
   },
   {
     key: "white-cap",
     title: "White Cap",
     rows: [
-      { key: "d_wc_min", label: "Min Cap Layers", format: "cap-layers" },
-      { key: "smooth_kernel", label: "Smoothing Radius", format: "smooth-radius" },
-      { key: "detail_cap_max_layers", label: "Detail Depth", unit: "layers" },
-      { key: "cap_mode", label: "Boundary Cap", format: "cap-mode", advanced: true, group: "Boundary" },
-      { key: "boundary_cap_de_budget", label: "Appearance Budget", unit: "dE", advanced: true, group: "Boundary" },
-      { key: "detail_cap_smoothing_enabled", label: "Detail Smoothing", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_exact_speckle_max_px", label: "Exact Speckle Limit", unit: "px", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_cumulative_component_max_px", label: "Component Limit", unit: "px", advanced: true, group: "Detail" },
-      { key: "detail_cap_smoothing_cumulative_hole_max_px", label: "Hole Limit", unit: "px", advanced: true, group: "Detail" },
+      { key: "boundary_cap_smoothing_radius_mm", controlId: "cfgSmoothKernel", label: "Smoothing radius", unit: "mm", group: "Boundary Cap" },
+      { key: "detail_cap_max_layers", controlId: "cfgDetailCapMaxLayers", label: "Max Detail Layers", unit: "layers", group: "Detail Cap" },
+      { key: "cap_mode", controlId: "cfgCapMode", label: "Boundary cap style", format: "cap-mode", advanced: true, group: "Boundary Cap" },
+      { key: "boundary_cap_de_budget", controlId: "cfgBoundaryCapDeBudget", label: "Appearance budget", unit: "dE", advanced: true, group: "Boundary Cap" },
+      { key: "luminance_base_shading_limit_fraction", controlId: "cfgBaseShadingLimit", label: "Shading balance", format: "percent", group: "Boundary Cap" },
     ],
   },
-];
+  ];
+  // The drawer and saved-run review both consume this descriptor. Keep the
+  // alias explicit so future presentation code cannot quietly introduce a
+  // second, divergent settings vocabulary.
+  app.state.ui.SETTINGS_PRESENTATION = app.state.ui.READ_ONLY_RUN_SETTING_SECTIONS;
+  app.state.ui.SETTINGS_PRESENTATION_VERSION = 5;
   app.state.ui.DIAGNOSTIC_PALETTE_INFERNO = "inferno-v1";
   app.state.ui.DIAGNOSTIC_PALETTE_LEGACY = "legacy-approximate";
   app.state.ui.INFERNO_RGB8_HEX = "00000401000501010601010802010a02020c02020e03021004031204031405041706041907051b08051d09061f0a07220b07240c08260d08290e092b10092d110a30120a32140b34150b37160b39180c3c190c3e1b0c411c0c431e0c451f0c48210c4a230c4c240c4f260c51280b53290b552b0b572d0b592f0a5b310a5c320a5e340a5f3609613809623909633b09643d09653e0966400a67420a68440a68450a69470b6a490b6a4a0c6b4c0c6b4d0d6c4f0d6c510e6c520e6d540f6d550f6d57106e59106e5a116e5c126e5d126e5f136e61136e62146e64156e65156e67166e69166e6a176e6c186e6d186e6f196e71196e721a6e741a6e751b6e771c6d781c6d7a1d6d7c1d6d7d1e6d7f1e6c801f6c82206c84206b85216b87216b88226a8a226a8c23698d23698f24699025689225689326679526679727669827669a28659b29649d29649f2a63a02a63a22b62a32c61a52c60a62d60a82e5fa92e5eab2f5ead305dae305cb0315bb1325ab3325ab43359b63458b73557b93556ba3655bc3754bd3853bf3952c03a51c13a50c33b4fc43c4ec63d4dc73e4cc83f4bca404acb4149cc4248ce4347cf4446d04545d24644d34743d44842d54a41d74b3fd84c3ed94d3dda4e3cdb503bdd513ade5238df5337e05536e15635e25734e35933e45a31e55c30e65d2fe75e2ee8602de9612bea632aeb6429eb6628ec6726ed6925ee6a24ef6c23ef6e21f06f20f1711ff1731df2741cf3761bf37819f47918f57b17f57d15f67e14f68013f78212f78410f8850ff8870ef8890cf98b0bf98c0af98e09fa9008fa9207fa9407fb9606fb9706fb9906fb9b06fb9d07fc9f07fca108fca309fca50afca60cfca80dfcaa0ffcac11fcae12fcb014fcb216fcb418fbb61afbb81dfbba1ffbbc21fbbe23fac026fac228fac42afac62df9c72ff9c932f9cb35f8cd37f8cf3af7d13df7d340f6d543f6d746f5d949f5db4cf4dd4ff4df53f4e156f3e35af3e55df2e661f2e865f2ea69f1ec6df1ed71f1ef75f1f179f2f27df2f482f3f586f3f68af4f88ef5f992f6fa96f8fb9af9fc9dfafda1fcffa4";
@@ -605,8 +428,5 @@ export function initializeApplicationState(app) {
   app.state.settings.moduleState = {};
   app.state.ui.MODULE_UI_VISIBLE_SLOTS = new Set(["preprocessing"]);
   app.state.ui._resizeTimer = undefined;
-  for (const k of app.state.settings.SETTINGS_PROFILE_KEYS) {
-    app.state.settings.SETTINGS_PROFILE_DEFAULTS[k] = app.commands._cloneValue(app.state.settings.config[k]);
-  }
   return app.state;
 }

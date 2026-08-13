@@ -330,7 +330,7 @@ def test_exact_raster_export_border_is_geometry_not_solve_padding():
             xy_pitch_mm=0.20,
             border_enabled=True,
             border_width_mm=0.40,
-            border_height_mm=0.32,
+            border_height_mm=0.36,
         ),
         solve_mode=SolveMode.STANDARD,
     )
@@ -351,6 +351,27 @@ def test_exact_raster_export_border_is_geometry_not_solve_padding():
     border_mesh = bundle.object_by_key("__border__").to_trimesh()
     assert border_mesh.is_watertight
     assert _strict_non_2_edges(border_mesh) == 0
+
+
+@pytest.mark.parametrize("border_height_mm", [0.19, 0.37])
+def test_export_rejects_border_height_off_the_post_base_layer_grid(border_height_mm):
+    cyan = np.full((2, 3), 0.10, dtype=np.float32)
+    white = np.full_like(cyan, 0.10)
+
+    with pytest.raises(post_solve_export.ExportPreparationError, match="border height"):
+        build_exact_raster_mesh_bundle(
+            thickness_maps={"cyan": cyan, "__white_cap__": white},
+            ordering=["cyan"],
+            config=RectilinearExportConfig(
+                d_wb_mm=0.20,
+                xy_pitch_mm=0.20,
+                layer_height_mm=0.10,
+                border_enabled=True,
+                border_width_mm=0.40,
+                border_height_mm=border_height_mm,
+            ),
+            solve_mode=SolveMode.STANDARD,
+        )
 
 
 def test_exact_raster_can_emit_white_cap_as_same_material_slabs():
@@ -598,7 +619,7 @@ def test_export_solve_bundle_applies_border_from_bundle_metadata(tmp_path):
         luminance_mode="standard",
         border=True,
         border_width_mm=0.40,
-        border_height_mm=0.32,
+        border_height_mm=0.36,
     )
 
     result = export_solve_bundle(
@@ -621,7 +642,7 @@ def test_export_solve_bundle_applies_border_from_bundle_metadata(tmp_path):
     assert result.manifest["border"] == {
         "enabled": True,
         "width_mm": pytest.approx(0.40),
-        "height_mm": pytest.approx(0.32),
+        "height_mm": pytest.approx(0.36),
     }
     assert result.manifest["mesh_build_report"]["content_footprint_mm"] == {
         "width_mm": pytest.approx(1.0),

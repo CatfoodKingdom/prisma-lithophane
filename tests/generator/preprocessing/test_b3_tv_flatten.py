@@ -20,11 +20,11 @@ from tests.generator.profile_fixture import PROFILES_DIR as _PROFILES_DIR
 
 
 def _make_context(
-    nozzle_diameter: float = 0.20,
+    extrusion_width_mm: float = 0.20,
 ) -> PreprocessingContext:
     return PreprocessingContext(
         config=SimpleNamespace(
-            nozzle_diameter=nozzle_diameter,
+            extrusion_width_mm=extrusion_width_mm,
         ),
         image_fingerprint="b3-test-fp",
         source_path=None,
@@ -302,7 +302,7 @@ def test_weight_autoscale():
     image = np.full((24, 24, 3), 0.5, dtype=np.float32)
     op = B3TvFlatten()
 
-    # 0.20 mm nozzle -> feature scale 0.40 (ratio 1.0); 0.40 mm nozzle ->
+    # 0.20 mm width -> feature scale 0.40 (ratio 1.0); 0.40 mm width ->
     # feature scale 0.80 (ratio 2.0). B3's TV weight autoscales linearly.
     result_040 = op.apply(image, context=_make_context(0.20), progress=None)
     result_080 = op.apply(image, context=_make_context(0.40), progress=None)

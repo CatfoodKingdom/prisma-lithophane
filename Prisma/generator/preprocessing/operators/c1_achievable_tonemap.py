@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
-from pipeline.base import ParamDef, PreprocessingModule
+from pipeline.base import ParamDef, PresetDef, PreprocessingModule
 from pipeline.registry import register_preprocessing
 from preprocessing.color_convert import (
     oklab_f32_to_srgb_f32,
@@ -210,6 +210,17 @@ class C1AchievableTonemap(PreprocessingModule):
     name = "c1_achievable_tonemap"
     preview_key = "preprocess/c1_achievable_tonemap"
     description = "Palette-aware achievable-range tonal compression (Wing C)"
+    display_label = "Palette Tone Fit"
+    display_tooltip = "Adjusts the source tone range toward what the selected palette can reproduce."
+    preset_control_label = "Palette tone fit"
+    default_preset = "balanced"
+    presets = (
+        PresetDef("off", "Off", enabled=False),
+        PresetDef("subtle", "Subtle", {"strength": 0.15, "shadow_percentile": 0.0, "highlight_percentile": 97.5, "midtone_contrast": 1.0}),
+        PresetDef("balanced", "Balanced", {"strength": 0.25, "shadow_percentile": 0.25, "highlight_percentile": 99.5, "midtone_contrast": 0.75}),
+        PresetDef("strong", "Strong", {"strength": 0.40, "shadow_percentile": 0.25, "highlight_percentile": 99.5, "midtone_contrast": 0.75}),
+        PresetDef("custom", "Custom", custom=True),
+    )
     default_enabled = False
     input_domain = "srgb_f32"
     output_domain = "srgb_f32"
@@ -218,42 +229,46 @@ class C1AchievableTonemap(PreprocessingModule):
     params = {
         "strength": ParamDef(
             name="strength",
-            label="Strength",
+            label="Tone fit strength",
             type="float",
             default=1.0,
             min=0.0,
             max=1.0,
             description="Blend between source L and achievable-range remap.",
+            tooltip="Blend amount between source tone and palette-achievable remap.",
             order=10,
         ),
         "shadow_percentile": ParamDef(
             name="shadow_percentile",
-            label="Shadow Percentile",
+            label="Shadow anchor",
             type="float",
             default=0.5,
             min=0.0,
             max=10.0,
             description="Source L percentile treated as the shadow anchor.",
+            tooltip="Source luminance percentile used as the dark anchor.",
             order=20,
         ),
         "highlight_percentile": ParamDef(
             name="highlight_percentile",
-            label="Highlight Percentile",
+            label="Highlight anchor",
             type="float",
             default=99.5,
             min=90.0,
             max=100.0,
             description="Source L percentile treated as the highlight anchor.",
+            tooltip="Source luminance percentile used as the bright anchor.",
             order=30,
         ),
         "midtone_contrast": ParamDef(
             name="midtone_contrast",
-            label="Midtone Contrast",
+            label="Midtone curve",
             type="float",
             default=1.0,
             min=0.5,
             max=2.0,
             description="Three-anchor PCHIP midpoint-placement control.",
+            tooltip="Controls midpoint placement in the tone curve.",
             order=40,
         ),
     }

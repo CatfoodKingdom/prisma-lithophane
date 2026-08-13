@@ -16,19 +16,18 @@ from pipeline.state import PipelineConfig
 from preprocessing.feature_scale import resolve_feature_scale_mm
 
 
-def test_pipelineconfig_nozzle_diameter_drives_feature_scale():
-    """Default nozzle (0.20) resolves to the 0.40 feature scale; 0.40 -> 0.80."""
+def test_pipelineconfig_extrusion_width_drives_feature_scale():
     cfg = PipelineConfig(
         palette=["bambu-basic-cyan"],
         white_base="bambu-tough-white",
     )
-    assert cfg.nozzle_diameter == 0.20
+    assert cfg.extrusion_width_mm == 0.20
     assert resolve_feature_scale_mm(SimpleNamespace(config=cfg)) == 0.40
 
     cfg_big = PipelineConfig(
         palette=["bambu-basic-cyan"],
         white_base="bambu-tough-white",
-        nozzle_diameter=0.40,
+        extrusion_width_mm=0.40,
     )
     assert resolve_feature_scale_mm(SimpleNamespace(config=cfg_big)) == 0.80
 

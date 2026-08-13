@@ -10,6 +10,7 @@ Launch:
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import hashlib
 import io
@@ -32,7 +33,7 @@ from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
 from urllib.parse import quote
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -64,6 +65,18 @@ if str(_PRISMA_DIR) not in sys.path:
     sys.path.insert(0, str(_PRISMA_DIR))
 
 import data_paths  # noqa: E402
+from guide_assets import (  # noqa: E402
+    ExampleImageSeedStateError,
+    ExampleImageSeeder,
+    GuideAssetCatalog,
+    GuideAssetError,
+)
+from guide_runtime import (  # noqa: E402
+    GuideRuntimeConflict,
+    GuideRuntimeCorrupt,
+    GuideRuntimeError,
+    GuideRuntimeStore,
+)
 from guide_state import (  # noqa: E402
     GuideStateError,
     GuideStateRevisionConflict,
@@ -74,6 +87,10 @@ from progress import ProgressCancelled, ProgressReporter  # noqa: E402
 from image_ingress import (  # noqa: E402
     load_image,
     apply_adjustments,
+)
+from solve_grid import (  # noqa: E402
+    SolveGridResolutionError,
+    resolve_solve_grid,
 )
 from source_images import (  # noqa: E402
     ImageImportManager,
@@ -96,8 +113,31 @@ from facade import (  # noqa: E402
     SolveStats,
     solve_full,
 )
-from config.solve_settings import (  # noqa: E402
-    normalize_neutral_field_protection_mode,
+from config.settings_contract import (  # noqa: E402
+    SETTING_SPECS_BY_KEY,
+    profile_setting_keys,
+    public_settings_contract,
+)
+from config.settings_evaluation import (  # noqa: E402
+    SettingsContext,
+    StaticSettingsError,
+    blockers_for_operation,
+    evaluate_settings,
+    validate_static_settings_patch,
+)
+from config.settings_resolution import (  # noqa: E402
+    boundary_cap_smoothing_cells,
+    minimum_cap_thickness_mm,
+)
+from config.print_setup import (  # noqa: E402
+    PrintSetupValueError,
+    maximum_solve_pitch_multiplier,
+    mm_to_um,
+    nearest_supported_layer_height_um,
+    require_multiplier,
+    require_um,
+    resolved_print_setup_from_active,
+    um_to_mm,
 )
 from filament_order import canonical_palette_order, load_filament_order_registry  # noqa: E402
 from grouping.banded_export import (  # noqa: E402
@@ -153,7 +193,6 @@ from pipeline.registry import (  # noqa: E402
 )
 from config.resolution_schema import (  # noqa: E402
     LEGACY_RESOLUTION_REPLACEMENTS,
-    normalize_resolution_schema,
     ResolutionSchemaConflictError,
     ResolutionSchemaLegacyFieldError,
 )
@@ -192,29 +231,42 @@ _PRINTERS_PATH = data_paths.CONFIG_DIR / "printers.json"
 # Single source of truth for module toggle state in this worktree.
 _MODULES_PATH = data_paths.CONFIG_DIR / "modules.json"
 _GUIDE_STATE_STORE = GuideStateStore(data_paths.CONFIG_DIR / "guide_state.json")
+_GUIDE_RUNTIME_STORE = GuideRuntimeStore(data_paths.CONFIG_DIR / "guide_runtime.json")
+_GUIDE_ASSET_CATALOG = GuideAssetCatalog(
+    _PRISMA_DIR / "data" / "generator" / "tutorial_images"
+)
+_EXAMPLE_IMAGE_SEEDER = ExampleImageSeeder(
+    _GUIDE_ASSET_CATALOG,
+    _IMAGES_DIR,
+    data_paths.CONFIG_DIR / "example_image_seed_state.json",
+)
 
-_SETTINGS_PROFILE_SCHEMA_VERSION = 1
+_SETTINGS_PROFILE_SCHEMA_VERSION = 6
 _SYSTEM_SETTINGS_PROFILE_ID = "system-default"
 _SYSTEM_SETTINGS_PROFILE_NAME = "Basic"
 _SETTINGS_PROFILE_STATE_NAME = "state.json"
 _BUNDLED_SETTINGS_PROFILES_DIR = (
     _PRISMA_DIR / "data" / "generator" / "settings_profiles"
 )
-_BUNDLED_SETTINGS_PROFILE_REVISION = 2
-_DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS = frozenset(
-    {"wing-c-minimal", "wing-c-standard"}
-)
+_BUNDLED_SETTINGS_PROFILE_REVISION = 7
+_BUNDLED_SETTINGS_PROFILE_ID_UPGRADES = {
+    "wing-c-minimal": "refinement-balanced",
+    "wing-c-standard": "refinement-strong",
+}
 _SETTINGS_PROFILE_FORBIDDEN_NAME_CHARS = set('<>:"/\\|?*')
 
 _MIN_LINE_LENGTH_MULTIPLIER = 2
 _MAX_LINE_LENGTH_MULTIPLIER = 10
 _PRINTABILITY_MM_PRECISION = 6
-_OBSOLETE_NOZZLE_PRINTABILITY_FIELDS = frozenset(
-    {"min_line_width", "min_line_length"}
-)
-
-_BUILT_IN_PRINTER_PROFILES_REVISION = 1
-_BUILT_IN_PRINTER_PROFILES_REVISION_KEY = "built_in_profiles_revision"
+_PRINTERS_SCHEMA_VERSION = 3
+_PRINTERS_INITIAL_REVISION = 1
+_PRINT_SETUP_MUTATION_LOCK = threading.RLock()
+_PRINT_SETUP_REVIEW_SCHEMA_VERSION = 1
+_PRINT_SETUP_REVIEW_TTL_SECONDS = 15 * 60
+_PRINT_SETUP_PENDING_REVIEW_LIMIT = 64
+_PRINT_SETUP_REPLAY_LIMIT = 128
+_PRINT_SETUP_PENDING_REVIEWS: OrderedDict[str, dict[str, Any]] = OrderedDict()
+_PRINT_SETUP_ACCEPTED_MUTATIONS: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _BAMBU_X1C_PRINTER_PROFILE = {
     "id": "bambu-x1c",
     "name": "Bambu X1C",
@@ -223,20 +275,20 @@ _BAMBU_X1C_PRINTER_PROFILE = {
     "slots_per_ams": 4,
     "nozzle_profiles": [
         {
-            "size": 0.2,
-            "min_layer_height": 0.05,
-            "max_layer_height": 0.15,
-            "line_width": 0.22,
-            "max_line_width": 0.25,
-            "min_line_length_multiplier": 2,
+            "id": "nozzle-200",
+            "diameter_um": 200,
+            "min_layer_height_um": 50,
+            "max_layer_height_um": 150,
+            "max_extrusion_width_um": 250,
+            "minimum_line_length_multiplier": 2,
         },
         {
-            "size": 0.4,
-            "min_layer_height": 0.08,
-            "max_layer_height": 0.32,
-            "line_width": 0.42,
-            "max_line_width": 0.5,
-            "min_line_length_multiplier": 2,
+            "id": "nozzle-400",
+            "diameter_um": 400,
+            "min_layer_height_um": 80,
+            "max_layer_height_um": 320,
+            "max_extrusion_width_um": 500,
+            "minimum_line_length_multiplier": 2,
         },
     ],
 }
@@ -244,89 +296,85 @@ _TUTORIAL_PRINTER_PROFILE = {
     **deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
     "id": "tutorial-printer",
     "name": "Tutorial Printer",
+    "virtual": True,
+    "guide_only": True,
+    "editable": False,
+    "deletable": False,
+    "renameable": False,
 }
-_BASICS_TUTORIAL_IMAGE_SOURCE = (
-    _PRISMA_DIR / "data" / "generator" / "tutorial_images" / "bubba_blanket.jpg"
-)
-_BASICS_TUTORIAL_IMAGE_NAME = "Prisma Tutorial - Bubba Blanket.jpg"
 _DEFAULT_PRINTERS = {
+    "schema_version": _PRINTERS_SCHEMA_VERSION,
+    "revision": _PRINTERS_INITIAL_REVISION,
     "printers": [
         deepcopy(_BAMBU_X1C_PRINTER_PROFILE),
-        deepcopy(_TUTORIAL_PRINTER_PROFILE),
     ],
     "active_printer_id": "bambu-x1c",
-    "active_nozzle_size": 0.2,
-    _BUILT_IN_PRINTER_PROFILES_REVISION_KEY: _BUILT_IN_PRINTER_PROFILES_REVISION,
+    "printer_setup_state": {
+        "bambu-x1c": {
+            "active_nozzle_id": "nozzle-200",
+            "nozzle_width_state": {
+                "nozzle-200": {"current_width_um": 200, "saved_widths_um": [200]},
+                "nozzle-400": {"current_width_um": 400, "saved_widths_um": [400]},
+            },
+        },
+    },
+}
+_TUTORIAL_PRINTER_SETUP_STATE = {
+    "active_nozzle_id": "nozzle-400",
+    "nozzle_width_state": {
+        "nozzle-200": {"current_width_um": 200, "saved_widths_um": [200]},
+        "nozzle-400": {"current_width_um": 400, "saved_widths_um": [400]},
+    },
 }
 
 
-def _default_line_widths(nozzle_size: float) -> dict[str, float]:
-    size = round(float(nozzle_size), 4)
-    if math.isclose(size, 0.2, abs_tol=1e-6):
-        return {"line_width": 0.22, "max_line_width": 0.25}
-    if math.isclose(size, 0.4, abs_tol=1e-6):
-        return {"line_width": 0.42, "max_line_width": 0.5}
-    return {
-        "line_width": round(size * 1.05, 2),
-        "max_line_width": round(size * 1.25, 2),
-    }
+def _default_max_extrusion_width_um(diameter_um: int) -> int:
+    diameter = require_um(diameter_um, field="diameter_um")
+    if diameter == 200:
+        return 250
+    if diameter == 400:
+        return 500
+    return max(diameter, int(math.floor(diameter * 1.25 + 0.5)))
 
 
 def _printer_profile_error(
     *,
     message: str,
     printer_id: str,
-    nozzle_size: Any,
+    nozzle_size: Any = None,
     field: str | None = None,
-    obsolete_fields: list[str] | None = None,
 ) -> HTTPException:
     detail: dict[str, Any] = {
         "error": "invalid_printer_profile",
         "message": message,
         "printer": printer_id,
-        "nozzle_size": nozzle_size,
         "path": str(_PRINTERS_PATH),
     }
+    if nozzle_size is not None:
+        detail["nozzle"] = nozzle_size
     if field is not None:
         detail["field"] = field
-    if obsolete_fields:
-        detail["obsolete_fields"] = obsolete_fields
     return HTTPException(422, detail)
 
 
-def _resolve_nozzle_printability(
-    profile: Mapping[str, Any],
+def _printers_data_error(message: str) -> HTTPException:
+    return HTTPException(
+        422,
+        {
+            "error": "invalid_printer_configuration",
+            "message": message,
+            "path": str(_PRINTERS_PATH),
+        },
+    )
+
+
+def _normalize_line_length_multiplier(
+    value: Any,
     *,
     printer_id: str = "unknown",
-    nozzle_index: int | None = None,
-) -> dict[str, float | int]:
-    raw_size = profile.get("size")
-    nozzle_label = raw_size if raw_size is not None else f"#{nozzle_index or 0}"
-    if (
-        isinstance(raw_size, bool)
-        or not isinstance(raw_size, (int, float))
-        or not math.isfinite(float(raw_size))
-        or float(raw_size) <= 0
-    ):
-        raise _printer_profile_error(
-            message="Nozzle size must be a positive finite number.",
-            printer_id=printer_id,
-            nozzle_size=nozzle_label,
-            field="size",
-        )
-    obsolete = sorted(_OBSOLETE_NOZZLE_PRINTABILITY_FIELDS.intersection(profile))
-    if obsolete:
-        raise _printer_profile_error(
-            message=(
-                "Printer profile uses obsolete printability fields; minimum "
-                "width is derived from nozzle size and minimum length is stored "
-                "as min_line_length_multiplier."
-            ),
-            printer_id=printer_id,
-            nozzle_size=float(raw_size),
-            obsolete_fields=obsolete,
-        )
-    raw_multiplier = profile.get("min_line_length_multiplier")
+    nozzle_label: Any = None,
+) -> int:
+    raw_multiplier = value
     if (
         isinstance(raw_multiplier, bool)
         or not isinstance(raw_multiplier, (int, float))
@@ -340,8 +388,8 @@ def _resolve_nozzle_printability(
                 f"{_MAX_LINE_LENGTH_MULTIPLIER}."
             ),
             printer_id=printer_id,
-            nozzle_size=float(raw_size),
-            field="min_line_length_multiplier",
+            nozzle_size=nozzle_label,
+            field="minimum_line_length_multiplier",
         )
     multiplier = int(raw_multiplier)
     if not _MIN_LINE_LENGTH_MULTIPLIER <= multiplier <= _MAX_LINE_LENGTH_MULTIPLIER:
@@ -352,31 +400,60 @@ def _resolve_nozzle_printability(
                 f"{_MAX_LINE_LENGTH_MULTIPLIER}."
             ),
             printer_id=printer_id,
-            nozzle_size=float(raw_size),
-            field="min_line_length_multiplier",
+            nozzle_size=nozzle_label,
+            field="minimum_line_length_multiplier",
         )
-    size = round(float(raw_size), _PRINTABILITY_MM_PRECISION)
-    minimum_line = round(size * multiplier, _PRINTABILITY_MM_PRECISION)
+    return multiplier
+
+
+def _normalize_printer_integer(
+    value: Any,
+    *,
+    field: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or not float(value).is_integer()
+    ):
+        raise _printers_data_error(
+            f"{field} must be a whole number from {minimum} through {maximum}."
+        )
+    normalized = int(value)
+    if not minimum <= normalized <= maximum:
+        raise _printers_data_error(
+            f"{field} must be from {minimum} through {maximum}."
+        )
+    return normalized
+
+
+def _resolve_nozzle_printability(
+    nozzle: Mapping[str, Any],
+    width_um: int,
+    *,
+    printer_id: str = "unknown",
+) -> dict[str, float | int]:
+    width = require_um(width_um, field="width_um")
+    multiplier = _normalize_line_length_multiplier(
+        nozzle.get("minimum_line_length_multiplier"),
+        printer_id=printer_id,
+        nozzle_label=nozzle.get("id"),
+    )
+    width_mm = um_to_mm(width)
+    minimum_line = round(width_mm * multiplier, _PRINTABILITY_MM_PRECISION)
     return {
-        "minimum_extrusion_width_mm": size,
+        "extrusion_width_um": width,
+        "extrusion_width_mm": width_mm,
         "minimum_line_length_multiplier": multiplier,
         "minimum_line_length_mm": minimum_line,
         "minimum_component_area_mm2": round(
-            size * minimum_line,
+            width_mm * minimum_line,
             _PRINTABILITY_MM_PRECISION,
         ),
     }
-
-
-def _find_nozzle_profiles_with_retired_preferred_length(data: dict) -> list[str]:
-    hits: list[str] = []
-    for printer_index, printer in enumerate((data or {}).get("printers", []) or []):
-        printer_id = printer.get("id") or f"#{printer_index}"
-        for nozzle_index, profile in enumerate(printer.get("nozzle_profiles", []) or []):
-            if "preferred_line_length" in (profile or {}):
-                size = profile.get("size", f"#{nozzle_index}")
-                hits.append(f"{printer_id}/nozzle-{size}")
-    return hits
 
 
 def _normalize_nozzle_profile(
@@ -385,123 +462,228 @@ def _normalize_nozzle_profile(
     printer_id: str = "unknown",
     nozzle_index: int | None = None,
 ) -> dict:
-    normalized = dict(profile)
-    normalized.pop("preferred_line_length", None)
-    printability = _resolve_nozzle_printability(
-        normalized,
+    label = profile.get("id") or f"#{nozzle_index or 0}"
+    try:
+        diameter_um = require_um(profile.get("diameter_um"), field="diameter_um")
+        min_layer_um = require_um(profile.get("min_layer_height_um"), field="min_layer_height_um")
+        max_layer_um = require_um(profile.get("max_layer_height_um"), field="max_layer_height_um")
+        max_width_um = require_um(profile.get("max_extrusion_width_um"), field="max_extrusion_width_um")
+    except PrintSetupValueError as exc:
+        raise _printer_profile_error(
+            message=str(exc), printer_id=printer_id, nozzle_size=label
+        ) from exc
+    if min_layer_um > max_layer_um:
+        raise _printer_profile_error(
+            message="Minimum Layer Height cannot exceed maximum Layer Height.",
+            printer_id=printer_id,
+            nozzle_size=label,
+            field="min_layer_height_um",
+        )
+    if max_width_um < diameter_um:
+        raise _printer_profile_error(
+            message="Maximum Extrusion Width must be at or above the nozzle diameter.",
+            printer_id=printer_id,
+            nozzle_size=label,
+            field="max_extrusion_width_um",
+        )
+    multiplier = _normalize_line_length_multiplier(
+        profile.get("minimum_line_length_multiplier"),
         printer_id=printer_id,
-        nozzle_index=nozzle_index,
+        nozzle_label=label,
     )
-    size = float(printability["minimum_extrusion_width_mm"])
-    defaults = _default_line_widths(size)
-    max_line_width = max(
-        size,
-        float(normalized.get("max_line_width") or defaults["max_line_width"]),
-    )
-    nominal = float(normalized.get("line_width") or defaults["line_width"])
-    nominal = min(max(nominal, size), max_line_width)
-    normalized["size"] = size
-    normalized["line_width"] = nominal
-    normalized["max_line_width"] = max_line_width
-    normalized["min_line_length_multiplier"] = int(
-        printability["minimum_line_length_multiplier"]
-    )
-    return normalized
+    return {
+        "id": str(profile.get("id") or "").strip(),
+        "diameter_um": diameter_um,
+        "min_layer_height_um": min_layer_um,
+        "max_layer_height_um": max_layer_um,
+        "max_extrusion_width_um": max_width_um,
+        "minimum_line_length_multiplier": multiplier,
+    }
 
 
-def _normalize_printers_data(data: dict, *, retired_policy: str = "warn_drop") -> dict:
-    retired_hits = _find_nozzle_profiles_with_retired_preferred_length(data)
-    if retired_hits:
-        if retired_policy == "reject":
-            raise HTTPException(
-                422,
-                {
-                    "error": "retired_printer_profile_field",
-                    "field": "preferred_line_length",
-                    "profiles": retired_hits,
-                    "message": (
-                        "preferred_line_length is retired; use minimum line "
-                        "length hard printability settings instead"
-                    ),
-                },
+def _normalize_nozzle_width_state(
+    source: Any,
+    *,
+    printer_id: str,
+    nozzle: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(source, Mapping):
+        raise _printers_data_error(
+            f"Printer {printer_id!r} must define operational width state for nozzle {nozzle['id']!r}."
+        )
+    try:
+        current_width_um = require_um(source.get("current_width_um"), field="current_width_um")
+    except PrintSetupValueError as exc:
+        raise _printers_data_error(
+            f"Printer {printer_id!r} nozzle {nozzle['id']!r} has invalid current width: {exc}"
+        ) from exc
+    minimum = int(nozzle["diameter_um"])
+    maximum = int(nozzle["max_extrusion_width_um"])
+    if not minimum <= current_width_um <= maximum:
+        raise _printers_data_error(
+            f"Printer {printer_id!r} nozzle {nozzle['id']!r} current width must be from "
+            f"{um_to_mm(minimum):g} mm through {um_to_mm(maximum):g} mm."
+        )
+    raw_saved = source.get("saved_widths_um")
+    if not isinstance(raw_saved, list):
+        raise _printers_data_error(
+            f"Printer {printer_id!r} nozzle {nozzle['id']!r} saved widths must be a list."
+        )
+    saved: list[int] = []
+    seen: set[int] = set()
+    for raw_width in raw_saved:
+        try:
+            width_um = require_um(raw_width, field="saved_widths_um")
+        except PrintSetupValueError as exc:
+            raise _printers_data_error(
+                f"Printer {printer_id!r} nozzle {nozzle['id']!r} has an invalid saved width: {exc}"
+            ) from exc
+        if not minimum <= width_um <= maximum:
+            raise _printers_data_error(
+                f"Printer {printer_id!r} nozzle {nozzle['id']!r} saved widths must be within its supported range."
             )
-        if retired_policy == "warn_drop":
-            logger.warning(
-                "Dropping retired preferred_line_length from printer profile(s): %s",
-                ", ".join(retired_hits),
+        if width_um in seen:
+            raise _printers_data_error(
+                f"Printer {printer_id!r} nozzle {nozzle['id']!r} contains duplicate saved widths."
             )
-        else:
-            raise ValueError(f"Unknown printer retired-field policy {retired_policy!r}")
-    normalized = dict(data)
+        seen.add(width_um)
+        saved.append(width_um)
+    return {
+        "current_width_um": current_width_um,
+        "saved_widths_um": sorted(saved),
+    }
+
+
+def _normalize_printers_data(data: dict) -> dict:
+    if int(data.get("schema_version") or 0) != _PRINTERS_SCHEMA_VERSION:
+        raise _printers_data_error("Printer configuration must use the current schema version.")
+    revision = data.get("revision")
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        raise _printers_data_error("Printer configuration revision must be a non-negative integer.")
+    raw_printers = data.get("printers")
+    if not isinstance(raw_printers, list) or not raw_printers:
+        raise _printers_data_error("At least one printer is required.")
+    normalized: dict[str, Any] = {
+        "schema_version": _PRINTERS_SCHEMA_VERSION,
+        "revision": revision,
+    }
     printers = []
-    for printer_index, printer in enumerate(data.get("printers", [])):
-        normalized_printer = dict(printer)
+    seen_printer_ids: set[str] = set()
+    for printer_index, printer in enumerate(raw_printers):
         printer_id = str(printer.get("id") or f"#{printer_index}")
-        normalized_printer["nozzle_profiles"] = [
-            _normalize_nozzle_profile(
+        if not printer.get("id") or printer_id in seen_printer_ids:
+            raise _printers_data_error("Printer IDs must be non-empty and unique.")
+        seen_printer_ids.add(printer_id)
+        raw_nozzles = printer.get("nozzle_profiles")
+        if not isinstance(raw_nozzles, list) or not raw_nozzles:
+            raise _printers_data_error(
+                f"Printer {printer_id!r} must have at least one nozzle profile."
+            )
+        seen_nozzle_ids: set[str] = set()
+        seen_nozzle_diameters: set[int] = set()
+        normalized_nozzles: list[dict[str, Any]] = []
+        for nozzle_index, profile in enumerate(raw_nozzles):
+            nozzle_id = str(profile.get("id") or "").strip()
+            if not nozzle_id or nozzle_id in seen_nozzle_ids:
+                raise _printers_data_error(
+                    f"Printer {printer_id!r} nozzle IDs must be non-empty and unique."
+                )
+            seen_nozzle_ids.add(nozzle_id)
+            normalized_nozzle = _normalize_nozzle_profile(
                 profile,
                 printer_id=printer_id,
                 nozzle_index=nozzle_index,
             )
-            for nozzle_index, profile in enumerate(printer.get("nozzle_profiles", []))
-        ]
+            diameter_um = int(normalized_nozzle["diameter_um"])
+            if diameter_um in seen_nozzle_diameters:
+                raise _printers_data_error(
+                    f"Printer {printer_id!r} cannot contain duplicate Nozzle Diameters."
+                )
+            seen_nozzle_diameters.add(diameter_um)
+            normalized_nozzles.append(normalized_nozzle)
+        raw_print_area = printer.get("max_print_area") or {"x": 256, "y": 256}
+        if not isinstance(raw_print_area, Mapping):
+            raise _printers_data_error(
+                f"Printer {printer_id!r} must define its maximum print area."
+            )
+        normalized_printer = {
+            "id": printer_id,
+            "name": str(printer.get("name") or printer_id),
+            "max_print_area": {
+                "x": _normalize_printer_integer(
+                    raw_print_area.get("x"),
+                    field="Print Area X",
+                    minimum=50,
+                    maximum=500,
+                ),
+                "y": _normalize_printer_integer(
+                    raw_print_area.get("y"),
+                    field="Print Area Y",
+                    minimum=50,
+                    maximum=500,
+                ),
+            },
+            "ams_units": _normalize_printer_integer(
+                printer.get("ams_units", 1),
+                field="AMS Units",
+                minimum=1,
+                maximum=4,
+            ),
+            "slots_per_ams": _normalize_printer_integer(
+                printer.get("slots_per_ams", 4),
+                field="Slots per AMS",
+                minimum=1,
+                maximum=16,
+            ),
+            "nozzle_profiles": normalized_nozzles,
+        }
+        for optional_key in ("virtual", "guide_only", "editable", "deletable", "renameable"):
+            if optional_key in printer:
+                normalized_printer[optional_key] = bool(printer[optional_key])
         printers.append(normalized_printer)
     normalized["printers"] = printers
-    active_printer = next(
-        (
-            printer
-            for printer in printers
-            if printer.get("id") == data.get("active_printer_id")
-        ),
-        printers[0] if printers else None,
-    )
-    normalized["active_printer_id"] = (
-        active_printer.get("id") if active_printer is not None else None
-    )
-    nozzle_profiles = (
-        active_printer.get("nozzle_profiles", [])
-        if active_printer is not None
-        else []
-    )
-    active_nozzle = next(
-        (
-            nozzle
-            for nozzle in nozzle_profiles
-            if nozzle.get("size") == data.get("active_nozzle_size")
-        ),
-        nozzle_profiles[0] if nozzle_profiles else None,
-    )
-    normalized["active_nozzle_size"] = (
-        active_nozzle.get("size") if active_nozzle is not None else None
-    )
+    requested_active_printer_id = str(data.get("active_printer_id") or "")
+    if requested_active_printer_id not in {printer["id"] for printer in printers}:
+        raise _printers_data_error("Active Printer Profile is unavailable.")
+    normalized["active_printer_id"] = requested_active_printer_id
+    raw_setup_state = data.get("printer_setup_state")
+    if not isinstance(raw_setup_state, Mapping):
+        raise _printers_data_error("Printer configuration must include per-printer setup state.")
+    unknown_printer_state = set(raw_setup_state) - {printer["id"] for printer in printers}
+    if unknown_printer_state:
+        raise _printers_data_error("Printer setup state contains an unknown Printer Profile.")
+    setup_state: dict[str, Any] = {}
+    for printer in printers:
+        printer_id = printer["id"]
+        source = raw_setup_state.get(printer_id)
+        if not isinstance(source, Mapping):
+            raise _printers_data_error(
+                f"Printer {printer_id!r} must include active Nozzle and width state."
+            )
+        nozzle_by_id = {nozzle["id"]: nozzle for nozzle in printer["nozzle_profiles"]}
+        active_nozzle_id = str(source.get("active_nozzle_id") or "")
+        if active_nozzle_id not in nozzle_by_id:
+            raise _printers_data_error(
+                f"Printer {printer_id!r} active Nozzle Profile is unavailable."
+            )
+        raw_width_state = source.get("nozzle_width_state")
+        if not isinstance(raw_width_state, Mapping) or set(raw_width_state) != set(nozzle_by_id):
+            raise _printers_data_error(
+                f"Printer {printer_id!r} must contain width state for exactly its configured nozzles."
+            )
+        setup_state[printer_id] = {
+            "active_nozzle_id": active_nozzle_id,
+            "nozzle_width_state": {
+                nozzle_id: _normalize_nozzle_width_state(
+                    raw_width_state[nozzle_id],
+                    printer_id=printer_id,
+                    nozzle=nozzle,
+                )
+                for nozzle_id, nozzle in nozzle_by_id.items()
+            },
+        }
+    normalized["printer_setup_state"] = setup_state
     return normalized
-
-
-def _migrate_built_in_printer_profiles(data: dict) -> tuple[dict, bool]:
-    """Add newly bundled profiles once without reviving later user deletions."""
-    raw_revision = data.get(_BUILT_IN_PRINTER_PROFILES_REVISION_KEY, 0)
-    revision = (
-        raw_revision
-        if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
-        else 0
-    )
-    if revision >= _BUILT_IN_PRINTER_PROFILES_REVISION:
-        return data, False
-
-    migrated = deepcopy(data)
-    existing_ids = {
-        str(printer.get("id"))
-        for printer in migrated.get("printers", [])
-        if isinstance(printer, Mapping)
-    }
-    if _TUTORIAL_PRINTER_PROFILE["id"] not in existing_ids:
-        migrated.setdefault("printers", []).append(
-            deepcopy(_TUTORIAL_PRINTER_PROFILE)
-        )
-    migrated[
-        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
-    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
-    return migrated, True
 
 
 # Force-import live preprocessing modules so they register themselves.
@@ -510,50 +692,96 @@ _ensure_registry_populated()
 
 def _load_printers() -> dict:
     """Load printers.json, creating with defaults if missing."""
-    if _PRINTERS_PATH.exists():
-        with open(_PRINTERS_PATH, encoding="utf-8") as f:
-            normalized = _normalize_printers_data(json.load(f))
-        migrated, changed = _migrate_built_in_printer_profiles(normalized)
-        if changed:
-            _save_printers(migrated)
-        return _normalize_printers_data(migrated)
-    _save_printers(_DEFAULT_PRINTERS)
-    return _normalize_printers_data(_DEFAULT_PRINTERS)
+    with _PRINT_SETUP_MUTATION_LOCK:
+        if _PRINTERS_PATH.exists():
+            with open(_PRINTERS_PATH, encoding="utf-8") as f:
+                return _normalize_printers_data(json.load(f))
+        _write_printers_unlocked(_DEFAULT_PRINTERS)
+        return _normalize_printers_data(deepcopy(_DEFAULT_PRINTERS))
 
 
-def _save_printers(data: dict) -> None:
-    """Write printers.json atomically."""
+def _write_printers_unlocked(data: dict) -> dict:
+    """Validate and atomically write the current printer contract."""
     versioned = deepcopy(data)
-    versioned[
-        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
-    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
+    versioned["printers"] = [
+        printer
+        for printer in versioned.get("printers", [])
+        if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    if versioned.get("active_printer_id") == _TUTORIAL_PRINTER_PROFILE["id"]:
+        versioned["active_printer_id"] = (
+            versioned["printers"][0]["id"] if versioned["printers"] else None
+        )
+    versioned.get("printer_setup_state", {}).pop(_TUTORIAL_PRINTER_PROFILE["id"], None)
     data = _normalize_printers_data(versioned)
     _PRINTERS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = _PRINTERS_PATH.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     tmp.replace(_PRINTERS_PATH)
+    return data
+
+
+def _save_printers(data: dict) -> None:
+    """Write already-revisioned printer data under the shared mutation lock."""
+    with _PRINT_SETUP_MUTATION_LOCK:
+        _write_printers_unlocked(data)
 
 
 def _resolve_active_printer(data: dict) -> dict:
-    """Return the active printer, nozzle profile, and resolved printability."""
+    """Return the active printer, nozzle, numeric width, and printability."""
     data = _normalize_printers_data(data)
     printers = data.get("printers", [])
     active_id = data.get("active_printer_id")
     printer = next((p for p in printers if p["id"] == active_id), printers[0] if printers else None)
     if not printer:
-        return {"printer": None, "nozzle": None, "printability": None}
-    active_nozzle_size = data.get("active_nozzle_size")
+        return {"printer": None, "nozzle": None, "extrusion_width": None, "printability": None}
+    setup = data["printer_setup_state"][printer["id"]]
     nozzle = next(
-        (n for n in printer.get("nozzle_profiles", []) if n["size"] == active_nozzle_size),
-        printer["nozzle_profiles"][0] if printer.get("nozzle_profiles") else None,
+        item for item in printer["nozzle_profiles"] if item["id"] == setup["active_nozzle_id"]
     )
-    printability = (
-        _resolve_nozzle_printability(nozzle, printer_id=str(printer["id"]))
-        if nozzle is not None
-        else None
+    width_um = setup["nozzle_width_state"][nozzle["id"]]["current_width_um"]
+    extrusion_width = {"width_um": width_um}
+    printability = _resolve_nozzle_printability(
+        nozzle, width_um, printer_id=str(printer["id"])
     )
-    return {"printer": printer, "nozzle": nozzle, "printability": printability}
+    return {
+        "printer": printer,
+        "nozzle": nozzle,
+        "extrusion_width": extrusion_width,
+        "printability": printability,
+    }
+
+
+def _guide_printer_overlay() -> dict[str, Any]:
+    return session.get("guide", {}) if "session" in globals() else {}
+
+
+def _effective_printers_data() -> dict:
+    """Merge the protected tutorial ghost into the active guide's view only."""
+    data = _load_printers()
+    overlay = _guide_printer_overlay()
+    if not overlay.get("ghost_printer_mounted"):
+        return data
+    merged = deepcopy(data)
+    merged["printers"] = [
+        printer
+        for printer in merged.get("printers", [])
+        if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+    ]
+    merged["printers"].append(deepcopy(_TUTORIAL_PRINTER_PROFILE))
+    merged.setdefault("printer_setup_state", {})[_TUTORIAL_PRINTER_PROFILE["id"]] = deepcopy(
+        _TUTORIAL_PRINTER_SETUP_STATE
+    )
+    setup_overlay = overlay.get("printer_setup_overlay")
+    if isinstance(setup_overlay, Mapping):
+        requested_printer_id = setup_overlay.get("active_printer_id")
+        if requested_printer_id:
+            merged["active_printer_id"] = requested_printer_id
+        for printer_id, state in (setup_overlay.get("printer_setup_state") or {}).items():
+            if printer_id in merged["printer_setup_state"]:
+                merged["printer_setup_state"][printer_id] = deepcopy(state)
+    return _normalize_printers_data(merged)
 
 
 def _with_active_printer_printability(
@@ -565,18 +793,47 @@ def _with_active_printer_printability(
     resolved_active = (
         dict(active)
         if active is not None
-        else _resolve_active_printer(_load_printers())
+        else _resolve_active_printer(_effective_printers_data())
     )
     printability = resolved_active.get("printability")
     if not isinstance(printability, Mapping):
         return dict(cfg)
     resolved = dict(cfg)
-    resolved["printability_minimum_extrusion_width_mm"] = printability[
-        "minimum_extrusion_width_mm"
-    ]
+    resolved["printability_extrusion_width_mm"] = printability["extrusion_width_mm"]
     resolved["printability_minimum_line_length_mm"] = printability[
         "minimum_line_length_mm"
     ]
+    multiplier = resolved.get("solve_pitch_extrusion_width_multiplier", 1)
+    try:
+        setup = resolved_print_setup_from_active(resolved_active, multiplier)
+    except PrintSetupValueError as exc:
+        width_um = require_um(
+            resolved_active["extrusion_width"]["width_um"], field="width_um"
+        )
+        maximum = maximum_solve_pitch_multiplier(width_um)
+        try:
+            numeric_multiplier = int(multiplier)
+        except (TypeError, ValueError, OverflowError):
+            numeric_multiplier = 1
+        repaired = min(max(numeric_multiplier, 1), maximum)
+        logger.warning(
+            "Repaired Solve Pitch multiplier from %r to %d: %s",
+            multiplier,
+            repaired,
+            exc,
+        )
+        resolved["solve_pitch_extrusion_width_multiplier"] = repaired
+        resolved["print_setup_repair"] = {
+            "code": "solve_pitch_multiplier_clamped",
+            "requested": multiplier,
+            "effective": repaired,
+        }
+        setup = resolved_print_setup_from_active(resolved_active, repaired)
+    resolved["image_sample_pitch_mm"] = um_to_mm(setup.effective_solve_pitch_um)
+    resolved["solver_fine_pitch_mm"] = um_to_mm(setup.effective_solve_pitch_um)
+    resolved["extrusion_width_mm"] = um_to_mm(setup.extrusion_width_um)
+    resolved["nozzle_diameter"] = um_to_mm(setup.nozzle_diameter_um)
+    resolved["resolved_print_setup"] = setup.to_dict()
     return resolved
 
 
@@ -605,6 +862,13 @@ _file_handler = logging.FileHandler(str(_log_file), encoding="utf-8")
 _file_handler.setFormatter(logging.Formatter("%(asctime)s  %(name)s  %(levelname)s  %(message)s"))
 logging.getLogger("prisma").addHandler(_file_handler)
 
+try:
+    _EXAMPLE_IMAGE_SEEDER.seed()
+except (ExampleImageSeedStateError, GuideAssetError, OSError) as exc:
+    # Public examples are a convenience. A corrupt once-only history must fail
+    # closed so deleting a seeded image never causes it to be resurrected.
+    logger.warning("Example images were not seeded: %s", exc)
+
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
@@ -612,6 +876,7 @@ logging.getLogger("prisma").addHandler(_file_handler)
 
 @asynccontextmanager
 async def _app_lifespan(_app):
+    _ensure_settings_profile_store()
     yield
     manager = globals().get("_IMAGE_IMPORTS")
     if manager is not None:
@@ -632,6 +897,121 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_GUIDE_IDEMPOTENCY_RESULTS: OrderedDict[tuple[str, ...], tuple[int, dict[str, str], bytes]] = OrderedDict()
+_GUIDE_IDEMPOTENCY_LOCKS: dict[tuple[str, ...], asyncio.Lock] = {}
+_GUIDE_IDEMPOTENCY_LIMIT = 512
+_GUIDE_IDEMPOTENT_START_PATHS = frozenset({
+    "/api/palette/suggest",
+    "/api/solve/start",
+    "/api/solve/palette-batch/start",
+    "/api/export/files/start",
+})
+
+
+def _guide_idempotent_mutation_path(request: Request) -> bool:
+    path = request.url.path
+    if path in _GUIDE_IDEMPOTENT_START_PATHS:
+        return True
+    if path in {"/api/palettes", "/api/settings-profiles", "/api/runs/save"}:
+        return request.method in {"POST", "PUT", "DELETE"}
+    return bool(
+        request.method == "DELETE"
+        and (
+            re.fullmatch(r"/api/settings-profiles/[^/]+", path)
+            or re.fullmatch(r"/api/runs/saved/[^/]+", path)
+        )
+    )
+
+
+def _clear_guide_idempotency(session_id: str | None = None) -> None:
+    """Release request-replay state once its guide session can no longer retry."""
+    if session_id is None:
+        _GUIDE_IDEMPOTENCY_RESULTS.clear()
+        _GUIDE_IDEMPOTENCY_LOCKS.clear()
+        return
+    for cache_key in list(_GUIDE_IDEMPOTENCY_LOCKS):
+        if cache_key[0] == session_id:
+            _GUIDE_IDEMPOTENCY_LOCKS.pop(cache_key, None)
+            _GUIDE_IDEMPOTENCY_RESULTS.pop(cache_key, None)
+
+
+async def _dispatch_idempotent_guide_request(request: Request, call_next):
+    """Replay successful guide mutations after a lost HTTP response."""
+    action_key = request.headers.get("x-prisma-idempotency-key")
+    session_id = request.headers.get("x-prisma-guide-session")
+    if (
+        not action_key
+        or not session_id
+        or not _guide_idempotent_mutation_path(request)
+    ):
+        return await call_next(request)
+    cache_key = (
+        session_id,
+        action_key,
+        request.method,
+        request.url.path,
+        request.url.query,
+        "action-start",
+    )
+    lock = _GUIDE_IDEMPOTENCY_LOCKS.setdefault(cache_key, asyncio.Lock())
+    async with lock:
+        cached = _GUIDE_IDEMPOTENCY_RESULTS.get(cache_key)
+        if cached is not None:
+            status_code, headers, payload = cached
+            _GUIDE_IDEMPOTENCY_RESULTS.move_to_end(cache_key)
+            return Response(content=payload, status_code=status_code, headers=headers)
+        response = await call_next(request)
+        if not 200 <= response.status_code < 300:
+            return response
+        payload = b"".join([chunk async for chunk in response.body_iterator])
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        cached_response = (response.status_code, headers, payload)
+        _GUIDE_IDEMPOTENCY_RESULTS[cache_key] = cached_response
+        _GUIDE_IDEMPOTENCY_RESULTS.move_to_end(cache_key)
+        while len(_GUIDE_IDEMPOTENCY_RESULTS) > _GUIDE_IDEMPOTENCY_LIMIT:
+            evicted, _value = _GUIDE_IDEMPOTENCY_RESULTS.popitem(last=False)
+            _GUIDE_IDEMPOTENCY_LOCKS.pop(evicted, None)
+        return Response(
+            content=payload,
+            status_code=response.status_code,
+            headers=headers,
+            background=response.background,
+        )
+
+
+@app.middleware("http")
+async def _guide_workspace_mutation_guard(request: Request, call_next):
+    """Enforce exclusive guide ownership without changing read-only APIs."""
+    _GUIDE_RUNTIME_STORE.note_page(request.headers.get("x-prisma-page-id"))
+    runtime_path = request.url.path.startswith("/api/guides/runtime")
+    cancellation_path = request.url.path in {
+        "/api/solve/cancel",
+        "/api/export/files/cancel",
+        "/api/palette/suggest/cancel",
+    }
+    mutation_admitted = False
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not runtime_path:
+        raw_epoch = request.headers.get("x-prisma-workspace-epoch")
+        try:
+            epoch = int(raw_epoch) if raw_epoch is not None else None
+        except ValueError:
+            epoch = -1
+        allowed, detail = _GUIDE_RUNTIME_STORE.begin_mutation(
+            page_id=request.headers.get("x-prisma-page-id"),
+            session_id=request.headers.get("x-prisma-guide-session"),
+            workspace_epoch=epoch,
+            allow_recovery=cancellation_path,
+        )
+        if not allowed:
+            return JSONResponse(status_code=423, content={"detail": detail})
+        mutation_admitted = True
+    try:
+        return await _dispatch_idempotent_guide_request(request, call_next)
+    finally:
+        if mutation_admitted:
+            _GUIDE_RUNTIME_STORE.end_mutation()
 
 
 @app.exception_handler(SourceImageError)
@@ -677,8 +1057,9 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "white_base": "bambu-tough-white",
     "white_cap": None,
     "layer_height": 0.08,
-    # Canonical solve-resolution fields only. Legacy aliases are rejected on
-    # ingress and are not stored in session state.
+    "solve_pitch_extrusion_width_multiplier": 1,
+    # Derived projections. Product writes are rejected and these values are
+    # rematerialized from the active Extrusion Width plus multiplier.
     "image_sample_pitch_mm": 0.20,
     "solver_fine_pitch_mm": 0.20,
     "detail_cap_enabled": True,
@@ -692,29 +1073,30 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "emit_pressure_diagnostics": False,
     "emit_geometry_attribution": False,
     "emit_blueprint_printability": True,
-    "printability_minimum_extrusion_width_mm": None,
+    "printability_extrusion_width_mm": None,
     "printability_minimum_line_length_mm": None,
     "enforce_printability": True,
     "color_region_target_from_printability": True,
     "color_region_target_width_multiplier": 2.0,
-    "neutral_field_protection_mode": "off",
+    "neutral_field_protection_enabled": False,
+    "neutral_field_protection_cutoff": 0.020,
     "stage2_fine_override_enabled": True,
     "stage2_final_printability_gate_fine_override": True,
     "stage2_printability_gate_fine_override": True,
     "stage2_printability_repair_fine_override": True,
     "stage2_boundary_mutation_enabled": True,
-    "stage2_boundary_mutation_min_gain": None,
+    "stage2_boundary_mutation_min_gain": 0.010,
     "stage2_boundary_mutation_min_component_mm": None,
     "stage2_boundary_mutation_current_de_percentile": None,
     "stage2_boundary_mutation_max_passes": 1,
     "stage4_printability_gate_detail": True,
     "luminance_detail_authoring_printability": "off",
     "d_wb": 0.20,
-    "d_wc_min": 0.16,
+    "min_cap_layers": 2,
     "t_max": 3.0,
     "k_max": 3,
     "de_threshold": 0.01,
-    "smooth_kernel": 5.0,
+    "boundary_cap_smoothing_radius_mm": 1.0,
     "border": False,
     "border_width_mm": 3.0,
     "border_height_mm": 3.0,
@@ -727,8 +1109,6 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "ams_slots": 4,
     "n_ams_units": 1,
     "white_slots": 1,
-    "swap_improvement_threshold": 2.0,
-    "force_all_tiers": False,
     "gamut_mode": "hull",
     "gamut_white_rescale": False,
     "model_domain_ingress": True,
@@ -762,6 +1142,11 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
 
 session: Dict[str, Any] = {
     "config": deepcopy(_DEFAULT_CONFIG),
+    "guide": {
+        "ghost_printer_mounted": False,
+        "printer_setup_overlay": None,
+        "mounted_asset_ids": set(),
+    },
     "solve": {
         "status": "idle",       # idle | running | complete | error | cancelled
         "progress": {},
@@ -865,11 +1250,10 @@ class ModelLibraryIdPayload(BaseModel):
 class ConfigPayload(BaseModel):
     """All configuration knobs that the frontend can set.
 
-    Resolution fields: the canonical pitch fields are image_sample_pitch_mm,
-    solver_fine_pitch_mm, detail_cap_enabled, detail_cap_max_layers,
-    color_region_target_mm.
-    Legacy aliases such as pixel_size_mm and color_pixel_mm are rejected on
-    ingress without being carried as live model fields.
+    Solve Pitch is selected only through
+    solve_pitch_extrusion_width_multiplier. The physical pitch fields are
+    derived server-side from the active Extrusion Width and are rejected on
+    ingress, as are older resolution aliases.
     """
     model_config = ConfigDict(extra="allow")
 
@@ -882,13 +1266,12 @@ class ConfigPayload(BaseModel):
     white_cap: Optional[str] = None
     layer_height: float = 0.08
     d_wb: float = 0.20
-    d_wc_min: float = 0.16
+    min_cap_layers: int = 2
     t_max: float = 3.0
     k_max: int = 3
     de_threshold: float = 0.01
-    smooth_kernel: float = 5.0
-    image_sample_pitch_mm: Optional[float] = None
-    solver_fine_pitch_mm: Optional[float] = None
+    boundary_cap_smoothing_radius_mm: float = 1.0
+    solve_pitch_extrusion_width_multiplier: int = 1
     color_region_target_mm: Optional[float] = None
     detail_cap_enabled: bool = True
     detail_cap_max_layers: Optional[int] = 5
@@ -900,29 +1283,25 @@ class ConfigPayload(BaseModel):
     emit_pressure_diagnostics: bool = False
     emit_geometry_attribution: bool = False
     emit_blueprint_printability: bool = True
-    printability_minimum_extrusion_width_mm: Optional[float] = None
+    printability_extrusion_width_mm: Optional[float] = None
     printability_minimum_line_length_mm: Optional[float] = None
     enforce_printability: bool = True
     color_region_target_from_printability: bool = True
     color_region_target_width_multiplier: float = 2.0
-    neutral_field_protection_mode: Literal[
-        "off", "narrow", "standard", "broad"
-    ] = "off"
+    neutral_field_protection_enabled: bool = False
+    neutral_field_protection_cutoff: float = 0.020
     stage2_fine_override_enabled: bool = True
     stage2_final_printability_gate_fine_override: bool = True
     stage2_printability_gate_fine_override: bool = True
     stage2_printability_repair_fine_override: bool = True
     stage2_boundary_mutation_enabled: bool = True
-    stage2_boundary_mutation_min_gain: Optional[float] = None
-    stage2_boundary_mutation_min_component_mm: Optional[float] = None
-    stage2_boundary_mutation_current_de_percentile: Optional[float] = None
+    stage2_boundary_mutation_min_gain: float = 0.010
     stage2_boundary_mutation_max_passes: Optional[int] = 1
     stage4_printability_gate_detail: bool = True
     luminance_detail_authoring_printability: str = "off"
     border: bool = False
     border_width_mm: float = 3.0
     border_height_mm: float = 3.0
-    use_corrections: bool = True
     appearance_model_provider: str = "photo_stack_bundle"
     photo_stack_bundle_path: Optional[str] = None
     max_dim_mm: float = 130.0
@@ -931,8 +1310,6 @@ class ConfigPayload(BaseModel):
     ams_slots: int = 4
     n_ams_units: int = 1
     white_slots: int = 1
-    swap_improvement_threshold: float = 2.0
-    force_all_tiers: bool = False
     gamut_mode: str = "hull"
     gamut_white_rescale: bool = False
     model_domain_ingress: bool = True
@@ -980,10 +1357,13 @@ class ConfigPayload(BaseModel):
             )
         return canonical
 
-    @field_validator("neutral_field_protection_mode", mode="before")
+    @field_validator("neutral_field_protection_cutoff")
     @classmethod
-    def _normalize_neutral_field_protection_mode(cls, value: Any) -> str:
-        return normalize_neutral_field_protection_mode(value)
+    def _validate_neutral_field_protection_cutoff(cls, value: float) -> float:
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0 or numeric > 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
+        return numeric
 
     @field_validator("gamut_mode", mode="before")
     @classmethod
@@ -1015,8 +1395,8 @@ class ConfigPayload(BaseModel):
         if value is None or str(value).strip() == "":
             return None
         canonical = str(value).strip()
-        if not re.fullmatch(r"loaded-run:[a-zA-Z0-9_-]+", canonical):
-            raise ValueError("image_source_ref must be a valid loaded-run reference")
+        if not re.fullmatch(r"(?:loaded-run|guide-image):[a-zA-Z0-9_-]+", canonical):
+            raise ValueError("image_source_ref must be a valid private image reference")
         return canonical
 
     @field_validator("detail_cap_enabled")
@@ -1041,6 +1421,8 @@ _PHANTOM_CONFIG_FIELDS = frozenset({
     "v2_enable_cap_topology_cleanup",
     "v2_max_cleanup_rounds",
     "v2_full_cap_quality_report",
+    "swap_improvement_threshold",
+    "force_all_tiers",
 })
 
 
@@ -1139,7 +1521,17 @@ def _source_provenance_for_config(
     resolved_source: ResolvedSource,
 ) -> dict:
     provenance = resolved_source.provenance()
-    loaded_card_id = _loaded_source_card_id(cfg.get("image_source_ref"))
+    source_ref = cfg.get("image_source_ref")
+    guide_asset_id = _guide_source_asset_id(source_ref)
+    if guide_asset_id is not None:
+        asset = _GUIDE_ASSET_CATALOG.get(guide_asset_id)
+        provenance["original_source_name"] = str(
+            asset.get("guide_display_name") or resolved_source.display_name
+        )
+        provenance["guide_asset_id"] = guide_asset_id
+        provenance.pop("snapshot_name", None)
+        return provenance
+    loaded_card_id = _loaded_source_card_id(source_ref)
     if loaded_card_id is None:
         return provenance
     record = _loaded_source_record(loaded_card_id)
@@ -1164,14 +1556,122 @@ def _load_run_source_image(
     """Load the framed, adjusted source raster for solve-adjacent paths."""
 
     resolved = resolved_source or _resolve_run_source_image(image_path)
+    target_w: int | None = None
+    target_h: int | None = None
+    resolved_max_dim_mm = cfg["max_dim_mm"] if max_dim_mm is None else max_dim_mm
+    if max_dim_mm is None:
+        solve_grid = _resolved_solve_grid_for_config(cfg)
+        if solve_grid is not None:
+            target_w = int(solve_grid["cells"]["width"])
+            target_h = int(solve_grid["cells"]["height"])
+            resolved_max_dim_mm = None
     img = load_image(
         resolved.working_path,
         pixel_size_mm=cfg["image_sample_pitch_mm"],
-        max_dim_mm=cfg["max_dim_mm"] if max_dim_mm is None else max_dim_mm,
+        max_dim_mm=resolved_max_dim_mm,
+        target_w=target_w,
+        target_h=target_h,
         frame=cfg.get("frame"),
         source_resample_kernel=cfg.get("source_resample_kernel", "lanczos"),
     )
     return apply_adjustments(img, cfg.get("image_adjust"))
+
+
+def _resolved_solve_grid_for_config(cfg: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Return canonical whole-cell geometry when the config owns a frame."""
+
+    frame = cfg.get("frame")
+    if not isinstance(frame, Mapping):
+        return None
+    width = frame.get("width_mm")
+    height = frame.get("height_mm")
+    pitch = cfg.get("solver_fine_pitch_mm")
+    if pitch is None:
+        pitch = cfg.get("image_sample_pitch_mm")
+    if width is None or height is None or pitch is None:
+        return None
+    return resolve_solve_grid(width, height, pitch)
+
+
+def _settings_evaluation_for_config(
+    cfg: Mapping[str, Any],
+    *,
+    active: Mapping[str, Any] | None = None,
+    module_state: Mapping[str, bool] | None = None,
+    resolved_solve_grid: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Evaluate settings against one immutable product-context snapshot."""
+    active_snapshot = deepcopy(
+        dict(active) if active is not None else _resolve_active_printer(_effective_printers_data())
+    )
+    nozzle = active_snapshot.get("nozzle") or {}
+    printer = active_snapshot.get("printer") or {}
+    printability = active_snapshot.get("printability") or {}
+    state = deepcopy(
+        dict(module_state) if module_state is not None else load_module_state(_MODULES_PATH)
+    )
+    descriptors = {
+        descriptor["name"]: descriptor
+        for descriptor in list_all_modules()
+        if descriptor.get("slot") == "preprocessing"
+    }
+    grid = resolved_solve_grid
+    if grid is None:
+        try:
+            grid = _resolved_solve_grid_for_config(cfg)
+        except SolveGridResolutionError:
+            grid = None
+    context = SettingsContext(
+        printer_id=str(printer.get("id")) if printer.get("id") else None,
+        nozzle_size_mm=(um_to_mm(nozzle["diameter_um"]) if nozzle.get("diameter_um") else None),
+        min_layer_height_mm=(um_to_mm(nozzle["min_layer_height_um"]) if nozzle.get("min_layer_height_um") else None),
+        max_layer_height_mm=(um_to_mm(nozzle["max_layer_height_um"]) if nozzle.get("max_layer_height_um") else None),
+        extrusion_width_mm=printability.get("extrusion_width_mm"),
+        minimum_line_length_mm=printability.get("minimum_line_length_mm"),
+        solve_grid=deepcopy(grid) if grid is not None else None,
+        module_state=state,
+        module_descriptors=descriptors,
+        model_library_available=_MODEL_LIBRARY_AVAILABLE,
+        source_identity={
+            "image_path": cfg.get("image_path"),
+            "image_source_ref": cfg.get("image_source_ref"),
+            "frame": deepcopy(cfg.get("frame")),
+            "image_adjust": deepcopy(cfg.get("image_adjust")),
+        },
+        appearance_identity={
+            "provider": cfg.get("appearance_model_provider"),
+            "base_filament": cfg.get("base_filament"),
+            "cap_filament": cfg.get("cap_filament"),
+            "model_library_available": _MODEL_LIBRARY_AVAILABLE,
+        },
+    )
+    return evaluate_settings(cfg, context)
+
+
+def _require_settings_valid_for(
+    cfg: Mapping[str, Any],
+    operation: str,
+    *,
+    active: Mapping[str, Any] | None = None,
+    module_state: Mapping[str, bool] | None = None,
+) -> dict[str, Any]:
+    evaluation = _settings_evaluation_for_config(
+        cfg,
+        active=active,
+        module_state=module_state,
+    )
+    blockers = blockers_for_operation(evaluation, operation)
+    if blockers:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_settings_context",
+                "operation": operation,
+                "issues": blockers,
+                "settings_evaluation": evaluation,
+            },
+        )
+    return evaluation
 
 
 def _prepare_export_materialization(
@@ -1187,7 +1687,7 @@ def _prepare_export_materialization(
 
 
 def _drop_phantom_config_fields(cfg: Optional[dict]) -> dict:
-    """Return a deep-copied mapping without the eight quietly retired no-op fields."""
+    """Return a deep-copied mapping without quietly retired configuration fields."""
     resolved = deepcopy(dict(cfg or {}))
     for key in _PHANTOM_CONFIG_FIELDS:
         resolved.pop(key, None)
@@ -1278,13 +1778,10 @@ def _force_mandatory_product_settings(cfg: dict) -> dict:
     resolved = _drop_phantom_config_fields(cfg)
     for key in _QUIET_DROPPED_CONFIG_EXTRAS:
         resolved.pop(key, None)
-    layer_height = max(float(resolved.get("layer_height", 0.08) or 0.08), 1e-9)
-    raw_min_cap = resolved.get("d_wc_min")
-    if raw_min_cap is None:
-        raw_min_cap = 2.0 * layer_height
-    min_cap = max(float(raw_min_cap), layer_height)
-    min_cap_layers = max(1, int(math.ceil(min_cap / layer_height - 1e-9)))
-    resolved["d_wc_min"] = round(min_cap_layers * layer_height, 6)
+    resolved["min_cap_layers"] = max(
+        1,
+        int(resolved.get("min_cap_layers", 2) or 2),
+    )
     resolved["model_domain_ingress"] = True
     resolved["enforce_printability"] = True
     resolved["cap_continuity_cleanup"] = True
@@ -1294,6 +1791,19 @@ def _force_mandatory_product_settings(cfg: dict) -> dict:
     resolved["stage2_printability_gate_fine_override"] = True
     resolved["stage2_printability_repair_fine_override"] = True
     resolved["stage4_printability_gate_detail"] = True
+    # These controls are no longer user-configurable in Generator. Keep the
+    # lower-level APIs parameterized, but make every product solve canonical.
+    resolved["use_corrections"] = True
+    resolved["stage2_boundary_mutation_current_de_percentile"] = None
+    resolved["stage2_boundary_mutation_min_component_mm"] = None
+    try:
+        raw_cutoff = resolved.get("neutral_field_protection_cutoff")
+        cutoff = 0.020 if raw_cutoff is None else float(raw_cutoff)
+    except (TypeError, ValueError):
+        cutoff = 0.020
+    if not math.isfinite(cutoff):
+        cutoff = 0.020
+    resolved["neutral_field_protection_cutoff"] = max(0.0, min(1.0, cutoff))
     return resolved
 
 
@@ -1454,24 +1964,27 @@ def _build_solve_config(
         if active_printer is not None
         else cfg.get("__active_printer__") or get_active_printer()
     )
-    nozzle_size = 0.20  # fallback
-    printer_min_line_width = 0.20
-    printer_min_line_length = 0.40
-    if active.get("nozzle") and active["nozzle"].get("size"):
-        nozzle = active["nozzle"]
-        printability = active.get("printability") or _resolve_nozzle_printability(
-            nozzle,
-            printer_id=str((active.get("printer") or {}).get("id") or "unknown"),
+    cfg = _with_active_printer_printability(cfg, active=active)
+    nozzle = active.get("nozzle")
+    extrusion_width = active.get("extrusion_width")
+    if not nozzle or not nozzle.get("diameter_um") or not extrusion_width:
+        raise HTTPException(
+            409,
+            "The active printer must have an active Extrusion Width before solving.",
         )
-        nozzle_size = float(nozzle["size"])
-        printer_min_line_width = float(
-            printability["minimum_extrusion_width_mm"]
-        )
-        printer_min_line_length = float(
-            printability["minimum_line_length_mm"]
-        )
-    # Product printability is mandatory; older sessions/profiles cannot
-    # silently disable or partially reconfigure enforcement.
+    printability = active.get("printability") or _resolve_nozzle_printability(
+        nozzle,
+        extrusion_width["width_um"],
+        printer_id=str((active.get("printer") or {}).get("id") or "unknown"),
+    )
+    nozzle_size = um_to_mm(nozzle["diameter_um"])
+    extrusion_width_mm = float(
+        printability["extrusion_width_mm"]
+    )
+    printer_min_line_length = float(
+        printability["minimum_line_length_mm"]
+    )
+    # Product printability is mandatory and comes from the active Extrusion Width.
     # Blueprint printability diagnostics stay on for normal solves.  Heavier
     # pressure/geometry attribution artifacts are CLI/API-only research output.
     _enforce = True
@@ -1482,6 +1995,21 @@ def _build_solve_config(
     palette = canonical_palette_order(
         palette_override if palette_override is not None else cfg["palette"],
         registry,
+    )
+
+    layer_height = float(cfg["layer_height"])
+    solve_pitch = float(
+        cfg.get("solver_fine_pitch_mm")
+        or cfg.get("image_sample_pitch_mm")
+        or 0.20
+    )
+    runtime_min_cap_mm = minimum_cap_thickness_mm(
+        cfg["min_cap_layers"],
+        layer_height,
+    )
+    runtime_smoothing_cells = boundary_cap_smoothing_cells(
+        cfg["boundary_cap_smoothing_radius_mm"],
+        solve_pitch,
     )
 
     return SolveConfig(
@@ -1509,15 +2037,18 @@ def _build_solve_config(
             cfg.get("emit_geometry_attribution", False)
         ),
         emit_blueprint_printability=True,
-        printability_minimum_extrusion_width_mm=printer_min_line_width,
+        printability_extrusion_width_mm=extrusion_width_mm,
         printability_minimum_line_length_mm=printer_min_line_length,
         enforce_printability=_enforce,
         color_region_target_from_printability=_enforce,
         color_region_target_width_multiplier=cfg.get(
             "color_region_target_width_multiplier", 2.0
         ),
-        neutral_field_protection_mode=cfg.get(
-            "neutral_field_protection_mode", "off"
+        neutral_field_protection_enabled=bool(
+            cfg.get("neutral_field_protection_enabled", False)
+        ),
+        neutral_field_protection_cutoff=cfg.get(
+            "neutral_field_protection_cutoff", 0.020
         ),
         stage2_fine_override_enabled=cfg.get(
             "stage2_fine_override_enabled", True
@@ -1528,15 +2059,12 @@ def _build_solve_config(
         stage2_boundary_mutation_enabled=cfg.get(
             "stage2_boundary_mutation_enabled", True
         ),
-        stage2_boundary_mutation_min_gain=cfg.get(
-            "stage2_boundary_mutation_min_gain"
-        ),
-        stage2_boundary_mutation_min_component_mm=cfg.get(
-            "stage2_boundary_mutation_min_component_mm"
-        ),
-        stage2_boundary_mutation_current_de_percentile=cfg.get(
-            "stage2_boundary_mutation_current_de_percentile"
-        ),
+        stage2_boundary_mutation_min_gain=cfg["stage2_boundary_mutation_min_gain"],
+        # Generator hardcodes the minimum donor contact to one pixel and does
+        # not apply a current-dE percentile filter. The refinement primitives
+        # remain parameterized for non-Generator callers.
+        stage2_boundary_mutation_min_component_mm=None,
+        stage2_boundary_mutation_current_de_percentile=None,
         stage2_boundary_mutation_max_passes=cfg.get(
             "stage2_boundary_mutation_max_passes", 1
         ),
@@ -1558,17 +2086,17 @@ def _build_solve_config(
             cfg.get("detail_cap_smoothing_cumulative_hole_max_px", 2) or 0
         ),
         d_wb=cfg["d_wb"],
-        d_wc_min=cfg["d_wc_min"],
+        d_wc_min=runtime_min_cap_mm,
         t_max=cfg["t_max"],
         k_max=cfg["k_max"],
         de_threshold=cfg["de_threshold"],
-        smooth_kernel=cfg["smooth_kernel"],
+        smooth_kernel=runtime_smoothing_cells,
         ams_slots=cfg.get("ams_slots", 4),
         white_slots=cfg.get("white_slots", 1),
-        use_corrections=cfg["use_corrections"],
+        use_corrections=True,
         corrections=(
             _load_corrections()
-            if cfg["use_corrections"] and not photo_stack_provider
+            if not photo_stack_provider
             else None
         ),
         profiles_dir=_runtime_profiles_dir(),
@@ -1578,7 +2106,7 @@ def _build_solve_config(
         ),
         photo_stack_bundle_path=photo_stack_candidate_path,
         nozzle_diameter=nozzle_size,
-        printer_min_line_width_mm=printer_min_line_width,
+        extrusion_width_mm=extrusion_width_mm,
         gamut_mode=cfg.get("gamut_mode", "hull"),
         gamut_white_rescale=bool(cfg.get("gamut_white_rescale", False)),
         model_domain_ingress=True,
@@ -2344,6 +2872,7 @@ def _validate_card_id(card_id: str) -> str:
 
 
 _LOADED_SOURCE_REF_PREFIX = "loaded-run:"
+_GUIDE_SOURCE_REF_PREFIX = "guide-image:"
 _LOADED_SOURCE_PRIVATE_DIR = "_loaded_source"
 
 
@@ -2351,16 +2880,36 @@ def _loaded_source_ref(card_id: str) -> str:
     return f"{_LOADED_SOURCE_REF_PREFIX}{_validate_card_id(card_id)}"
 
 
-def _loaded_source_card_id(source_ref: object) -> str | None:
+def _parse_image_source_ref(source_ref: object) -> tuple[str | None, str | None]:
+    """Parse every non-physical Image Library source reference in one place."""
     if source_ref is None or str(source_ref).strip() == "":
-        return None
+        return None, None
     value = str(source_ref).strip()
-    if not value.startswith(_LOADED_SOURCE_REF_PREFIX):
-        raise HTTPException(400, "Invalid image_source_ref")
-    card_id = value[len(_LOADED_SOURCE_REF_PREFIX):]
-    if not card_id:
-        raise HTTPException(400, "Invalid image_source_ref")
-    return _validate_card_id(card_id)
+    if value.startswith(_GUIDE_SOURCE_REF_PREFIX):
+        asset_id = value[len(_GUIDE_SOURCE_REF_PREFIX):]
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+", asset_id):
+            raise HTTPException(400, "Invalid image_source_ref")
+        try:
+            _GUIDE_ASSET_CATALOG.get(asset_id)
+        except GuideAssetError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return "guide-image", asset_id
+    if value.startswith(_LOADED_SOURCE_REF_PREFIX):
+        card_id = value[len(_LOADED_SOURCE_REF_PREFIX):]
+        if not card_id:
+            raise HTTPException(400, "Invalid image_source_ref")
+        return "loaded-run", _validate_card_id(card_id)
+    raise HTTPException(400, "Invalid image_source_ref")
+
+
+def _loaded_source_card_id(source_ref: object) -> str | None:
+    kind, identifier = _parse_image_source_ref(source_ref)
+    return identifier if kind == "loaded-run" else None
+
+
+def _guide_source_asset_id(source_ref: object) -> str | None:
+    kind, identifier = _parse_image_source_ref(source_ref)
+    return identifier if kind == "guide-image" else None
 
 
 def _loaded_source_record(card_id: str) -> dict:
@@ -2388,6 +2937,16 @@ def _loaded_source_record(card_id: str) -> dict:
 
 
 def _resolve_image_source_path(image_path: object, image_source_ref: object = None) -> Path:
+    guide_asset_id = _guide_source_asset_id(image_source_ref)
+    if guide_asset_id is not None:
+        if guide_asset_id not in session.get("guide", {}).get("mounted_asset_ids", set()):
+            raise HTTPException(404, "Guide image is not mounted")
+        asset = _GUIDE_ASSET_CATALOG.get(guide_asset_id)
+        filename = str(image_path or "")
+        expected = str(asset.get("guide_display_name") or "")
+        if not filename or Path(filename).name != filename or filename != expected:
+            raise HTTPException(400, "image_path does not match the guide image")
+        return Path(asset["path"])
     loaded_card_id = _loaded_source_card_id(image_source_ref)
     if loaded_card_id is not None:
         record = _loaded_source_record(loaded_card_id)
@@ -2479,21 +3038,20 @@ _SOLVE_OWNED_KEYS = (
     "stage1_coarsening_factor",
     "color_region_target_from_printability",
     "color_region_target_width_multiplier",
-    "neutral_field_protection_mode",
+    "neutral_field_protection_enabled",
+    "neutral_field_protection_cutoff",
     "stage2_fine_override_enabled",
     "stage2_final_printability_gate_fine_override",
     "stage2_printability_gate_fine_override",
     "stage2_printability_repair_fine_override",
     "stage2_boundary_mutation_enabled",
     "stage2_boundary_mutation_min_gain",
-    "stage2_boundary_mutation_min_component_mm",
-    "stage2_boundary_mutation_current_de_percentile",
     "stage2_boundary_mutation_max_passes",
     "stage4_printability_gate_detail",
     "luminance_detail_authoring_printability",
     # Core physics / solver
     "palette",
-    "d_wb", "d_wc_min", "d_wc_max", "t_max", "k_max",
+    "d_wb", "min_cap_layers", "d_wc_max", "t_max", "k_max",
     # Source-image ingress settings must invalidate solve-owned outputs.
     "de_threshold", "gamut_mode", "gamut_white_rescale", "model_domain_ingress_lut_path", "chroma_weight",
     "luminance_mode",
@@ -2508,7 +3066,6 @@ _SOLVE_OWNED_KEYS = (
     "luminance_handler_response_gamma",
     "luminance_handler_detail_residual",
     "luminance_handler_include_solver_detail",
-    "use_corrections",
     "appearance_model_provider",
     "photo_stack_bundle_path",
     # Stage 1 zone-label generator params.
@@ -2520,14 +3077,14 @@ _SOLVE_OWNED_KEYS = (
     "cap_mode", "boundary_cap_de_budget",
     # (No cleanup_* raster params here: all four retired — 2.2a reassign_mode/
     # search_radius_mm, 2.2b min_width/min_area. Wing-B feature scale is now
-    # nozzle-derived; the active nozzle's resolved printability already enters this
-    # fingerprint via __active_nozzle_printability__ below.)
+    # Extrusion-Width-derived; the resolved print setup enters the fingerprint
+    # through __resolved_print_setup__ below.)
     # Print-aware source resample kernel (Wing B / B7).
     # Toggling this changes the ingress raster and must invalidate
     # cached solves — per consensus §R6.C.
     "source_resample_kernel",
     # Thickness smoothing kernel (applied after solver)
-    "smooth_kernel",
+    "boundary_cap_smoothing_radius_mm",
     # Image selection
     "image_path", "image_source_ref", "image_adjust", "max_dim_mm", "frame",
 )
@@ -2560,29 +3117,37 @@ def _solve_owned_fingerprint(
     storage semantics without contaminating the hash).
     """
     canonical_cfg = _force_mandatory_product_settings(cfg)
-    subset = {k: canonical_cfg.get(k) for k in _SOLVE_OWNED_KEYS}
     active = deepcopy(
         active_printer
         if active_printer is not None
         else canonical_cfg.get("__active_printer__") or get_active_printer()
     )
+    canonical_cfg = _with_active_printer_printability(canonical_cfg, active=active)
+    subset = {k: canonical_cfg.get(k) for k in _SOLVE_OWNED_KEYS}
+    if not bool(canonical_cfg.get("neutral_field_protection_enabled", False)):
+        subset["neutral_field_protection_cutoff"] = None
     nozzle = active.get("nozzle") or {}
+    extrusion_width = active.get("extrusion_width") or {}
     printability = active.get("printability") or (
         _resolve_nozzle_printability(
             nozzle,
+            extrusion_width["width_um"],
             printer_id=str((active.get("printer") or {}).get("id") or "unknown"),
         )
-        if nozzle
+        if extrusion_width
         else {}
     )
-    subset["__active_nozzle_printability__"] = {
-        "size": nozzle.get("size"),
-        "min_line_length_multiplier": nozzle.get(
-            "min_line_length_multiplier"
+    subset["__resolved_print_setup__"] = {
+        "nozzle_id": nozzle.get("id"),
+        "nozzle_diameter_um": nozzle.get("diameter_um"),
+        "extrusion_width_um": extrusion_width.get("width_um"),
+        "minimum_line_length_multiplier": nozzle.get(
+            "minimum_line_length_multiplier"
         ),
-        "minimum_extrusion_width_mm": printability.get(
-            "minimum_extrusion_width_mm"
+        "solve_pitch_extrusion_width_multiplier": canonical_cfg.get(
+            "solve_pitch_extrusion_width_multiplier"
         ),
+        "extrusion_width_mm": printability.get("extrusion_width_mm"),
         "minimum_line_length_mm": printability.get("minimum_line_length_mm"),
         "minimum_component_area_mm2": printability.get(
             "minimum_component_area_mm2"
@@ -2597,6 +3162,39 @@ def _solve_owned_fingerprint(
         mid: pre_params.get(mid, {})
         for mid, enabled in subset["__module_state__"].items()
         if enabled and mid in PREPROCESSING_MODULE_IDS
+    }
+    evaluation = _settings_evaluation_for_config(
+        canonical_cfg,
+        active=active,
+        module_state=subset["__module_state__"],
+    )
+    subset["__settings_contract_schema__"] = evaluation["schema_version"]
+    subset["__effective_settings__"] = {
+        key: deepcopy(item.get("effective"))
+        for key, item in evaluation["values"].items()
+        if key != "preprocessing_params"
+    }
+    if not bool(canonical_cfg.get("neutral_field_protection_enabled", False)):
+        subset["__effective_settings__"]["neutral_field_protection_cutoff"] = None
+    solve_pitch = (
+        canonical_cfg.get("solver_fine_pitch_mm")
+        or canonical_cfg.get("image_sample_pitch_mm")
+        or 0.20
+    )
+    subset["__effective_runtime_units__"] = {
+        "d_wc_min_mm": minimum_cap_thickness_mm(
+            canonical_cfg.get("min_cap_layers", 2),
+            canonical_cfg.get("layer_height", 0.08),
+        ),
+        "smooth_kernel_cells": boundary_cap_smoothing_cells(
+            canonical_cfg.get("boundary_cap_smoothing_radius_mm", 1.0),
+            solve_pitch,
+        ),
+    }
+    subset["__effective_modules__"] = {
+        key: deepcopy(item)
+        for key, item in evaluation["modules"].items()
+        if bool(item.get("enabled"))
     }
     image_name = str(canonical_cfg.get("image_path") or "")
     if image_name:
@@ -2708,6 +3306,7 @@ def _build_solve_start_diagnostics(
     cfg: dict,
     *,
     module_state: dict | None = None,
+    settings_evaluation: Mapping[str, Any] | None = None,
 ) -> dict:
     """Build a compact, inspectable summary of solve-start runtime inputs."""
     module_state = deepcopy(
@@ -2726,20 +3325,35 @@ def _build_solve_start_diagnostics(
         "chroma_weight": cfg.get("chroma_weight"),
         "image_sample_pitch_mm": cfg.get("image_sample_pitch_mm"),
         "solver_fine_pitch_mm": cfg.get("solver_fine_pitch_mm"),
+        "solve_pitch_extrusion_width_multiplier": cfg.get(
+            "solve_pitch_extrusion_width_multiplier"
+        ),
+        "resolved_print_setup": deepcopy(cfg.get("resolved_print_setup")),
         "color_region_target_mm": cfg.get("color_region_target_mm"),
-        "neutral_field_protection_mode": cfg.get(
-            "neutral_field_protection_mode", "off"
+        "neutral_field_protection_enabled": bool(
+            cfg.get("neutral_field_protection_enabled", False)
+        ),
+        "neutral_field_protection_cutoff": cfg.get(
+            "neutral_field_protection_cutoff", 0.020
         ),
         "luminance_mode": cfg.get("luminance_mode"),
         "detail_cap_max_layers": cfg.get("detail_cap_max_layers"),
         "de_threshold": cfg.get("de_threshold"),
         "layer_height": cfg.get("layer_height"),
+        "d_wc_min": minimum_cap_thickness_mm(
+            cfg.get("min_cap_layers", 2),
+            cfg.get("layer_height", 0.08),
+        ),
+        "smooth_kernel": boundary_cap_smoothing_cells(
+            cfg.get("boundary_cap_smoothing_radius_mm", 1.0),
+            cfg.get("solver_fine_pitch_mm") or cfg.get("image_sample_pitch_mm") or 0.20,
+        ),
         "t_max": cfg.get("t_max"),
         "k_max": cfg.get("k_max"),
         "image_path": cfg.get("image_path"),
         "palette": list(cfg.get("palette", [])),
-        "printability_minimum_extrusion_width_mm": cfg.get(
-            "printability_minimum_extrusion_width_mm"
+        "printability_extrusion_width_mm": cfg.get(
+            "printability_extrusion_width_mm"
         ),
         "printability_minimum_line_length_mm": cfg.get(
             "printability_minimum_line_length_mm"
@@ -2761,9 +3375,24 @@ def _build_solve_start_diagnostics(
         if values:
             module_settings[module_name] = values
 
+    evaluation = deepcopy(
+        dict(settings_evaluation)
+        if settings_evaluation is not None
+        else _settings_evaluation_for_config(cfg, module_state=module_state)
+    )
     return {
         "active_modules": active_modules,
         "resolved_settings": resolved_settings,
+        "requested_settings": {
+            key: deepcopy(cfg.get(key))
+            for key in _SETTINGS_PROFILE_KEYS
+            if key in cfg
+        },
+        "effective_settings": {
+            key: deepcopy(item.get("effective"))
+            for key, item in evaluation.get("values", {}).items()
+        },
+        "settings_evaluation": evaluation,
         "module_settings": module_settings,
         "module_state": module_state,
     }
@@ -2949,7 +3578,7 @@ def _attach_staged_metrics_to_run_metadata(
     run_metadata["staged_metrics"] = dict(staged_metrics)
     stats = run_metadata.setdefault("stats", {})
     for key in (
-        "blueprint_printability_minimum_extrusion_width_mm",
+        "blueprint_printability_extrusion_width_mm",
         "blueprint_printability_minimum_line_length_mm",
         "blueprint_printability_runtime_s",
         "blueprint_printability_hard_fail_component_count",
@@ -3167,26 +3796,52 @@ def get_image_preview(filename: str, image_source_ref: str | None = None):
 @app.get("/api/session")
 def get_session() -> dict:
     """Return full session state (config + solve status)."""
+    cfg = session["config"]
     response = {
-        "config": _with_canonical_pitch_egress(session["config"]),
+        "config": _with_canonical_pitch_egress(cfg),
         "solve": _serialize_effective_solve_status(),
+        "settings_evaluation": _settings_evaluation_for_config(cfg),
     }
     source_ref = session["config"].get("image_source_ref")
     if source_ref:
-        card_id = _loaded_source_card_id(source_ref)
-        record = _loaded_source_record(card_id)
-        private_path = (
-            data_paths.RUN_CACHE_DIR / card_id / str(record["relative_path"])
-        ).resolve()
-        resolved = _resolve_run_source_image(private_path)
-        response["source_image"] = _loaded_source_response(
-            display_name=Path(str(record.get("display_name") or "")).name or "image",
-            source_ref=source_ref,
-            private_path=private_path,
-            resolved_source=resolved,
-            library_match=None,
-        )
+        guide_asset_id = _guide_source_asset_id(source_ref)
+        if guide_asset_id is not None:
+            response["source_image"] = {
+                **_GUIDE_ASSET_CATALOG.metadata(guide_asset_id),
+                "temporary": True,
+                "thumbnail_url": (
+                    f"/api/images/preview/{quote(session['config']['image_path'])}"
+                    f"?image_source_ref={quote(source_ref)}"
+                ),
+            }
+        else:
+            card_id = _loaded_source_card_id(source_ref)
+            record = _loaded_source_record(card_id)
+            private_path = (
+                data_paths.RUN_CACHE_DIR / card_id / str(record["relative_path"])
+            ).resolve()
+            resolved = _resolve_run_source_image(private_path)
+            response["source_image"] = _loaded_source_response(
+                display_name=Path(str(record.get("display_name") or "")).name or "image",
+                source_ref=source_ref,
+                private_path=private_path,
+                resolved_source=resolved,
+                library_match=None,
+            )
     return response
+
+
+@app.get("/api/settings/contract")
+def get_settings_contract() -> dict:
+    """Return the static user-settings and preprocessing-module contract."""
+    return {
+        **public_settings_contract(),
+        "modules": [
+            descriptor
+            for descriptor in list_all_modules()
+            if descriptor.get("slot") == "preprocessing"
+        ],
+    }
 
 
 def _solve_elapsed_seconds(solve: dict) -> float:
@@ -3335,12 +3990,18 @@ _RETIRED_CONFIG_FIELDS = frozenset({
     "cap_fixed_thickness_mm",
     # 2026-07-03: retired preferred line length and its soft-warning diagnostics.
     "printability_preferred_line_length_mm",
+    # 2026-08-11: Solve Pitch is derived from the active Extrusion Width and
+    # the stored integer multiplier. Physical pitch values are read-only.
+    "image_sample_pitch_mm",
+    "solver_fine_pitch_mm",
 })
 
 
 _STRICT_RETIRED_CONFIG_FIELDS = frozenset({
     "cap_fixed_thickness_mm",
     "printability_preferred_line_length_mm",
+    "image_sample_pitch_mm",
+    "solver_fine_pitch_mm",
 })
 
 
@@ -3399,34 +4060,32 @@ def _payload_model_fields(payload: ConfigPayload) -> dict:
 
 @app.post("/api/session/config")
 def set_config(payload: ConfigPayload) -> dict:
+    with _PRINT_SETUP_MUTATION_LOCK:
+        return _set_config_unlocked(payload)
+
+
+def _set_config_unlocked(payload: ConfigPayload) -> dict:
     """Set config fields (partial PATCH semantics).
 
-    Canonical-only session config:
-      - legacy aliases are rejected
-      - canonical pitch fields are validated directly
-      - partial updates merge into the current session first, then validate
-        the merged result
+    The writable Solve Pitch value is the integer Extrusion Width multiplier.
+    Physical pitch projections are always recomputed from the active print
+    setup after the partial update is merged.
     """
     old = session["config"]
     incoming = _payload_model_fields(payload)
+    try:
+        validate_static_settings_patch(incoming)
+    except StaticSettingsError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_static_settings", "issues": exc.issues},
+        ) from exc
     if "luminance_base_shading_limit_fraction" in incoming:
         incoming["luminance_handler_optical_authority_fraction"] = incoming.pop(
             "luminance_base_shading_limit_fraction"
         )
 
-    try:
-        norm_out = normalize_resolution_schema({**old, **incoming})
-    except (ResolutionSchemaConflictError, ResolutionSchemaLegacyFieldError) as exc:
-        raise _translate_resolution_schema_error(exc) from exc
-
-    # Merge: start from session, overlay normalized resolution fields, then
-    # overlay any remaining non-resolution incoming fields (already in norm_out
-    # for resolution fields; added below for non-resolution).
-    merged = {**old, **norm_out}
-    # Also carry any non-resolution fields from incoming that normalize didn't touch.
-    for k, v in incoming.items():
-        if k not in norm_out:
-            merged[k] = v
+    merged = {**old, **incoming}
     merged = _apply_luminance_mode_preset(
         merged,
         reset_standard=("luminance_mode" in incoming),
@@ -3441,11 +4100,31 @@ def set_config(payload: ConfigPayload) -> dict:
         if not merged.get("image_path"):
             raise HTTPException(400, "image_path is required with image_source_ref")
         _resolve_config_image_source(merged)
+    try:
+        resolved_solve_grid = _resolved_solve_grid_for_config(merged)
+    except SolveGridResolutionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_solve_grid",
+                "message": str(exc),
+            },
+        ) from exc
+    print_setup_repair = deepcopy(merged.pop("print_setup_repair", None))
     changed = [k for k in merged if old.get(k) != merged[k]]
     session["config"] = merged
     if changed:
         logger.info("Config updated: %s", ", ".join(changed))
-    return {"ok": True, "config": _with_canonical_pitch_egress(session["config"])}
+    return {
+        "ok": True,
+        "config": _with_canonical_pitch_egress(session["config"]),
+        "resolved_solve_grid": resolved_solve_grid,
+        "print_setup_repair": print_setup_repair,
+        "settings_evaluation": _settings_evaluation_for_config(
+            session["config"],
+            resolved_solve_grid=resolved_solve_grid,
+        ),
+    }
 
 
 # ── Guides / Onboarding ──────────────────────────────────────────────────
@@ -3457,97 +4136,211 @@ class GuideStatePutPayload(BaseModel):
     state: Dict[str, Any]
 
 
-class BasicsGuidePreparePayload(BaseModel):
+class GuideLeasePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    restore_tutorial_printer: bool = False
-    include_tutorial_printer: bool = True
-    include_tutorial_image: bool = True
+    page_id: str = Field(min_length=1, max_length=128)
 
 
-def _files_have_same_sha256(left: Path, right: Path) -> bool:
-    if not left.is_file() or not right.is_file():
-        return False
-    if left.stat().st_size != right.stat().st_size:
-        return False
-    def digest(path: Path) -> str:
-        checksum = hashlib.sha256()
-        with path.open("rb") as handle:
-            while block := handle.read(1024 * 1024):
-                checksum.update(block)
-        return checksum.hexdigest()
-
-    return digest(left) == digest(right)
+class GuideLeaseReleasePayload(GuideLeasePayload):
+    lease_id: str = Field(min_length=1, max_length=128)
 
 
-def _materialize_basics_tutorial_image() -> ResolvedSource:
-    if not _BASICS_TUTORIAL_IMAGE_SOURCE.is_file():
-        raise GuideStateError(
-            f"Bundled tutorial image is missing: {_BASICS_TUTORIAL_IMAGE_SOURCE}"
-        )
+_CLIENT_GUIDE_SNAPSHOT_KEYS = frozenset({
+    "settings",
+    "enabled_filaments",
+    "palette_candidates",
+    "palette_controls",
+    "solve_mode",
+    "export_policy",
+})
 
-    _IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-    destination = _IMAGES_DIR / _BASICS_TUTORIAL_IMAGE_NAME
-    if destination.exists() and not _files_have_same_sha256(
-        destination,
-        _BASICS_TUTORIAL_IMAGE_SOURCE,
-    ):
-        stem = destination.stem
-        suffix = destination.suffix
-        counter = 2
-        while True:
-            candidate = _IMAGES_DIR / f"{stem} {counter}{suffix}"
-            if not candidate.exists() or _files_have_same_sha256(
-                candidate,
-                _BASICS_TUTORIAL_IMAGE_SOURCE,
+
+class GuideRuntimeBeginPayload(GuideLeaseReleasePayload):
+    guide_id: str = Field(min_length=1, max_length=128)
+    route_id: str = Field(min_length=1, max_length=128)
+    client_snapshot: Dict[str, Any]
+
+    @field_validator("client_snapshot")
+    @classmethod
+    def _validate_client_snapshot(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise ValueError("client_snapshot must be an object")
+        unknown = set(value) - _CLIENT_GUIDE_SNAPSHOT_KEYS
+        if unknown:
+            raise ValueError(f"unsupported client snapshot fields: {', '.join(sorted(unknown))}")
+        snapshot = deepcopy(dict(value))
+
+        def require_mapping(field: str) -> dict[str, Any] | None:
+            current = snapshot.get(field)
+            if current is None:
+                return None
+            if not isinstance(current, Mapping):
+                raise ValueError(f"client_snapshot.{field} must be an object")
+            return dict(current)
+
+        def require_string_list(container: Mapping[str, Any], field: str, label: str) -> None:
+            current = container.get(field)
+            if not isinstance(current, list) or any(
+                not isinstance(item, str) or not item.strip() for item in current
             ):
-                destination = candidate
-                break
-            counter += 1
+                raise ValueError(f"{label}.{field} must be a list of non-empty strings")
 
-    if not destination.exists():
-        temporary = destination.with_name(
-            f".{destination.name}.{uuid.uuid4().hex}.tmp"
+        require_mapping("settings")
+        enabled = require_mapping("enabled_filaments")
+        if enabled is not None:
+            if set(enabled) - {"runtime_library_id", "enabled_ids"}:
+                raise ValueError("client_snapshot.enabled_filaments has unsupported fields")
+            library_id = enabled.get("runtime_library_id")
+            if library_id is not None and not isinstance(library_id, str):
+                raise ValueError("enabled_filaments.runtime_library_id must be a string or null")
+            require_string_list(enabled, "enabled_ids", "enabled_filaments")
+        candidates = require_mapping("palette_candidates")
+        if candidates is not None:
+            if set(candidates) - {"selected_ids", "initialized"}:
+                raise ValueError("client_snapshot.palette_candidates has unsupported fields")
+            require_string_list(candidates, "selected_ids", "palette_candidates")
+            if not isinstance(candidates.get("initialized"), bool):
+                raise ValueError("palette_candidates.initialized must be a boolean")
+        controls = require_mapping("palette_controls")
+        if controls is not None and set(controls) - {
+            "target_filament_count", "target_suggest_count", "suggestion_mode"
+        }:
+            raise ValueError("client_snapshot.palette_controls has unsupported fields")
+        solve_mode = snapshot.get("solve_mode")
+        if solve_mode is not None and solve_mode not in {"single", "batch"}:
+            raise ValueError("client_snapshot.solve_mode must be single or batch")
+        export_policy = require_mapping("export_policy")
+        if export_policy is not None and set(export_policy) - {
+            "output_format", "geometry_source", "field_scale"
+        }:
+            raise ValueError("client_snapshot.export_policy has unsupported fields")
+        serialized = json.dumps(value)
+        if len(serialized.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("client_snapshot is too large")
+        return snapshot
+
+
+class GuideRuntimeSessionPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    page_id: str = Field(min_length=1, max_length=128)
+
+
+class GuideRuntimeResetPayload(GuideRuntimeSessionPayload):
+    begin_recovery: bool = False
+
+
+class GuideRuntimeJobPayload(GuideRuntimeSessionPayload):
+    kind: str = Field(min_length=1, max_length=64)
+    job_id: str = Field(min_length=1, max_length=128)
+
+
+class GuideOwnedResourcePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_id: str = Field(min_length=1, max_length=128)
+    kind: str = Field(pattern=r"^(palette|settings-profile|saved-run)$")
+    id: Optional[str] = Field(default=None, max_length=256)
+    name: str = Field(min_length=1, max_length=256)
+    fingerprint: Any
+    status: str = Field(pattern=r"^(pending_create|present|pending_delete|absent)$")
+
+
+class GuideRuntimeResourcePayload(GuideRuntimeSessionPayload):
+    resource: GuideOwnedResourcePayload
+
+
+def _capture_guide_server_snapshot() -> dict[str, Any]:
+    profile_state = _load_settings_profile_state()
+    return {
+        "modules": load_module_state(_MODULES_PATH),
+        "user_default_profile_id": profile_state.get("user_default_profile_id") or _SYSTEM_SETTINGS_PROFILE_ID,
+        "settings_config": {
+            key: deepcopy(session["config"].get(key, _DEFAULT_CONFIG.get(key)))
+            for key in _SETTINGS_PROFILE_KEYS
+        },
+    }
+
+
+def _reset_guide_backend_workspace() -> dict[str, Any]:
+    """Clear transient project work without touching reusable image/LUT caches."""
+    from cache_admin import safe_clear_dir
+
+    _assert_no_active_job(action="start a guide")
+    removed = sum(
+        safe_clear_dir(path, root=data_paths.CACHE_DIR)
+        for path in (
+            data_paths.RUN_CACHE_DIR,
+            data_paths.AUTO_RUNS_DIR,
+            data_paths.CACHE_DIR / "palette-batches",
         )
-        try:
-            shutil.copyfile(_BASICS_TUTORIAL_IMAGE_SOURCE, temporary)
-            os.replace(temporary, destination)
-        finally:
-            temporary.unlink(missing_ok=True)
-
-    return _SOURCE_IMAGES.prepare(destination)
-
-
-def _tutorial_printer_status(
-    printers_data: Mapping[str, Any],
-) -> Literal["ready", "missing", "modified"]:
-    profile = next(
-        (
-            item
-            for item in printers_data.get("printers", [])
-            if item.get("id") == _TUTORIAL_PRINTER_PROFILE["id"]
-        ),
-        None,
     )
-    if profile is None:
-        return "missing"
-    return "ready" if profile == _TUTORIAL_PRINTER_PROFILE else "modified"
+    session["solve_cache"].clear()
+    session["config"]["image_path"] = None
+    session["config"]["image_source_ref"] = None
+    session["config"]["palette"] = []
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    session["guide"]["printer_setup_overlay"] = None
+    for key in ("solve", "suggest", "export"):
+        session[key].update({
+            "status": "idle",
+            "progress": {},
+            "elapsed_s": 0.0,
+            "result": None,
+            "cancel_requested": False,
+            "job_id": None,
+        })
+    session["palette_batch"].update({
+        "status": "idle",
+        "job_id": None,
+        "phase": None,
+        "progress": {},
+        "elapsed_s": 0.0,
+        "item_count": 0,
+        "current_position": None,
+        "items": [],
+        "cancel_requested": False,
+    })
+    _clear_palette_backend_cache()
+    return {"removed": removed, "config": _with_canonical_pitch_egress(session["config"])}
 
 
-def _restore_tutorial_printer(printers_data: Mapping[str, Any]) -> dict[str, Any]:
-    restored = deepcopy(dict(printers_data))
-    profiles = [
-        deepcopy(profile)
-        for profile in restored.get("printers", [])
-        if profile.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
-    ]
-    profiles.append(deepcopy(_TUTORIAL_PRINTER_PROFILE))
-    restored["printers"] = profiles
-    restored[_BUILT_IN_PRINTER_PROFILES_REVISION_KEY] = (
-        _BUILT_IN_PRINTER_PROFILES_REVISION
-    )
-    _save_printers(restored)
-    return restored
+def _restore_guide_server_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    user_default_profile_id = str(snapshot.get("user_default_profile_id") or "").strip()
+    if not user_default_profile_id:
+        raise GuideRuntimeConflict("the recorded startup Settings Profile is unavailable")
+    profile_ids = {profile.id for profile in _load_all_settings_profiles()}
+    if user_default_profile_id not in profile_ids:
+        raise GuideRuntimeConflict("the recorded startup Settings Profile no longer exists")
+    profile_state = _load_settings_profile_state()
+    profile_state["user_default_profile_id"] = user_default_profile_id
+    _save_settings_profile_state(profile_state)
+    modules = snapshot.get("modules")
+    if isinstance(modules, Mapping):
+        save_module_state(_MODULES_PATH, dict(modules))
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    session["guide"]["printer_setup_overlay"] = None
+    active = _resolve_active_printer(_load_printers())
+    restored_config = dict(session["config"])
+    settings_config = snapshot.get("settings_config")
+    if isinstance(settings_config, Mapping):
+        for key in _SETTINGS_PROFILE_KEYS:
+            if key in settings_config:
+                restored_config[key] = deepcopy(settings_config[key])
+    restored_config["image_path"] = None
+    restored_config["image_source_ref"] = None
+    restored_config["palette"] = []
+    session["config"] = _with_active_printer_printability(restored_config, active=active)
+    return {
+        "active": active,
+        "modules": load_module_state(_MODULES_PATH),
+        "config": _with_canonical_pitch_egress(session["config"]),
+        "user_default_profile_id": user_default_profile_id,
+    }
 
 
 @app.get("/api/guides/state")
@@ -3580,93 +4373,1053 @@ def put_guide_state(payload: GuideStatePutPayload) -> dict:
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/guides/basics/prepare")
-def prepare_basics_guide(payload: BasicsGuidePreparePayload) -> dict:
-    """Materialize tutorial-owned inputs without overwriting user-owned data."""
-
-    tutorial_printer = None
-    if payload.include_tutorial_printer:
-        printers_data = _load_printers()
-        printer_status = _tutorial_printer_status(printers_data)
-        if payload.restore_tutorial_printer and printer_status != "ready":
-            printers_data = _restore_tutorial_printer(printers_data)
-            printer_status = "ready"
-        tutorial_printer = {
-            "status": printer_status,
-            "profile": deepcopy(_TUTORIAL_PRINTER_PROFILE),
+@app.get("/api/guides/runtime")
+def get_guide_runtime(page_id: str | None = None, include_snapshot: bool = False) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.status(
+            page_id=page_id,
+            include_snapshot=include_snapshot,
+        )
+    except GuideRuntimeCorrupt as exc:
+        return {
+            "schema_version": 1,
+            "workspace_epoch": 0,
+            "lease": None,
+            "session": None,
+            "corrupt": True,
+            "error": str(exc),
         }
 
-    tutorial_image_payload = None
-    if payload.include_tutorial_image:
-        try:
-            tutorial_image = _materialize_basics_tutorial_image()
-        except (GuideStateError, OSError, SourceImageError) as exc:
-            raise HTTPException(500, str(exc)) from exc
-        tutorial_image_payload = {
-            "filename": tutorial_image.display_name,
-            "width": tutorial_image.width,
-            "height": tutorial_image.height,
-            "size_kb": round(
-                tutorial_image.original_path.stat().st_size / 1024,
-                1,
-            ),
-            "source_format": tutorial_image.source_format,
-            "normalized": tutorial_image.normalized,
-        }
 
-    return {
-        "tutorial_image": tutorial_image_payload,
-        "tutorial_printer": tutorial_printer,
+@app.post("/api/guides/runtime/acquire")
+def acquire_guide_runtime(payload: GuideLeasePayload) -> dict:
+    _assert_no_active_job(action="start a guide")
+    try:
+        return _GUIDE_RUNTIME_STORE.acquire(payload.page_id)
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except GuideRuntimeCorrupt as exc:
+        raise HTTPException(423, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/release")
+def release_guide_runtime(payload: GuideLeaseReleasePayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.release(payload.lease_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/depart")
+def depart_guide_runtime_page(payload: GuideLeasePayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.depart_page(payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/begin")
+def begin_guide_runtime(payload: GuideRuntimeBeginPayload) -> dict:
+    _assert_no_active_job(action="start a guide")
+    snapshot = {
+        "server": _capture_guide_server_snapshot(),
+        "client": deepcopy(payload.client_snapshot),
     }
+    try:
+        record = _GUIDE_RUNTIME_STORE.begin(
+            lease_id=payload.lease_id,
+            page_id=payload.page_id,
+            guide_id=payload.guide_id,
+            route_id=payload.route_id,
+            snapshot=snapshot,
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "session_id": record["session_id"],
+        "guide_id": record["guide_id"],
+        "route_id": record["route_id"],
+        "phase": record["phase"],
+        "images_folder": str(_IMAGES_DIR),
+        "workspace_epoch": _GUIDE_RUNTIME_STORE.status(page_id=payload.page_id)["workspace_epoch"],
+    }
+
+
+@app.post("/api/guides/runtime/heartbeat")
+def heartbeat_guide_runtime(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        return _GUIDE_RUNTIME_STORE.heartbeat(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/guides/runtime/claim-recovery")
+def claim_guide_runtime_recovery(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.claim_recovery(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"session_id": record["session_id"], "phase": record["phase"]}
+
+
+@app.post("/api/guides/runtime/reset")
+def reset_guide_runtime(payload: GuideRuntimeResetPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.read()
+        if record is None or record["session_id"] != payload.session_id:
+            raise GuideRuntimeConflict("guide session is no longer active")
+        if record["owner_page_id"] != payload.page_id:
+            raise GuideRuntimeConflict("another Prisma window owns the guide session")
+        if payload.begin_recovery or record.get("phase") == "restoring":
+            _GUIDE_RUNTIME_STORE.mark_restoring(payload.session_id, payload.page_id)
+            _GUIDE_RUNTIME_STORE.wait_for_mutations()
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return _reset_guide_backend_workspace()
+
+
+@app.post("/api/guides/runtime/jobs")
+def register_guide_runtime_job(payload: GuideRuntimeJobPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.register_job(
+            payload.session_id,
+            payload.page_id,
+            payload.kind,
+            payload.job_id,
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"owned_jobs": record["owned_jobs"]}
+
+
+@app.post("/api/guides/runtime/resources")
+def transition_guide_runtime_resource(payload: GuideRuntimeResourcePayload) -> dict:
+    try:
+        resource = _GUIDE_RUNTIME_STORE.transition_resource(
+            payload.session_id,
+            payload.page_id,
+            payload.resource.model_dump(),
+        )
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {"resource": resource}
+
+
+def _guide_resource_candidates(kind: str) -> list[dict[str, Any]]:
+    if kind == "palette":
+        return [
+            {
+                "id": str(item.get("id") or ""),
+                "name": str(item.get("name") or ""),
+                "fingerprint": list(item.get("filament_ids") or []),
+            }
+            for item in _load_palettes().get("palettes", [])
+            if isinstance(item, Mapping)
+        ]
+    if kind == "settings-profile":
+        return [
+            {
+                "id": profile.id,
+                "name": profile.name,
+                "fingerprint": {
+                    "settings": _with_canonical_pitch_egress(deepcopy(profile.settings)),
+                    "modules": dict(profile.modules),
+                },
+            }
+            for profile in _load_all_settings_profiles()
+            if profile.kind == "named"
+        ]
+    if kind == "saved-run":
+        return [
+            {
+                "id": str(item.get("save_id") or ""),
+                "name": str(item.get("label") or ""),
+                "fingerprint": {
+                    "source_image_name": str(item.get("source_image_name") or ""),
+                    "palette": list(item.get("palette") or []),
+                },
+            }
+            for item in run_store.list_saves()
+            if isinstance(item, Mapping)
+        ]
+    raise GuideRuntimeConflict(f"unknown guide resource kind: {kind}")
+
+
+@app.post("/api/guides/runtime/resources/reconcile")
+def reconcile_guide_runtime_resources(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.read()
+        if record is None:
+            raise GuideRuntimeConflict("guide session is no longer active")
+        if record.get("session_id") != payload.session_id or record.get("owner_page_id") != payload.page_id:
+            raise GuideRuntimeConflict("another Prisma window owns the guide session")
+        reconciled: dict[str, dict[str, Any]] = {}
+        candidates_by_kind: dict[str, list[dict[str, Any]]] = {}
+        for operation_id, raw in record.get("owned_resources", {}).items():
+            resource = deepcopy(raw)
+            kind = resource["kind"]
+            if kind not in candidates_by_kind:
+                candidates_by_kind[kind] = _guide_resource_candidates(kind)
+            candidates = candidates_by_kind[kind]
+            resource_id = resource.get("id")
+            by_id = [item for item in candidates if resource_id and item["id"] == resource_id]
+            if resource.get("status") == "pending_create" and not by_id:
+                by_identity = [
+                    item for item in candidates
+                    if item["name"].casefold() == resource["name"].casefold()
+                    and item["fingerprint"] == resource["fingerprint"]
+                ]
+                if len(by_identity) > 1:
+                    raise GuideRuntimeConflict(
+                        f'Could not uniquely reconcile Guide-created {kind} "{resource["name"]}"'
+                    )
+                by_id = by_identity
+            if by_id:
+                resource["id"] = by_id[0]["id"]
+                resource["status"] = "present"
+            else:
+                resource["status"] = "absent"
+            reconciled[operation_id] = resource
+        saved = _GUIDE_RUNTIME_STORE.replace_reconciled_resources(
+            payload.session_id,
+            payload.page_id,
+            reconciled,
+        )
+    except (GuideRuntimeError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(409, f"Guide resources could not be reconciled: {exc}") from exc
+    return {
+        "resources": list(saved.values()),
+        "present": [resource for resource in saved.values() if resource["status"] == "present"],
+    }
+
+
+def _register_request_guide_job(
+    request: Request | None,
+    *,
+    kind: str,
+    job_id: str,
+) -> None:
+    if request is None:
+        return
+    session_id = request.headers.get("x-prisma-guide-session")
+    page_id = request.headers.get("x-prisma-page-id")
+    if not session_id or not page_id:
+        return
+    try:
+        _GUIDE_RUNTIME_STORE.register_job(session_id, page_id, kind, job_id)
+    except GuideRuntimeError as exc:
+        # The background job is already running at this point. Turning a
+        # successful start into an HTTP error would invite an idempotent retry
+        # to start duplicate work. Cleanup also polls every supported job kind,
+        # so keep returning the real job ID and retain an actionable log entry.
+        logger.warning(
+            "Guide job %s/%s started but could not be added to the durable ledger: %s",
+            kind,
+            job_id,
+            exc,
+        )
+
+
+@app.post("/api/guides/runtime/restore-server")
+def restore_guide_runtime_server(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        record = _GUIDE_RUNTIME_STORE.mark_restoring(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    restored = _restore_guide_server_snapshot(record["snapshot"]["server"])
+    _GUIDE_RUNTIME_STORE.mark_restored(payload.session_id, payload.page_id)
+    return restored
+
+
+@app.post("/api/guides/runtime/finalize")
+def finalize_guide_runtime(payload: GuideRuntimeSessionPayload) -> dict:
+    try:
+        epoch = _GUIDE_RUNTIME_STORE.finalize(payload.session_id, payload.page_id)
+    except GuideRuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    _clear_guide_idempotency(payload.session_id)
+    return {"finalized": True, "workspace_epoch": epoch}
+
+
+@app.post("/api/guides/runtime/abandon")
+def abandon_guide_runtime(payload: GuideLeasePayload) -> dict:
+    try:
+        destination, epoch = _GUIDE_RUNTIME_STORE.abandon(payload.page_id)
+    except GuideRuntimeConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    session["guide"]["mounted_asset_ids"].clear()
+    session["guide"]["ghost_printer_mounted"] = False
+    session["guide"]["printer_setup_overlay"] = None
+    _clear_guide_idempotency()
+    return {
+        "abandoned": True,
+        "preserved_as": destination.name if destination else None,
+        "workspace_epoch": epoch,
+    }
+
+
+@app.post("/api/guides/runtime/open-config-folder")
+def open_guide_runtime_config_folder() -> dict:
+    try:
+        open_folder_in_file_manager(data_paths.CONFIG_DIR)
+    except Exception as exc:
+        raise HTTPException(500, f"Could not open the configuration folder: {exc}") from exc
+    return {"opened": True}
+
+
+@app.post("/api/guides/runtime/mount-printer")
+def mount_guide_ghost_printer(payload: GuideRuntimeSessionPayload) -> dict:
+    record = _GUIDE_RUNTIME_STORE.read()
+    if record is None or record["session_id"] != payload.session_id:
+        raise HTTPException(409, "guide session is no longer active")
+    if record["owner_page_id"] != payload.page_id:
+        raise HTTPException(423, "another Prisma window owns the guide session")
+    persisted = _load_printers()
+    session["guide"].update({
+        "ghost_printer_mounted": True,
+        "printer_setup_overlay": {
+            "active_printer_id": persisted.get("active_printer_id"),
+            "printer_setup_state": {},
+        },
+    })
+    return {
+        "profile": deepcopy(_TUTORIAL_PRINTER_PROFILE),
+        "printers": _effective_printers_data(),
+        "active": _resolve_active_printer(_effective_printers_data()),
+    }
+
+
+@app.post("/api/guides/runtime/assets/{asset_id}/mount")
+def mount_guide_asset(asset_id: str, payload: GuideRuntimeSessionPayload) -> dict:
+    record = _GUIDE_RUNTIME_STORE.read()
+    if record is None or record["session_id"] != payload.session_id:
+        raise HTTPException(409, "guide session is no longer active")
+    if record["owner_page_id"] != payload.page_id:
+        raise HTTPException(423, "another Prisma window owns the guide session")
+    try:
+        metadata = _GUIDE_ASSET_CATALOG.metadata(asset_id)
+    except GuideAssetError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    session["guide"]["mounted_asset_ids"].add(asset_id)
+    return metadata
 
 
 # ── Printers ──────────────────────────────────────────────────────────────
 
+def _printer_revision_conflict(expected: Any, current: Mapping[str, Any]) -> HTTPException:
+    return HTTPException(
+        409,
+        {
+            "error": "printer_revision_conflict",
+            "message": "Printer configuration changed after this view was opened.",
+            "expected_revision": expected,
+            "current_revision": current.get("revision"),
+            "printers_data": deepcopy(dict(current)),
+        },
+    )
+
+
+def _require_expected_printer_revision(payload: Mapping[str, Any], current: Mapping[str, Any]) -> int:
+    expected = payload.get("expected_revision", payload.get("revision"))
+    if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
+        raise HTTPException(422, "expected_revision must be a non-negative integer")
+    if expected != current.get("revision"):
+        raise _printer_revision_conflict(expected, current)
+    return expected
+
+
+def _layer_height_selection_conflict(active: Mapping[str, Any]) -> dict[str, Any] | None:
+    nozzle = active.get("nozzle") or {}
+    if not nozzle:
+        return None
+    try:
+        requested_um = mm_to_um(session["config"].get("layer_height"), field="layer_height")
+        minimum_um = require_um(nozzle.get("min_layer_height_um"), field="min_layer_height_um")
+        maximum_um = require_um(nozzle.get("max_layer_height_um"), field="max_layer_height_um")
+    except PrintSetupValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    nearest_um = nearest_supported_layer_height_um(requested_um, minimum_um, maximum_um)
+    if nearest_um == requested_um:
+        return None
+    return {
+        "error": "layer_height_incompatible_with_nozzle",
+        "message": "The selected nozzle does not support the current Layer Height.",
+        "requested_layer_height_mm": um_to_mm(requested_um),
+        "nearest_layer_height_mm": um_to_mm(nearest_um),
+        "minimum_layer_height_mm": um_to_mm(minimum_um),
+        "maximum_layer_height_mm": um_to_mm(maximum_um),
+        "nozzle_diameter_mm": um_to_mm(nozzle["diameter_um"]),
+        "extrusion_width_mm": um_to_mm((active.get("extrusion_width") or {})["width_um"]),
+    }
+
+
+def _accept_or_reject_layer_height_transition(
+    active: Mapping[str, Any],
+    *,
+    accept_correction: bool,
+    expected_layer_height_mm: Any = None,
+) -> float | None:
+    conflict = _layer_height_selection_conflict(active)
+    if conflict is None:
+        return None
+    if not accept_correction:
+        raise HTTPException(409, conflict)
+    try:
+        expected_um = mm_to_um(expected_layer_height_mm, field="expected_layer_height_mm")
+        current_um = mm_to_um(session["config"].get("layer_height"), field="layer_height")
+    except PrintSetupValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if expected_um != current_um:
+        raise HTTPException(
+            409,
+            {
+                "error": "layer_height_state_conflict",
+                "message": "Layer Height changed before the nozzle correction was accepted.",
+                "expected_layer_height_mm": um_to_mm(expected_um),
+                "current_layer_height_mm": um_to_mm(current_um),
+            },
+        )
+    return float(conflict["nearest_layer_height_mm"])
+
+
+def _active_printer_response(
+    active: Mapping[str, Any],
+    *,
+    printers_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    session["config"] = _with_active_printer_printability(session["config"], active=active)
+    response = {
+        "ok": True,
+        **deepcopy(dict(active)),
+        "resolved_print_setup": deepcopy(session["config"].get("resolved_print_setup")),
+        "config": {
+            "layer_height": session["config"].get("layer_height"),
+            "solve_pitch_extrusion_width_multiplier": session["config"].get(
+                "solve_pitch_extrusion_width_multiplier"
+            ),
+            "image_sample_pitch_mm": session["config"].get("image_sample_pitch_mm"),
+            "solver_fine_pitch_mm": session["config"].get("solver_fine_pitch_mm"),
+        },
+        "print_setup_repair": deepcopy(session["config"].pop("print_setup_repair", None)),
+        "settings_evaluation": _settings_evaluation_for_config(session["config"], active=active),
+    }
+    if printers_data is not None:
+        response["printers_data"] = deepcopy(dict(printers_data))
+    return response
+
+
+def _requested_printer_and_nozzle(
+    data: dict[str, Any],
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    requested_printer_id = str(payload.get("active_printer_id") or data.get("active_printer_id") or "")
+    printer = next(
+        (item for item in data.get("printers", []) if item.get("id") == requested_printer_id),
+        None,
+    )
+    if printer is None:
+        raise HTTPException(404, "Printer Profile not found")
+    data["active_printer_id"] = requested_printer_id
+    setup = data["printer_setup_state"][requested_printer_id]
+    requested_nozzle_id = str(payload.get("active_nozzle_id") or setup.get("active_nozzle_id") or "")
+    nozzle = next(
+        (item for item in printer.get("nozzle_profiles", []) if item.get("id") == requested_nozzle_id),
+        None,
+    )
+    if nozzle is None:
+        raise HTTPException(404, "Nozzle Profile not found")
+    setup["active_nozzle_id"] = requested_nozzle_id
+    return printer, nozzle, setup
+
+
+def _apply_active_setup_request(data: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    _, nozzle, setup = _requested_printer_and_nozzle(data, payload)
+    if "current_width_um" in payload:
+        try:
+            requested_width_um = require_um(payload.get("current_width_um"), field="current_width_um")
+        except PrintSetupValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if not nozzle["diameter_um"] <= requested_width_um <= nozzle["max_extrusion_width_um"]:
+            raise HTTPException(
+                422,
+                (
+                    "Extrusion Width must be from "
+                    f"{um_to_mm(nozzle['diameter_um']):g} mm through "
+                    f"{um_to_mm(nozzle['max_extrusion_width_um']):g} mm for this nozzle."
+                ),
+            )
+        setup["nozzle_width_state"][nozzle["id"]]["current_width_um"] = requested_width_um
+    return _normalize_printers_data(data)
+
+
+def _store_guide_printer_setup_overlay(data: Mapping[str, Any]) -> None:
+    overlay = _guide_printer_overlay()
+    overlay["printer_setup_overlay"] = {
+        "active_printer_id": data.get("active_printer_id"),
+        "printer_setup_state": deepcopy(data.get("printer_setup_state") or {}),
+    }
+
+
+def _bounded_review_record(
+    store: OrderedDict[str, dict[str, Any]],
+    key: str,
+    value: dict[str, Any],
+    *,
+    limit: int,
+) -> None:
+    store[key] = value
+    store.move_to_end(key)
+    while len(store) > limit:
+        store.popitem(last=False)
+
+
+def _expire_print_setup_reviews() -> None:
+    cutoff = time.monotonic() - _PRINT_SETUP_REVIEW_TTL_SECONDS
+    expired = [
+        token
+        for token, record in _PRINT_SETUP_PENDING_REVIEWS.items()
+        if float(record.get("created_at", 0.0)) < cutoff
+    ]
+    for token in expired:
+        _PRINT_SETUP_PENDING_REVIEWS.pop(token, None)
+
+
+def _accepted_print_setup_replay(
+    payload: Mapping[str, Any],
+    current_data: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    mutation_id = str(payload.get("mutation_id") or "").strip()
+    token = str(payload.get("acceptance_token") or "").strip()
+    record = _PRINT_SETUP_ACCEPTED_MUTATIONS.get(mutation_id)
+    if record is None or not token or token != record["acceptance_token"]:
+        return None
+    if record["context_digest"] != _print_setup_context_digest(current_data):
+        return _stale_print_setup_review_response(current_data, "committed_context_changed")
+    _PRINT_SETUP_ACCEPTED_MUTATIONS.move_to_end(mutation_id)
+    return deepcopy(record["response"])
+
+
+def _print_setup_context_digest(data: Mapping[str, Any]) -> str:
+    cfg = session["config"]
+    bound = {
+        "printer_revision": data.get("revision"),
+        "active": _resolve_active_printer(data),
+        "layer_height": cfg.get("layer_height"),
+        "solve_pitch_extrusion_width_multiplier": cfg.get(
+            "solve_pitch_extrusion_width_multiplier"
+        ),
+        "frame": cfg.get("frame"),
+        "border": cfg.get("border"),
+        "border_width_mm": cfg.get("border_width_mm"),
+        "border_height_mm": cfg.get("border_height_mm"),
+    }
+    encoded = json.dumps(bound, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _print_setup_payload_digest(payload: Mapping[str, Any]) -> str:
+    ignored = {
+        "acceptance_token",
+        "accept_review",
+        "accept_layer_height_correction",
+        "expected_layer_height_mm",
+    }
+    bound = {key: value for key, value in payload.items() if key not in ignored}
+    encoded = json.dumps(bound, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _print_setup_intent_kind(payload: Mapping[str, Any], *, adding_width: bool) -> str:
+    supplied = str(payload.get("intent_kind") or "").strip()
+    supported = {
+        "select_printer",
+        "select_nozzle",
+        "select_extrusion_width",
+        "add_and_select_extrusion_width",
+    }
+    if supplied:
+        if supplied not in supported:
+            raise HTTPException(422, "intent_kind is not supported")
+        intent_kind = supplied
+    elif adding_width:
+        intent_kind = "add_and_select_extrusion_width"
+    elif "current_width_um" in payload:
+        intent_kind = "select_extrusion_width"
+    elif "active_nozzle_id" in payload:
+        intent_kind = "select_nozzle"
+    else:
+        intent_kind = "select_printer"
+
+    endpoint_intents = (
+        {"add_and_select_extrusion_width"}
+        if adding_width
+        else {"select_printer", "select_nozzle", "select_extrusion_width"}
+    )
+    if intent_kind not in endpoint_intents:
+        raise HTTPException(422, "intent_kind is not valid for this operation")
+
+    required_fields = {
+        "select_printer": {"active_printer_id"},
+        "select_nozzle": {"active_nozzle_id"},
+        "select_extrusion_width": {"current_width_um"},
+        "add_and_select_extrusion_width": {"width_um"},
+    }[intent_kind]
+    missing = sorted(field for field in required_fields if field not in payload)
+    if missing:
+        raise HTTPException(422, f"{missing[0]} is required for {intent_kind}")
+
+    mutation_fields = {
+        "active_printer_id",
+        "active_nozzle_id",
+        "current_width_um",
+        "width_um",
+    }
+    allowed_fields = {
+        "select_printer": {"active_printer_id"},
+        "select_nozzle": {"active_printer_id", "active_nozzle_id"},
+        "select_extrusion_width": {
+            "active_printer_id",
+            "active_nozzle_id",
+            "current_width_um",
+        },
+        "add_and_select_extrusion_width": {
+            "active_printer_id",
+            "active_nozzle_id",
+            "width_um",
+        },
+    }[intent_kind]
+    unexpected = sorted((mutation_fields & payload.keys()) - allowed_fields)
+    if unexpected:
+        raise HTTPException(422, f"{unexpected[0]} is not valid for {intent_kind}")
+    return intent_kind
+
+
+def _print_setup_field_value(field: str, active: Mapping[str, Any]) -> dict[str, Any] | None:
+    if field == "printer":
+        value = active.get("printer") or {}
+        return {"id": value.get("id"), "name": value.get("name")}
+    if field == "nozzle":
+        value = active.get("nozzle") or {}
+        return {"id": value.get("id"), "diameter_um": value.get("diameter_um")}
+    if field == "extrusion_width":
+        value = active.get("extrusion_width") or {}
+        return {"width_um": value.get("width_um")}
+    return None
+
+
+def _print_setup_transition_review(
+    current_data: Mapping[str, Any],
+    proposed_data: Mapping[str, Any],
+    *,
+    intent_kind: str,
+) -> tuple[dict[str, Any], float | None]:
+    before = _resolve_active_printer(current_data)
+    after = _resolve_active_printer(proposed_data)
+    direct_field = {
+        "select_printer": "printer",
+        "select_nozzle": "nozzle",
+        "select_extrusion_width": "extrusion_width",
+        "add_and_select_extrusion_width": "extrusion_width",
+    }[intent_kind]
+    requested = []
+    dependent = []
+    for field in ("printer", "nozzle", "extrusion_width"):
+        old_value = _print_setup_field_value(field, before)
+        new_value = _print_setup_field_value(field, after)
+        if old_value == new_value:
+            continue
+        item = {"field": field, "before": old_value, "after": new_value}
+        if field == direct_field:
+            requested.append(item)
+        else:
+            dependent.append({**item, "reason": f"{intent_kind}_restores_saved_setup"})
+
+    before_cfg = _with_active_printer_printability(deepcopy(session["config"]), active=before)
+    after_cfg = _with_active_printer_printability(deepcopy(session["config"]), active=after)
+    layer_conflict = _layer_height_selection_conflict(after)
+    corrected_layer_height = None
+    if layer_conflict is not None:
+        corrected_layer_height = float(layer_conflict["nearest_layer_height_mm"])
+        dependent.append(
+            {
+                "field": "layer_height",
+                "before_mm": float(layer_conflict["requested_layer_height_mm"]),
+                "after_mm": corrected_layer_height,
+                "minimum_mm": float(layer_conflict["minimum_layer_height_mm"]),
+                "maximum_mm": float(layer_conflict["maximum_layer_height_mm"]),
+                "reason": "selected_nozzle_layer_height_range",
+            }
+        )
+        after_cfg["layer_height"] = corrected_layer_height
+
+    before_multiplier = before_cfg.get("solve_pitch_extrusion_width_multiplier")
+    after_multiplier = after_cfg.get("solve_pitch_extrusion_width_multiplier")
+    if before_multiplier != after_multiplier:
+        dependent.append(
+            {
+                "field": "solve_pitch_multiplier",
+                "before": before_multiplier,
+                "after": after_multiplier,
+                "reason": "selected_width_multiplier_limit",
+            }
+        )
+
+    derived = []
+    before_pitch = before_cfg.get("solver_fine_pitch_mm")
+    after_pitch = after_cfg.get("solver_fine_pitch_mm")
+    if before_pitch != after_pitch:
+        derived.append(
+            {
+                "field": "solve_pitch",
+                "before_mm": before_pitch,
+                "after_mm": after_pitch,
+            }
+        )
+    before_min_line = (before.get("printability") or {}).get("minimum_line_length_mm")
+    after_min_line = (after.get("printability") or {}).get("minimum_line_length_mm")
+    if before_min_line != after_min_line:
+        derived.append(
+            {
+                "field": "minimum_line_length",
+                "before_mm": before_min_line,
+                "after_mm": after_min_line,
+            }
+        )
+
+    before_capacity = int((before.get("printer") or {}).get("ams_units") or 0) * int(
+        (before.get("printer") or {}).get("slots_per_ams") or 0
+    )
+    after_capacity = int((after.get("printer") or {}).get("ams_units") or 0) * int(
+        (after.get("printer") or {}).get("slots_per_ams") or 0
+    )
+    if before_capacity != after_capacity:
+        derived.append(
+            {
+                "field": "filament_capacity",
+                "before_slots": before_capacity,
+                "after_slots": after_capacity,
+            }
+        )
+
+    attention = []
+    if before_pitch != after_pitch and isinstance(after_cfg.get("frame"), Mapping):
+        try:
+            grid = _resolved_solve_grid_for_config(after_cfg)
+        except (SolveGridResolutionError, TypeError, ValueError):
+            grid = None
+        if grid is not None and not grid["aligned"]["all"]:
+            affected = [axis for axis in ("width", "height") if not grid["aligned"][axis]]
+            attention.append(
+                {
+                    "code": "image_dimensions_not_solve_pitch_aligned",
+                    "affected": affected,
+                    "pitch_mm": grid["pitch_mm"],
+                    "requested": grid["requested"],
+                    "resolved": grid["resolved"],
+                    "resolution_kind": "solve_grid_preflight",
+                }
+            )
+
+    frame = after_cfg.get("frame")
+    printer = after.get("printer") or {}
+    area = printer.get("max_print_area") or {}
+    if direct_field == "printer" and isinstance(frame, Mapping):
+        exceeded = [
+            axis
+            for axis in ("width", "height")
+            if float(frame.get(f"{axis}_mm") or 0) > float(area.get("x" if axis == "width" else "y") or 0)
+        ]
+        if exceeded:
+            attention.append(
+                {
+                    "code": "image_dimensions_exceed_print_area",
+                    "affected": exceeded,
+                    "requested": {
+                        "width_mm": frame.get("width_mm"),
+                        "height_mm": frame.get("height_mm"),
+                    },
+                    "maximum": {"width_mm": area.get("x"), "height_mm": area.get("y")},
+                }
+            )
+
+    before_evaluation = _settings_evaluation_for_config(before_cfg, active=before)
+    after_evaluation = _settings_evaluation_for_config(after_cfg, active=after)
+    before_issues = {
+        json.dumps(issue, sort_keys=True, separators=(",", ":"), default=str)
+        for issue in before_evaluation.get("issues", [])
+    }
+    changed_issues = [
+        deepcopy(issue)
+        for issue in after_evaluation.get("issues", [])
+        if json.dumps(issue, sort_keys=True, separators=(",", ":"), default=str)
+        not in before_issues
+    ]
+    if changed_issues:
+        attention.append(
+            {
+                "code": "settings_context_requires_attention",
+                "issues": changed_issues,
+            }
+        )
+
+    review = {
+        "schema_version": _PRINT_SETUP_REVIEW_SCHEMA_VERSION,
+        "intent": {"kind": intent_kind},
+        "requested_changes": requested,
+        "dependent_changes": dependent,
+        "derived_consequences": derived,
+        "attention_items": attention,
+    }
+    return review, corrected_layer_height
+
+
+def _stale_print_setup_review_response(data: Mapping[str, Any], reason: str) -> dict[str, Any]:
+    return {
+        "status": "stale",
+        "reason": reason,
+        "authoritative": _active_printer_response(
+            _resolve_active_printer(data), printers_data=data
+        ),
+    }
+
+
+def _review_or_finish_printer_mutation(
+    current_data: dict[str, Any],
+    proposed_data: dict[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    persistent: bool,
+    adding_width: bool = False,
+) -> dict[str, Any]:
+    _expire_print_setup_reviews()
+    token = str(payload.get("acceptance_token") or "").strip()
+    mutation_id = str(payload.get("mutation_id") or "").strip()
+    if mutation_id and mutation_id in _PRINT_SETUP_ACCEPTED_MUTATIONS:
+        record = _PRINT_SETUP_ACCEPTED_MUTATIONS[mutation_id]
+        if token and token == record["acceptance_token"]:
+            _PRINT_SETUP_ACCEPTED_MUTATIONS.move_to_end(mutation_id)
+            return deepcopy(record["response"])
+        return _stale_print_setup_review_response(current_data, "mutation_id_reused")
+
+    intent_kind = _print_setup_intent_kind(payload, adding_width=adding_width)
+    review, corrected_layer_height = _print_setup_transition_review(
+        current_data, proposed_data, intent_kind=intent_kind
+    )
+    requires_review = bool(
+        review["dependent_changes"]
+        or review["derived_consequences"]
+        or review["attention_items"]
+    )
+    if token or requires_review:
+        context_digest = _print_setup_context_digest(current_data)
+        payload_digest = _print_setup_payload_digest(payload)
+        proposal_digest = hashlib.sha256(
+            json.dumps(review, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        ).hexdigest()
+        if token:
+            pending = _PRINT_SETUP_PENDING_REVIEWS.get(token)
+            if (
+                pending is None
+                or not mutation_id
+                or pending["mutation_id"] != mutation_id
+                or pending["context_digest"] != context_digest
+                or pending["payload_digest"] != payload_digest
+                or pending["proposal_digest"] != proposal_digest
+            ):
+                return _stale_print_setup_review_response(current_data, "review_context_changed")
+            _PRINT_SETUP_PENDING_REVIEWS.pop(token, None)
+        elif requires_review:
+            if not mutation_id:
+                raise HTTPException(422, "mutation_id is required for a reviewed change")
+            token = uuid.uuid4().hex
+            _bounded_review_record(
+                _PRINT_SETUP_PENDING_REVIEWS,
+                token,
+                {
+                    "created_at": time.monotonic(),
+                    "mutation_id": mutation_id,
+                    "context_digest": context_digest,
+                    "payload_digest": payload_digest,
+                    "proposal_digest": proposal_digest,
+                },
+                limit=_PRINT_SETUP_PENDING_REVIEW_LIMIT,
+            )
+            return {
+                "status": "review_required",
+                "acceptance_token": token,
+                "mutation_id": mutation_id,
+                "review": review,
+            }
+
+    response = _finish_printer_mutation(
+        proposed_data,
+        persistent=persistent,
+        corrected_layer_height=corrected_layer_height,
+    )
+    response["status"] = "applied"
+    if token and mutation_id:
+        _bounded_review_record(
+            _PRINT_SETUP_ACCEPTED_MUTATIONS,
+            mutation_id,
+            {
+                "acceptance_token": token,
+                "context_digest": _print_setup_context_digest(response["printers_data"]),
+                "response": deepcopy(response),
+            },
+            limit=_PRINT_SETUP_REPLAY_LIMIT,
+        )
+    return response
+
+
+def _finish_printer_mutation(
+    data: dict[str, Any],
+    *,
+    persistent: bool,
+    corrected_layer_height: float | None,
+) -> dict[str, Any]:
+    if persistent:
+        data["revision"] += 1
+        data = _write_printers_unlocked(data)
+    else:
+        data = _normalize_printers_data(data)
+        _store_guide_printer_setup_overlay(data)
+    if corrected_layer_height is not None:
+        session["config"]["layer_height"] = corrected_layer_height
+    active = _resolve_active_printer(data)
+    return _active_printer_response(active, printers_data=data)
+
 @app.get("/api/printers")
 def get_printers() -> dict:
     """Return all printer configs + active selection."""
-    return _load_printers()
+    return _effective_printers_data()
 
 
 @app.put("/api/printers")
 def save_printers(payload: dict) -> dict:
-    """Save the full printers object (printers list + active selection)."""
-    normalized = _normalize_printers_data(payload, retired_policy="reject")
-    normalized[
-        _BUILT_IN_PRINTER_PROFILES_REVISION_KEY
-    ] = _BUILT_IN_PRINTER_PROFILES_REVISION
-    _save_printers(normalized)
-    active = _resolve_active_printer(normalized)
-    session["config"] = _with_active_printer_printability(
-        session["config"],
-        active=active,
-    )
-    logger.info("Printers saved: %d printer(s)", len(normalized.get("printers", [])))
-    return {"ok": True, **normalized, "active": active}
+    """Save one complete Printer Configuration draft against its revision."""
+    with _PRINT_SETUP_MUTATION_LOCK:
+        current = _load_printers()
+        _require_expected_printer_revision(payload, current)
+        sanitized = deepcopy(payload)
+        accept_correction = bool(sanitized.pop("accept_layer_height_correction", False))
+        expected_layer_height_mm = sanitized.pop("expected_layer_height_mm", None)
+        sanitized.pop("expected_revision", None)
+        sanitized["printers"] = [
+            printer
+            for printer in sanitized.get("printers", [])
+            if printer.get("id") != _TUTORIAL_PRINTER_PROFILE["id"]
+        ]
+        sanitized.get("printer_setup_state", {}).pop(_TUTORIAL_PRINTER_PROFILE["id"], None)
+        if sanitized.get("active_printer_id") == _TUTORIAL_PRINTER_PROFILE["id"]:
+            sanitized["active_printer_id"] = current["active_printer_id"]
+        sanitized["revision"] = current["revision"] + 1
+        normalized = _normalize_printers_data(sanitized)
+        active = _resolve_active_printer(normalized)
+        corrected_layer_height = _accept_or_reject_layer_height_transition(
+            active,
+            accept_correction=accept_correction,
+            expected_layer_height_mm=expected_layer_height_mm,
+        )
+        normalized = _write_printers_unlocked(normalized)
+        if corrected_layer_height is not None:
+            session["config"]["layer_height"] = corrected_layer_height
+        logger.info("Printers saved: %d printer(s)", len(normalized.get("printers", [])))
+        return {
+            **normalized,
+            "active": _active_printer_response(active, printers_data=normalized),
+        }
 
 
 @app.get("/api/printers/active")
 def get_active_printer() -> dict:
     """Return the resolved active printer and nozzle profile."""
-    data = _load_printers()
-    return _resolve_active_printer(data)
+    data = _effective_printers_data()
+    active = _resolve_active_printer(data)
+    return _active_printer_response(active, printers_data=data)
 
 
 @app.put("/api/printers/active")
 def set_active_printer(payload: dict) -> dict:
-    """Set active_printer_id and/or active_nozzle_size."""
-    data = _load_printers()
-    if "active_printer_id" in payload:
-        data["active_printer_id"] = payload["active_printer_id"]
-    if "active_nozzle_size" in payload:
-        data["active_nozzle_size"] = payload["active_nozzle_size"]
-    _save_printers(data)
-    active = _resolve_active_printer(data)
-    session["config"] = _with_active_printer_printability(
-        session["config"],
-        active=active,
-    )
-    return {"ok": True, **active}
+    """Select a Printer, Nozzle Profile, and/or numeric Extrusion Width."""
+    with _PRINT_SETUP_MUTATION_LOCK:
+        overlay_active = bool(_guide_printer_overlay().get("ghost_printer_mounted"))
+        data = _effective_printers_data() if overlay_active else _load_printers()
+        replay = _accepted_print_setup_replay(payload, data)
+        if replay is not None:
+            return replay
+        _require_expected_printer_revision(payload, data)
+        normalized = _apply_active_setup_request(deepcopy(data), payload)
+        return _review_or_finish_printer_mutation(
+            data,
+            normalized,
+            payload,
+            persistent=not overlay_active,
+        )
+
+
+@app.post("/api/printers/width-shortcuts")
+def add_printer_width_shortcut(payload: dict) -> dict:
+    """Save a numeric width beneath one nozzle and make it current."""
+    with _PRINT_SETUP_MUTATION_LOCK:
+        overlay_active = bool(_guide_printer_overlay().get("ghost_printer_mounted"))
+        data = _effective_printers_data() if overlay_active else _load_printers()
+        replay = _accepted_print_setup_replay(payload, data)
+        if replay is not None:
+            return replay
+        _require_expected_printer_revision(payload, data)
+        working = deepcopy(data)
+        _, nozzle, setup = _requested_printer_and_nozzle(working, payload)
+        try:
+            width_um = require_um(payload.get("width_um"), field="width_um")
+        except PrintSetupValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if not nozzle["diameter_um"] <= width_um <= nozzle["max_extrusion_width_um"]:
+            raise HTTPException(
+                422,
+                (
+                    "Extrusion Width must be from "
+                    f"{um_to_mm(nozzle['diameter_um']):g} mm through "
+                    f"{um_to_mm(nozzle['max_extrusion_width_um']):g} mm for this nozzle."
+                ),
+            )
+        width_state = setup["nozzle_width_state"][nozzle["id"]]
+        if width_um not in width_state["saved_widths_um"]:
+            width_state["saved_widths_um"].append(width_um)
+            width_state["saved_widths_um"].sort()
+        width_state["current_width_um"] = width_um
+        normalized = _normalize_printers_data(working)
+        return _review_or_finish_printer_mutation(
+            data,
+            normalized,
+            payload,
+            persistent=not overlay_active,
+            adding_width=True,
+        )
+
+
+@app.delete("/api/printers/width-shortcuts")
+def remove_printer_width_shortcut(payload: dict) -> dict:
+    """Remove one saved-width shortcut without changing the current width."""
+    with _PRINT_SETUP_MUTATION_LOCK:
+        overlay_active = bool(_guide_printer_overlay().get("ghost_printer_mounted"))
+        data = _effective_printers_data() if overlay_active else _load_printers()
+        _require_expected_printer_revision(payload, data)
+        working = deepcopy(data)
+        _, nozzle, setup = _requested_printer_and_nozzle(working, payload)
+        try:
+            width_um = require_um(payload.get("width_um"), field="width_um")
+        except PrintSetupValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        width_state = setup["nozzle_width_state"][nozzle["id"]]
+        width_state["saved_widths_um"] = [
+            value for value in width_state["saved_widths_um"] if value != width_um
+        ]
+        normalized = _normalize_printers_data(working)
+        return _finish_printer_mutation(
+            normalized,
+            persistent=not overlay_active,
+            corrected_layer_height=None,
+        )
 
 
 # ── Modules ──────────────────────────────────────────────────────────────
@@ -3681,7 +5434,13 @@ def get_modules() -> dict:
     ]
     for m in modules:
         m["enabled"] = state.get(m["name"], m.get("default_enabled", False))
-    return {"modules": modules}
+    return {
+        "modules": modules,
+        "settings_evaluation": _settings_evaluation_for_config(
+            session["config"],
+            module_state=state,
+        ),
+    }
 
 
 @app.post("/api/modules/toggle")
@@ -3693,7 +5452,11 @@ def toggle_module_endpoint(payload: dict) -> dict:
         raise HTTPException(400, "module_id and enabled required")
     state = toggle_module(_MODULES_PATH, module_id, bool(enabled))
     logger.info("Module toggled: %s = %s", module_id, enabled)
-    return {"ok": True, "state": state}
+    return {
+        "ok": True,
+        "state": state,
+        "settings_evaluation": _settings_evaluation_for_config(session["config"], module_state=state),
+    }
 
 
 @app.put("/api/modules/state")
@@ -3705,60 +5468,21 @@ def set_module_state_endpoint(payload: dict) -> dict:
     save_module_state(_MODULES_PATH, state)
     normalized = load_module_state(_MODULES_PATH)
     logger.info("Module state replaced: %d active module(s)", sum(bool(v) for v in normalized.values()))
-    return {"ok": True, "state": normalized}
+    return {
+        "ok": True,
+        "state": normalized,
+        "settings_evaluation": _settings_evaluation_for_config(
+            session["config"],
+            module_state=normalized,
+        ),
+    }
 
 
 # ── Settings Profiles ──────────────────────────────────────────────────────
 
-# Settings persisted in a Settings Profile record.
-_SETTINGS_PROFILE_KEYS = (
-    # --- session-owned canonical settings ---
-    "base_filament",
-    "cap_filament",
-    "layer_height",
-    "d_wb",
-    "d_wc_min",
-    "t_max",
-    "k_max",
-    "de_threshold",
-    "smooth_kernel",
-    "use_corrections",
-    "appearance_model_provider",
-    "photo_stack_bundle_path",
-    "gamut_mode",
-    "gamut_white_rescale",
-    "model_domain_ingress_lut_path",
-    "chroma_weight",
-    "luminance_mode",
-    "luminance_base_shading_limit_fraction",
-    "luminance_detail_authoring_printability",
-    # --- canonical resolution (Phase 2+) ---
-    "image_sample_pitch_mm",
-    "solver_fine_pitch_mm",
-    "detail_cap_max_layers",
-    "detail_cap_smoothing_enabled",
-    "detail_cap_smoothing_exact_speckle_max_px",
-    "detail_cap_smoothing_cumulative_component_max_px",
-    "detail_cap_smoothing_cumulative_hole_max_px",
-    "color_region_target_mm",
-    "cell_mode",
-    # --- canonical staged backend params ---
-    "stage1_coarsening_factor",
-    "neutral_field_protection_mode",
-    "stage2_fine_override_enabled",
-    "stage2_boundary_mutation_enabled",
-    "stage2_boundary_mutation_min_gain",
-    "stage2_boundary_mutation_min_component_mm",
-    "stage2_boundary_mutation_current_de_percentile",
-    "stage2_boundary_mutation_max_passes",
-    # --- boundary/detail cap params ---
-    "cap_mode",
-    "boundary_cap_de_budget",
-    # Wing B / B7 print-aware resample kernel
-    "source_resample_kernel",
-    # F1 preprocessing operator param blocks keyed by operator id.
-    "preprocessing_params",
-)
+# Settings persisted in a Settings Profile record.  The ordered tuple is
+# derived from the authoritative user-settings contract.
+_SETTINGS_PROFILE_KEYS = profile_setting_keys()
 
 
 @dataclass
@@ -3794,18 +5518,21 @@ class SettingsProfilePayload(BaseModel):
 
     @field_validator("settings")
     @classmethod
-    def _normalize_neutral_field_protection_setting(
+    def _validate_current_settings_keys(
         cls,
         settings: Dict[str, Any],
     ) -> Dict[str, Any]:
-        normalized = dict(settings)
-        if "neutral_field_protection_mode" in normalized:
-            normalized["neutral_field_protection_mode"] = (
-                normalize_neutral_field_protection_mode(
-                    normalized["neutral_field_protection_mode"]
-                )
+        # Preserve the existing explicit resolution-field error and quietly
+        # retired phantom cleanup at the downstream normalization boundary.
+        pass_through = set(LEGACY_RESOLUTION_REPLACEMENTS) | set(_QUIET_DROPPED_CONFIG_EXTRAS)
+        unknown = sorted(
+            set(settings) - set(_SETTINGS_PROFILE_KEYS) - pass_through
+        )
+        if unknown:
+            raise ValueError(
+                "Unknown Settings Profile setting key(s): " + ", ".join(unknown)
             )
-        return normalized
+        return dict(settings)
 
 
 def _settings_profile_state_path() -> Path:
@@ -3851,7 +5578,7 @@ def _settings_profile_paths_for_id(profile_id: str) -> List[Path]:
     matches: List[Path] = []
     for path in _settings_profile_named_paths():
         try:
-            record = _load_settings_profile_record(path, kind_hint="named")
+            record = _load_settings_profile_record(path)
         except Exception as exc:
             logger.warning("Skipping invalid settings profile %s: %s", path.name, exc)
             continue
@@ -3985,6 +5712,12 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
         if key in incoming:
             logger.info("Dropping retired config key from settings profile: %s", key)
             incoming.pop(key, None)
+    for key in (
+        "use_corrections",
+        "stage2_boundary_mutation_current_de_percentile",
+        "stage2_boundary_mutation_min_component_mm",
+    ):
+        incoming.pop(key, None)
     retired_subject = "protect" + "_subject"
     retired_mask = "protect" + "_mask"
     for key in (
@@ -4010,12 +5743,14 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
         incoming["cap_mode"] = _normalize_cap_mode(incoming["cap_mode"])
     if "gamut_mode" in incoming:
         incoming["gamut_mode"] = ConfigPayload._normalize_gamut_mode(incoming["gamut_mode"])  # type: ignore[misc]
-    if "neutral_field_protection_mode" in incoming:
-        incoming["neutral_field_protection_mode"] = (
-            normalize_neutral_field_protection_mode(
-                incoming["neutral_field_protection_mode"]
-            )
-        )
+    if "neutral_field_protection_cutoff" in incoming:
+        try:
+            cutoff = float(incoming["neutral_field_protection_cutoff"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("neutral_field_protection_cutoff must be a number") from exc
+        if not math.isfinite(cutoff) or cutoff < 0 or cutoff > 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
+        incoming["neutral_field_protection_cutoff"] = cutoff
     if "base_filament" not in incoming and incoming.get("white_base"):
         incoming["base_filament"] = incoming["white_base"]
     if "cap_filament" not in incoming and "white_cap" in incoming:
@@ -4036,38 +5771,326 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
         incoming["preprocessing_params"] = _normalize_preprocessing_params(
             incoming["preprocessing_params"]
         )
+    validate_static_settings_patch(incoming)
     normalized = {key: deepcopy(_DEFAULT_CONFIG[key]) for key in _SETTINGS_PROFILE_KEYS}
     for key in _SETTINGS_PROFILE_KEYS:
         if key in incoming:
             normalized[key] = deepcopy(incoming[key])
-    return _force_mandatory_product_settings(normalized)
+    forced = _force_mandatory_product_settings(normalized)
+    return {key: deepcopy(forced[key]) for key in _SETTINGS_PROFILE_KEYS}
 
 
-def _load_settings_profile_record(path: Path, kind_hint: Optional[str] = None) -> SettingsProfileRecord:
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    profile_id = str(data.get("id") or _settings_profile_fallback_id(path))
-    kind = str(data.get("kind") or kind_hint or ("system" if profile_id == _SYSTEM_SETTINGS_PROFILE_ID else "named"))
-    raw_settings = normalize_resolution_schema(dict(data.get("settings") or {}))
+def _upgrade_settings_profile_v3_to_v4(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """Translate schema-3 settings into the schema-4 print-setup model."""
+    upgraded = deepcopy(dict(settings))
+    upgraded.pop("image_sample_pitch_mm", None)
+    upgraded.pop("solver_fine_pitch_mm", None)
+    upgraded.setdefault("solve_pitch_extrusion_width_multiplier", 1)
+    return upgraded
+
+
+def _upgrade_settings_profile_v1_to_v2(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """Translate Prisma's original profile schema into schema 2."""
+    upgraded = deepcopy(dict(settings))
+    for key in (
+        "use_corrections",
+        "stage2_boundary_mutation_current_de_percentile",
+        "stage2_boundary_mutation_min_component_mm",
+    ):
+        upgraded.pop(key, None)
+    upgraded.setdefault("neutral_field_protection_cutoff", 0.020)
+    return upgraded
+
+
+def _upgrade_settings_profile_v2_to_v3(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """Replace runtime-unit fields with the user-meaningful schema-3 fields."""
+    upgraded = deepcopy(dict(settings))
+    layer_height = float(upgraded.get("layer_height", 0.08) or 0.08)
+    if not math.isfinite(layer_height) or layer_height <= 0:
+        raise ValueError("schema-2 layer_height must be a positive finite number")
+
+    raw_min_cap = upgraded.pop("d_wc_min", None)
+    if "min_cap_layers" not in upgraded:
+        min_cap = (
+            2.0 * layer_height
+            if raw_min_cap is None
+            else float(raw_min_cap)
+        )
+        if not math.isfinite(min_cap) or min_cap <= 0:
+            raise ValueError("schema-2 d_wc_min must be a positive finite number")
+        upgraded["min_cap_layers"] = max(
+            1,
+            int(math.ceil(max(min_cap, layer_height) / layer_height - 1e-9)),
+        )
+
+    raw_smoothing_cells = upgraded.pop("smooth_kernel", None)
+    if "boundary_cap_smoothing_radius_mm" not in upgraded:
+        smoothing_cells = (
+            5.0
+            if raw_smoothing_cells is None
+            else float(raw_smoothing_cells)
+        )
+        pitch = float(
+            upgraded.get("solver_fine_pitch_mm")
+            or upgraded.get("image_sample_pitch_mm")
+            or 0.20
+        )
+        if (
+            not math.isfinite(smoothing_cells)
+            or smoothing_cells < 0
+            or not math.isfinite(pitch)
+            or pitch <= 0
+        ):
+            raise ValueError("schema-2 smoothing fields must be finite and non-negative")
+        upgraded["boundary_cap_smoothing_radius_mm"] = round(
+            smoothing_cells * pitch,
+            6,
+        )
+    return upgraded
+
+
+def _upgrade_settings_profile_v4_to_v5(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """Translate one raw schema-4 Settings Profile into the schema-5 state model."""
+    migrated = deepcopy(dict(settings))
+    raw_mode = migrated.pop("neutral_field_protection_mode", "off")
+    if not isinstance(raw_mode, str):
+        raise ValueError("neutral_field_protection_mode must be a string in schema 4")
+    mode = raw_mode.strip().lower()
+    if mode not in {"off", "narrow", "standard", "broad", "custom"}:
+        raise ValueError(f"Unsupported schema-4 neutral field mode: {raw_mode!r}")
+
+    raw_cutoff = migrated.get("neutral_field_protection_cutoff", 0.020)
+    try:
+        cutoff = float(raw_cutoff)
+    except (TypeError, ValueError):
+        cutoff = 0.020
+    if not math.isfinite(cutoff) or not 0 <= cutoff <= 1:
+        cutoff = 0.020
+
+    named_cutoffs = {"narrow": 0.010, "standard": 0.020, "broad": 0.035}
+    migrated["neutral_field_protection_enabled"] = mode != "off"
+    migrated["neutral_field_protection_cutoff"] = named_cutoffs.get(mode, cutoff)
+    return migrated
+
+
+def _normalize_settings_profile_payload(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    for legacy, replacements in LEGACY_RESOLUTION_REPLACEMENTS.items():
+        if legacy in settings and settings[legacy] is not None:
+            raise _translate_resolution_schema_error(
+                ResolutionSchemaLegacyFieldError(legacy, replacements)
+            )
+    try:
+        return _normalize_settings_profile_settings(dict(settings))
+    except StaticSettingsError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "invalid_static_settings", "issues": exc.issues},
+        ) from exc
+
+
+_SETTINGS_PROFILE_RECORD_KEYS = frozenset(
+    {
+        "id",
+        "kind",
+        "name",
+        "settings",
+        "modules",
+        "created_at",
+        "updated_at",
+        "schema_version",
+    }
+)
+
+
+def _preserve_settings_profile_upgrade_source(path: Path, schema_version: int) -> None:
+    backup_path = path.with_name(f"{path.name}.v{schema_version}.backup")
+    source_bytes = path.read_bytes()
+    if backup_path.exists():
+        if backup_path.read_bytes() != source_bytes:
+            raise ValueError(
+                f"Settings Profile upgrade backup does not match its source: {backup_path}"
+            )
+        return
+    shutil.copy2(path, backup_path)
+
+
+def _load_settings_profile_record_from_payload(
+    data: Any,
+    path: Path,
+) -> SettingsProfileRecord:
+    if not isinstance(data, dict):
+        raise ValueError(f"Settings Profile {path} must be a JSON object")
+    schema_version = data.get("schema_version")
+    if schema_version != _SETTINGS_PROFILE_SCHEMA_VERSION:
+        raise ValueError(
+            f"Settings Profile {path} is schema {schema_version!r}; "
+            f"the current loader requires schema {_SETTINGS_PROFILE_SCHEMA_VERSION}"
+        )
+    actual_record_keys = set(data)
+    if actual_record_keys != _SETTINGS_PROFILE_RECORD_KEYS:
+        missing = sorted(_SETTINGS_PROFILE_RECORD_KEYS - actual_record_keys)
+        unknown = sorted(actual_record_keys - _SETTINGS_PROFILE_RECORD_KEYS)
+        raise ValueError(
+            f"Settings Profile {path} is not canonical; "
+            f"missing fields={missing}, unknown fields={unknown}"
+        )
+    raw_settings = data.get("settings")
+    if not isinstance(raw_settings, dict):
+        raise ValueError(f"Settings Profile {path} has no settings object")
+    actual_setting_keys = set(raw_settings)
+    expected_setting_keys = set(_SETTINGS_PROFILE_KEYS)
+    if actual_setting_keys != expected_setting_keys:
+        raise ValueError(
+            f"Settings Profile {path} settings are not canonical; "
+            f"missing keys={sorted(expected_setting_keys - actual_setting_keys)}, "
+            f"unknown keys={sorted(actual_setting_keys - expected_setting_keys)}"
+        )
     settings = _normalize_settings_profile_settings(raw_settings)
-    modules = _normalize_settings_profile_modules(dict(data.get("modules") or {}))
-    created_at = str(data.get("created_at") or _utc_now_iso())
-    updated_at = str(data.get("updated_at") or created_at)
-    schema_version = int(data.get("schema_version") or _SETTINGS_PROFILE_SCHEMA_VERSION)
-    name = str(
-        data.get("name")
-        or (_SYSTEM_SETTINGS_PROFILE_NAME if kind == "system" else profile_id)
-    )
+    if settings != raw_settings:
+        raise ValueError(f"Settings Profile {path} settings are not normalized")
+    raw_modules = data.get("modules")
+    if not isinstance(raw_modules, dict):
+        raise ValueError(f"Settings Profile {path} has no modules object")
+    expected_module_keys = set(_normalize_module_state({}))
+    actual_module_keys = set(raw_modules)
+    if actual_module_keys != expected_module_keys:
+        raise ValueError(
+            f"Settings Profile {path} modules are not canonical; "
+            f"missing keys={sorted(expected_module_keys - actual_module_keys)}, "
+            f"unknown keys={sorted(actual_module_keys - expected_module_keys)}"
+        )
+    if any(not isinstance(value, bool) for value in raw_modules.values()):
+        raise ValueError(f"Settings Profile {path} module values must be booleans")
+    profile_id = data.get("id")
+    kind = data.get("kind")
+    name = data.get("name")
+    created_at = data.get("created_at")
+    updated_at = data.get("updated_at")
+    if not isinstance(profile_id, str) or not profile_id:
+        raise ValueError(f"Settings Profile {path} has no profile id")
+    if kind not in {"system", "named"}:
+        raise ValueError(f"Settings Profile {path} has invalid kind {kind!r}")
+    system_path = _settings_profile_path(_SYSTEM_SETTINGS_PROFILE_ID)
+    expected_kind = "system" if path == system_path else "named"
+    if kind != expected_kind:
+        raise ValueError(
+            f"Settings Profile {path} has kind {kind!r}; expected {expected_kind!r}"
+        )
+    if kind == "system" and profile_id != _SYSTEM_SETTINGS_PROFILE_ID:
+        raise ValueError(f"Settings Profile {path} has invalid system profile id")
+    if kind == "named" and profile_id == _SYSTEM_SETTINGS_PROFILE_ID:
+        raise ValueError(f"Settings Profile {path} uses the reserved system profile id")
+    if not isinstance(name, str) or not name:
+        raise ValueError(f"Settings Profile {path} has no profile name")
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError(f"Settings Profile {path} has no creation timestamp")
+    if not isinstance(updated_at, str) or not updated_at:
+        raise ValueError(f"Settings Profile {path} has no update timestamp")
     return SettingsProfileRecord(
         id=profile_id,
         kind=kind,
         name=name,
         settings=settings,
-        modules=modules,
+        modules=dict(raw_modules),
         created_at=created_at,
         updated_at=updated_at,
-        schema_version=schema_version,
+        schema_version=_SETTINGS_PROFILE_SCHEMA_VERSION,
     )
+
+
+def _upgrade_settings_profile_record(path: Path) -> bool:
+    """Permanently rewrite one known older profile before ordinary loading."""
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Settings Profile {path} must be a JSON object")
+    schema_version = data.get("schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ValueError(f"Settings Profile {path} has no integer schema version")
+    if schema_version == _SETTINGS_PROFILE_SCHEMA_VERSION:
+        _load_settings_profile_record_from_payload(data, path)
+        return False
+    if schema_version not in {1, 2, 3, 4, 5}:
+        raise ValueError(
+            f"Cannot upgrade Settings Profile schema {schema_version} in {path}; "
+            "no complete migration path exists"
+        )
+    raw_settings = data.get("settings")
+    if not isinstance(raw_settings, dict):
+        raise ValueError(f"Settings Profile {path} has no settings object")
+    raw_modules = data.get("modules") or {}
+    if not isinstance(raw_modules, dict):
+        raise ValueError(f"Settings Profile {path} has no modules object")
+
+    original_schema_version = schema_version
+    upgraded_settings = deepcopy(raw_settings)
+    if schema_version == 1:
+        upgraded_settings = _upgrade_settings_profile_v1_to_v2(upgraded_settings)
+        schema_version = 2
+    if schema_version == 2:
+        upgraded_settings = _upgrade_settings_profile_v2_to_v3(upgraded_settings)
+        schema_version = 3
+    if schema_version == 3:
+        upgraded_settings = _upgrade_settings_profile_v3_to_v4(upgraded_settings)
+        schema_version = 4
+    if schema_version == 4:
+        upgraded_settings = _upgrade_settings_profile_v4_to_v5(upgraded_settings)
+        schema_version = 5
+    if schema_version != 5:
+        raise AssertionError("Settings Profile upgrade did not reach schema 5")
+
+    profile_id = str(data.get("id") or _settings_profile_fallback_id(path))
+    kind = str(
+        data.get("kind")
+        or ("system" if profile_id == _SYSTEM_SETTINGS_PROFILE_ID else "named")
+    )
+    created_at = str(data.get("created_at") or _utc_now_iso())
+    upgraded = SettingsProfileRecord(
+        id=profile_id,
+        kind=kind,
+        name=str(
+            data.get("name")
+            or (_SYSTEM_SETTINGS_PROFILE_NAME if kind == "system" else profile_id)
+        ),
+        settings=_normalize_settings_profile_settings(upgraded_settings),
+        modules=_normalize_settings_profile_modules(raw_modules),
+        created_at=created_at,
+        updated_at=str(data.get("updated_at") or created_at),
+    )
+    payload = upgraded.to_dict()
+    _load_settings_profile_record_from_payload(payload, path)
+    _preserve_settings_profile_upgrade_source(path, original_schema_version)
+    _write_json_atomic(path, payload)
+    logger.info(
+        "Upgraded settings profile %s from schema %d to schema %d",
+        path.name,
+        original_schema_version,
+        _SETTINGS_PROFILE_SCHEMA_VERSION,
+    )
+    return True
+
+
+def _upgrade_settings_profile_store() -> None:
+    if not _SETTINGS_PROFILES_DIR.exists():
+        return
+    for path in sorted(
+        _SETTINGS_PROFILES_DIR.rglob("*.json"),
+        key=_settings_profile_sort_key,
+    ):
+        if path.name == _SETTINGS_PROFILE_STATE_NAME:
+            continue
+        if (
+            path.name == f"{_SYSTEM_SETTINGS_PROFILE_ID}.json"
+            and path.parent != _SETTINGS_PROFILES_DIR
+        ):
+            continue
+        _upgrade_settings_profile_record(path)
+
+
+def _load_settings_profile_record(path: Path) -> SettingsProfileRecord:
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return _load_settings_profile_record_from_payload(data, path)
 
 
 def _canonical_system_settings_profile(existing: Optional[SettingsProfileRecord] = None) -> SettingsProfileRecord:
@@ -4084,40 +6107,11 @@ def _canonical_system_settings_profile(existing: Optional[SettingsProfileRecord]
 
 
 def _save_settings_profile_record(record: SettingsProfileRecord) -> SettingsProfileRecord:
-    _write_json_atomic(_settings_profile_path(record.id), record.to_dict())
+    path = _settings_profile_path(record.id)
+    payload = record.to_dict()
+    _load_settings_profile_record_from_payload(payload, path)
+    _write_json_atomic(path, payload)
     return record
-
-
-def _persist_neutral_field_protection_profile_default(
-    path: Path,
-    record: SettingsProfileRecord,
-) -> bool:
-    """Materialize the new setting in a legacy profile instead of only defaulting it."""
-    try:
-        with open(path, encoding="utf-8") as handle:
-            payload = json.load(handle)
-        raw_settings = payload.get("settings")
-        if not isinstance(raw_settings, dict):
-            return False
-        key = "neutral_field_protection_mode"
-        if key in raw_settings:
-            return False
-        raw_settings[key] = deepcopy(record.settings[key])
-        _write_json_atomic(path, payload)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning(
-            "Could not persist Neutral-field Protection into profile %s: %s",
-            record.id,
-            exc,
-        )
-        return False
-    logger.info(
-        "Migrated settings profile %s with %s=%s",
-        record.id,
-        key,
-        record.settings[key],
-    )
-    return True
 
 
 def _ensure_system_settings_profile() -> SettingsProfileRecord:
@@ -4125,12 +6119,8 @@ def _ensure_system_settings_profile() -> SettingsProfileRecord:
     path = _settings_profile_path(_SYSTEM_SETTINGS_PROFILE_ID)
     existing = None
     if path.exists():
-        try:
-            existing = _load_settings_profile_record(path, kind_hint="system")
-            _persist_neutral_field_protection_profile_default(path, existing)
-        except Exception as exc:
-            logger.warning("System settings profile invalid; regenerating: %s", exc)
-            existing = None
+        _upgrade_settings_profile_record(path)
+        existing = _load_settings_profile_record(path)
     canonical = _canonical_system_settings_profile(existing)
     if existing and (
         existing.id == canonical.id
@@ -4149,7 +6139,8 @@ def _restore_system_settings_profile() -> SettingsProfileRecord:
     path = _settings_profile_path(_SYSTEM_SETTINGS_PROFILE_ID)
     if path.exists():
         try:
-            existing = _load_settings_profile_record(path, kind_hint="system")
+            _upgrade_settings_profile_record(path)
+            existing = _load_settings_profile_record(path)
         except Exception:
             existing = None
     return _save_settings_profile_record(_canonical_system_settings_profile(existing))
@@ -4157,24 +6148,36 @@ def _restore_system_settings_profile() -> SettingsProfileRecord:
 
 def _load_settings_profile_state() -> dict:
     path = _settings_profile_state_path()
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as exc:
-            logger.warning("Settings profile state invalid; resetting: %s", exc)
-            data = {}
-    else:
-        data = {}
-    try:
-        bundled_profile_revision = max(
-            0, int(data.get("bundled_profile_revision") or 0)
-        )
-    except (TypeError, ValueError):
-        bundled_profile_revision = 0
+    if not path.exists():
+        return {
+            "schema_version": _SETTINGS_PROFILE_SCHEMA_VERSION,
+            "user_default_profile_id": _SYSTEM_SETTINGS_PROFILE_ID,
+            "bundled_profile_revision": 0,
+        }
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Settings Profile state {path} must be a JSON object")
+    required = {
+        "schema_version",
+        "user_default_profile_id",
+        "bundled_profile_revision",
+    }
+    if set(data) != required or data.get("schema_version") != _SETTINGS_PROFILE_SCHEMA_VERSION:
+        raise ValueError(f"Settings Profile state {path} is not an exact current record")
+    user_default_profile_id = data.get("user_default_profile_id")
+    bundled_profile_revision = data.get("bundled_profile_revision")
+    if not isinstance(user_default_profile_id, str) or not user_default_profile_id:
+        raise ValueError(f"Settings Profile state {path} has an invalid default profile id")
+    if (
+        not isinstance(bundled_profile_revision, int)
+        or isinstance(bundled_profile_revision, bool)
+        or bundled_profile_revision < 0
+    ):
+        raise ValueError(f"Settings Profile state {path} has an invalid bundled revision")
     return {
         "schema_version": _SETTINGS_PROFILE_SCHEMA_VERSION,
-        "user_default_profile_id": data.get("user_default_profile_id") or _SYSTEM_SETTINGS_PROFILE_ID,
+        "user_default_profile_id": user_default_profile_id,
         "bundled_profile_revision": bundled_profile_revision,
     }
 
@@ -4191,8 +6194,51 @@ def _save_settings_profile_state(state: dict) -> dict:
     return payload
 
 
+def _upgrade_settings_profile_state() -> bool:
+    path = _settings_profile_state_path()
+    if not path.exists():
+        return False
+    with open(path, encoding="utf-8") as f:
+        persisted = json.load(f)
+    if not isinstance(persisted, dict):
+        raise ValueError(f"Settings Profile state {path} must be a JSON object")
+    schema_version = persisted.get("schema_version", 0)
+    if schema_version == _SETTINGS_PROFILE_SCHEMA_VERSION:
+        _load_settings_profile_state()
+        return False
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version not in {0, 1, 2, 3, 4, 5}
+    ):
+        raise ValueError(
+            f"Cannot upgrade Settings Profile state schema {schema_version!r} in {path}"
+        )
+    user_default_profile_id = persisted.get(
+        "user_default_profile_id",
+        _SYSTEM_SETTINGS_PROFILE_ID,
+    )
+    bundled_profile_revision = persisted.get("bundled_profile_revision", 0)
+    if not isinstance(user_default_profile_id, str) or not user_default_profile_id:
+        raise ValueError(f"Settings Profile state {path} has an invalid default profile id")
+    if (
+        not isinstance(bundled_profile_revision, int)
+        or isinstance(bundled_profile_revision, bool)
+        or bundled_profile_revision < 0
+    ):
+        raise ValueError(f"Settings Profile state {path} has an invalid bundled revision")
+    _preserve_settings_profile_upgrade_source(path, schema_version)
+    _save_settings_profile_state(
+        {
+            "user_default_profile_id": user_default_profile_id,
+            "bundled_profile_revision": bundled_profile_revision,
+        }
+    )
+    return True
+
+
 def _install_bundled_settings_profiles() -> dict:
-    """Apply the current one-time bundled-profile migration to a Workspace."""
+    """Permanently transform bundled identities and install current revisions."""
     state = _load_settings_profile_state()
     if (
         state["bundled_profile_revision"]
@@ -4202,37 +6248,96 @@ def _install_bundled_settings_profiles() -> dict:
     if not _BUNDLED_SETTINGS_PROFILES_DIR.exists():
         return state
 
-    for path in _settings_profile_named_paths():
-        try:
-            with open(path, encoding="utf-8") as f:
-                payload = json.load(f)
-            profile_id = str(
-                payload.get("id") or _settings_profile_fallback_id(path)
-            )
-        except Exception as exc:
-            logger.warning(
-                "Skipping invalid settings profile during bundled migration %s: %s",
-                path.name,
-                exc,
-            )
-            continue
-        if profile_id in _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS:
-            path.unlink()
-
-    bundled_paths = sorted(_BUNDLED_SETTINGS_PROFILES_DIR.rglob("*.json"))
-    for source in bundled_paths:
+    bundled_payloads: Dict[str, dict] = {}
+    for source in sorted(_BUNDLED_SETTINGS_PROFILES_DIR.rglob("*.json")):
         with open(source, encoding="utf-8") as f:
             payload = json.load(f)
+        if not isinstance(payload, dict) or not isinstance(payload.get("modules"), dict):
+            raise RuntimeError(f"Invalid bundled settings profile in {source}")
+        payload = deepcopy(payload)
+        payload["modules"] = _normalize_settings_profile_modules(payload["modules"])
         profile_id = str(payload.get("id") or "").strip()
         if (
             not profile_id
             or re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", profile_id)
             is None
             or profile_id == _SYSTEM_SETTINGS_PROFILE_ID
-            or profile_id in _DEPRECATED_BUNDLED_SETTINGS_PROFILE_IDS
+            or profile_id in _BUNDLED_SETTINGS_PROFILE_ID_UPGRADES
+            or profile_id in bundled_payloads
         ):
             raise RuntimeError(f"Invalid bundled settings profile id in {source}")
-        _write_json_atomic(_settings_profile_path(profile_id), payload)
+        target_path = _settings_profile_path(profile_id)
+        _load_settings_profile_record_from_payload(payload, target_path)
+        bundled_payloads[profile_id] = payload
+
+    transformed_ids: set[str] = set()
+    for path in _settings_profile_named_paths():
+        with open(path, encoding="utf-8") as f:
+            persisted_payload = json.load(f)
+        if not isinstance(persisted_payload, dict):
+            raise ValueError(f"Settings Profile {path} must be a JSON object")
+        profile_id = str(
+            persisted_payload.get("id") or _settings_profile_fallback_id(path)
+        )
+        upgraded_profile_id = _BUNDLED_SETTINGS_PROFILE_ID_UPGRADES.get(profile_id)
+        if upgraded_profile_id is None:
+            continue
+        upgraded_payload = deepcopy(bundled_payloads[upgraded_profile_id])
+        created_at = persisted_payload.get("created_at")
+        if isinstance(created_at, str) and created_at:
+            upgraded_payload["created_at"] = created_at
+        target_path = _settings_profile_path(upgraded_profile_id)
+        _load_settings_profile_record_from_payload(upgraded_payload, target_path)
+        if target_path.exists() and target_path != path:
+            with open(target_path, encoding="utf-8") as f:
+                existing_target = json.load(f)
+            target_schema = existing_target.get("schema_version")
+            if isinstance(target_schema, bool) or not isinstance(target_schema, int):
+                raise ValueError(
+                    f"Cannot transform bundled Settings Profile {profile_id!r}; "
+                    f"target has no integer schema version: {target_path}"
+                )
+            if existing_target != upgraded_payload:
+                _preserve_settings_profile_upgrade_source(
+                    target_path,
+                    target_schema,
+                )
+        _preserve_settings_profile_upgrade_source(
+            path,
+            int(persisted_payload["schema_version"]),
+        )
+        if target_path != path and (
+            not target_path.exists() or existing_target != upgraded_payload
+        ):
+            _write_json_atomic(target_path, upgraded_payload)
+        if target_path != path:
+            path.unlink()
+        transformed_ids.add(upgraded_profile_id)
+        if state["user_default_profile_id"] == profile_id:
+            state["user_default_profile_id"] = upgraded_profile_id
+
+    for profile_id, payload in bundled_payloads.items():
+        if profile_id in transformed_ids:
+            continue
+        target_path = _settings_profile_path(profile_id)
+        if target_path.exists():
+            with open(target_path, encoding="utf-8") as f:
+                persisted_payload = json.load(f)
+            if persisted_payload == payload:
+                continue
+            persisted_schema = persisted_payload.get("schema_version")
+            if (
+                isinstance(persisted_schema, bool)
+                or not isinstance(persisted_schema, int)
+            ):
+                raise ValueError(
+                    f"Bundled Settings Profile {target_path} has no integer schema version"
+                )
+            _preserve_settings_profile_upgrade_source(
+                target_path,
+                persisted_schema,
+            )
+        _write_json_atomic(target_path, payload)
 
     state["bundled_profile_revision"] = _BUNDLED_SETTINGS_PROFILE_REVISION
     return _save_settings_profile_state(state)
@@ -4243,11 +6348,7 @@ def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
     named_profiles_by_id: Dict[str, SettingsProfileRecord] = {}
     named_profile_sources: Dict[str, Path] = {}
     for path in _settings_profile_named_paths():
-        try:
-            record = _load_settings_profile_record(path, kind_hint="named")
-        except Exception as exc:
-            logger.warning("Skipping invalid settings profile %s: %s", path.name, exc)
-            continue
+        record = _load_settings_profile_record(path)
         existing_source = named_profile_sources.get(record.id)
         if existing_source is not None:
             logger.warning(
@@ -4257,7 +6358,6 @@ def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
                 _settings_profile_relative_path(existing_source),
             )
             continue
-        _persist_neutral_field_protection_profile_default(path, record)
         named_profile_sources[record.id] = path
         named_profiles_by_id[record.id] = record
     named_profiles = list(named_profiles_by_id.values())
@@ -4267,7 +6367,9 @@ def _load_all_settings_profiles() -> List[SettingsProfileRecord]:
 
 def _ensure_settings_profile_store() -> dict:
     _SETTINGS_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    _upgrade_settings_profile_state()
     _install_bundled_settings_profiles()
+    _upgrade_settings_profile_store()
     _ensure_system_settings_profile()
     if not _settings_profile_state_path().exists() and not _settings_profile_named_paths():
         _save_settings_profile_state({})
@@ -4307,7 +6409,6 @@ def _settings_profile_name_error(
 
 def _serialize_settings_profile_record(record: SettingsProfileRecord, user_default_profile_id: str) -> dict:
     data = record.to_dict()
-    data["settings"] = _with_canonical_pitch_egress(data["settings"])
     data["is_system_default"] = record.id == _SYSTEM_SETTINGS_PROFILE_ID
     data["is_user_default"] = record.id == user_default_profile_id
     return data
@@ -4348,15 +6449,15 @@ def create_settings_profile(payload: SettingsProfilePayload) -> dict:
         raise HTTPException(400, error)
 
     timestamp = _utc_now_iso()
-    try:
-        raw_settings = normalize_resolution_schema(dict(payload.settings or {}))
-    except (ResolutionSchemaConflictError, ResolutionSchemaLegacyFieldError) as exc:
-        raise _translate_resolution_schema_error(exc) from exc
+    raw_settings = dict(payload.settings or {})
+    for field in ("image_sample_pitch_mm", "solver_fine_pitch_mm"):
+        if field in raw_settings:
+            raise _retired_config_field_error(field)
     record = SettingsProfileRecord(
         id=_generate_settings_profile_id(),
         kind="named",
         name=payload.name,
-        settings=_normalize_settings_profile_settings(raw_settings),
+        settings=_normalize_settings_profile_payload(raw_settings),
         modules=_normalize_settings_profile_modules(dict(payload.modules or {})),
         created_at=timestamp,
         updated_at=timestamp,
@@ -4397,15 +6498,15 @@ def update_settings_profile(profile_id: str, payload: SettingsProfilePayload) ->
     if error:
         raise HTTPException(400, error)
 
-    try:
-        raw_settings = normalize_resolution_schema(dict(payload.settings or {}))
-    except (ResolutionSchemaConflictError, ResolutionSchemaLegacyFieldError) as exc:
-        raise _translate_resolution_schema_error(exc) from exc
+    raw_settings = dict(payload.settings or {})
+    for field in ("image_sample_pitch_mm", "solver_fine_pitch_mm"):
+        if field in raw_settings:
+            raise _retired_config_field_error(field)
     record = SettingsProfileRecord(
         id=existing.id,
         kind="named",
         name=payload.name,
-        settings=_normalize_settings_profile_settings(raw_settings),
+        settings=_normalize_settings_profile_payload(raw_settings),
         modules=_normalize_settings_profile_modules(dict(payload.modules or {})),
         created_at=existing.created_at,
         updated_at=_utc_now_iso(),
@@ -4505,13 +6606,20 @@ class PaletteSuggestPayload(BaseModel):
 
     image_path: str
     image_source_ref: Optional[str] = None
-    n_filaments: int = 7
-    top_k: int = 5
+    n_filaments: int = Field(default=7, strict=True, ge=2, le=16)
+    top_k: int = Field(default=5, strict=True, ge=1, le=10)
     filament_ids: Optional[List[str]] = None
-    max_swaps: Optional[int] = None  # if set, use swap-tier sweep
     palette_mode: str = "standard"
-    improvement_threshold: Optional[float] = None
-    force_all_tiers: Optional[bool] = None
+
+    @field_validator("filament_ids")
+    @classmethod
+    def _validate_distinct_filament_ids(
+        cls,
+        value: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("filament_ids must not contain duplicates")
+        return value
 
     @field_validator("palette_mode", mode="before")
     @classmethod
@@ -4608,58 +6716,6 @@ def _format_palette_candidate(cand) -> dict:
         d["rank_score"] = round(cand.rank_score, 4)
         d["rank_mode"] = cand.rank_mode or "mean"
     return d
-
-
-def _format_tier_response(
-    sweep,
-    *,
-    palette_mode: str = "standard",
-    signature_stats: Optional[dict] = None,
-    model_metadata: Optional[dict] = None,
-) -> dict:
-    tiers = getattr(sweep, "tiers", sweep)
-    tier_results = []
-    for tier in tiers:
-        tier_cands = [_format_palette_candidate(cand) for cand in tier.candidates]
-        tier_results.append({
-            "swap_count": tier.swap_count,
-            "n_filaments": tier.n_filaments,
-            "best_mean_de": round(tier.best_mean_de, 4),
-            "best_coverage_pct": round(tier.best_coverage_pct, 1),
-            "improvement": round(tier.improvement_over_prev, 1)
-                if tier.improvement_over_prev is not None else None,
-            "candidates": tier_cands,
-        })
-    response = {"tiers": tier_results, "palette_mode": palette_mode}
-    if hasattr(sweep, "alternatives"):
-        response["alternatives"] = [
-            _format_palette_candidate(cand)
-            for cand in getattr(sweep, "alternatives", [])
-        ]
-    if hasattr(sweep, "recommended"):
-        response["recommended"] = getattr(sweep, "recommended", None)
-    per_load_capped = getattr(sweep, "per_load_capped", None)
-    if per_load_capped:
-        response["per_load_capped"] = per_load_capped
-    if signature_stats:
-        response["signature_stats"] = signature_stats
-    if model_metadata:
-        response["model_metadata"] = model_metadata
-    return response
-
-
-def _palette_suggestion_ams_capacity(snapshot: dict) -> tuple[int, int]:
-    """Resolve palette-suggestion AMS capacity from active printer state."""
-    active = snapshot.get("__active_printer__") or get_active_printer() or {}
-    printer = active.get("printer") or {}
-    snapshot_units = max(1, int(snapshot.get("n_ams_units", 1) or 1))
-    snapshot_total_slots = max(1, int(snapshot.get("ams_slots", 4) or 4))
-    n_ams_units = max(1, int(printer.get("ams_units") or snapshot_units))
-    if printer.get("slots_per_ams") is not None:
-        slots_per_ams = max(1, int(printer["slots_per_ams"]))
-    else:
-        slots_per_ams = max(1, snapshot_total_slots // snapshot_units)
-    return slots_per_ams, n_ams_units
 
 
 _PALETTE_GAMUT_SAMPLING = {
@@ -4763,7 +6819,7 @@ def _build_palette_suggestion_model(
             "appearance_model_provider": provider_name,
             "gamut_backend": "historical_spline_profile",
             "gamut_domain": "model_oklab",
-            "corrections_enabled": bool(snapshot.get("use_corrections", False)),
+            "corrections_enabled": True,
             "height_budget_without_base_mm": round(height_budget, 6),
             "layer_height_mm": round(float(solve_cfg.layer_height), 6),
             "max_layers": max_layers,
@@ -4782,7 +6838,7 @@ def _build_palette_suggestion_model(
             detail="the active model library has no usable Photo Stack deployment bundle",
         )
 
-    use_corrections = bool(snapshot.get("use_corrections", False))
+    use_corrections = True
     cap_budget = float(solve_cfg.effective_boundary_d_wc_max())
     cache_key = _palette_backend_cache_key(
         bundle_path=bundle_path,
@@ -4913,6 +6969,34 @@ def _start_palette_suggestion_job(
 
     cfg = snapshot_override if snapshot_override is not None else _cfg()
 
+    suggestion_registry = _load_registry()
+    if payload.filament_ids is not None:
+        reserved_ids = set(_white_ids(cfg))
+        reserved_candidates = [
+            filament_id
+            for filament_id in payload.filament_ids
+            if filament_id in reserved_ids
+        ]
+        if reserved_candidates:
+            raise HTTPException(
+                400,
+                "Reserved base/cap filaments cannot be used as palette colors: "
+                + ", ".join(reserved_candidates),
+            )
+        from filament_policy import excluded_filament_ids
+
+        available_requested = [
+            filament_id
+            for filament_id in payload.filament_ids
+            if filament_id not in excluded_filament_ids(suggestion_registry)
+        ]
+        if len(available_requested) < payload.n_filaments:
+            raise HTTPException(
+                400,
+                f"Palette colors requests {payload.n_filaments} filaments, but only "
+                f"{len(available_requested)} selected eligible color filaments are available",
+            )
+
     # Palette suggestion is always thorough now. The old fast/quality switches
     # were only user-facing complexity; thorough is fast enough for this app.
     suggest = session["suggest"]
@@ -4922,6 +7006,7 @@ def _start_palette_suggestion_job(
     snapshot = deepcopy(cfg)
     snapshot["image_path"] = payload.image_path
     snapshot["image_source_ref"] = payload.image_source_ref
+    _require_settings_valid_for(snapshot, "suggest")
 
     # The configured white base/cap are fixed inputs the suggester cannot drop
     # (unlike color candidates) — refuse up front if either is excluded from
@@ -4990,8 +7075,7 @@ def _start_palette_suggestion_job(
             try:
                 _check_cancel()
                 _report_progress("Loading appearance model", 0.02)
-                from palette.suggest import suggest_palettes as _suggest_palettes
-                from palette.suggest import suggest_palettes_swap_aware
+                from palette.suggest import suggest_palettes_detailed
                 from palette.suggest import SUGGESTION_COVERAGE_DE_THRESHOLD
                 from palette.suggest import extract_color_signature_from_oklab
                 from palette.suggest import extract_luminance_residual_signature
@@ -5021,7 +7105,7 @@ def _start_palette_suggestion_job(
                         wb_profile=wb_profile,
                         wc_profile=wc_profile,
                         photo_stack_bundle_path=solve_cfg.photo_stack_bundle_path,
-                        use_corrections=bool(snapshot.get("use_corrections", False)),
+                        use_corrections=True,
                     )
                     if hasattr(white_rescale_provider, "fingerprint"):
                         model_metadata["provider_fingerprint"] = white_rescale_provider.fingerprint()
@@ -5090,45 +7174,27 @@ def _start_palette_suggestion_job(
                     filament_ids=payload.filament_ids,
                     # Contract bridge: never suggest filaments excluded from
                     # model-backed generation (default pool or user-supplied).
-                    exclude_filament_ids=excluded_filament_ids(_load_registry()),
+                    exclude_filament_ids=(
+                        excluded_filament_ids(suggestion_registry)
+                        | set(_white_ids(snapshot))
+                    ),
                     gamut_luminance_weight=gamut_luminance_weight,
                 )
                 common_kwargs.update(model_kwargs)
 
-                if payload.max_swaps is not None:
-                    slots_per_ams, n_ams_units = _palette_suggestion_ams_capacity(snapshot)
-                    sweep = suggest_palettes_swap_aware(
-                        sig,
-                        max_colors_per_load=payload.n_filaments,
-                        slots_per_ams=slots_per_ams,
-                        n_ams_units=n_ams_units,
-                        reserved_white=snapshot.get("white_slots", 1),
-                        max_swaps=payload.max_swaps,
-                        top_k=payload.top_k,
-                        improvement_threshold=payload.improvement_threshold or snapshot.get("swap_improvement_threshold", 2.0),
-                        force_all_tiers=payload.force_all_tiers if payload.force_all_tiers is not None else snapshot.get("force_all_tiers", False),
-                        **common_kwargs,
-                    )
-                    model_metadata.update(getattr(sweep, "model_metadata", {}) or {})
-                    result = _format_tier_response(
-                        sweep,
-                        palette_mode=palette_mode,
-                        signature_stats=signature_stats,
-                        model_metadata=model_metadata,
-                    )
-                else:
-                    candidates = _suggest_palettes(
-                        sig,
-                        n_filaments=payload.n_filaments,
-                        top_k=payload.top_k,
-                        **common_kwargs,
-                    )
-                    result = _format_candidate_response(
-                        candidates,
-                        palette_mode=palette_mode,
-                        signature_stats=signature_stats,
-                        model_metadata=model_metadata,
-                    )
+                suggestion_result = suggest_palettes_detailed(
+                    sig,
+                    n_filaments=payload.n_filaments,
+                    top_k=payload.top_k,
+                    **common_kwargs,
+                )
+                model_metadata.update(suggestion_result.model_metadata)
+                result = _format_candidate_response(
+                    suggestion_result.candidates,
+                    palette_mode=palette_mode,
+                    signature_stats=signature_stats,
+                    model_metadata=model_metadata,
+                )
 
                 if not _complete_suggest_job(
                     job_id,
@@ -5168,10 +7234,15 @@ def _start_palette_suggestion_job(
 
 
 @app.post("/api/palette/suggest")
-def suggest_palettes_endpoint(payload: PaletteSuggestPayload) -> dict:
+def suggest_palettes_endpoint(
+    payload: PaletteSuggestPayload,
+    request: Request = None,
+) -> dict:
     """Auto-suggest optimal palettes for the given image."""
 
-    return _start_palette_suggestion_job(payload)
+    started = _start_palette_suggestion_job(payload)
+    _register_request_guide_job(request, kind="suggest", job_id=started["job_id"])
+    return started
 
 
 @app.get("/api/palette/suggest/status")
@@ -5470,7 +7541,10 @@ def _materialize_post_solve_export_bundle_from_cached_solve(
             canonical_target
             + (color_ceiling - (d_wb + color_stack_height))
         ).astype(np.float32, copy=False)
-        d_wc_min = np.float32(float(cfg.get("d_wc_min", 0.0) or 0.0))
+        d_wc_min = np.float32(minimum_cap_thickness_mm(
+            cfg.get("min_cap_layers", 2),
+            cfg.get("layer_height", 0.08),
+        ))
         if np.any(canonical_target < color_ceiling + d_wc_min - np.float32(1e-6)):
             raise HTTPException(
                 409,
@@ -5651,33 +7725,6 @@ def _write_completed_solve_cache_entry(card_id: str, cfg: dict, solve: dict, res
     return session["solve_cache"][card_id]
 
 
-_SOLVE_PITCH_NOZZLE_TOLERANCE_MM = 1e-6
-
-
-def _validate_solve_pitch_for_nozzle(cfg: dict, active: dict | None = None) -> None:
-    """Reject a canonical solve grid that is finer than the active nozzle."""
-    resolved_active = active if active is not None else _resolve_active_printer(_load_printers())
-    nozzle = (resolved_active or {}).get("nozzle") or {}
-    nozzle_size = nozzle.get("size")
-    pitch = cfg.get("solver_fine_pitch_mm")
-    if pitch is None:
-        pitch = cfg.get("image_sample_pitch_mm")
-    try:
-        pitch_value = float(pitch)
-        nozzle_value = float(nozzle_size)
-    except (TypeError, ValueError):
-        return
-    if pitch_value < nozzle_value - _SOLVE_PITCH_NOZZLE_TOLERANCE_MM:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Solve Pitch ({pitch_value:g} mm) cannot be smaller than the active "
-                f"nozzle diameter ({nozzle_value:g} mm). Increase Solve Pitch or choose "
-                "a smaller nozzle."
-            ),
-        )
-
-
 def _start_full_solve_job(
     payload: SolveStartPayload,
     *,
@@ -5706,11 +7753,21 @@ def _start_full_solve_job(
     image_path = image_path_override or _resolve_config_image_source(raw_cfg)
 
     # Snapshot config so the solve thread isn't affected by mid-solve changes
+    active_printer = (
+        dict(active_printer_override)
+        if active_printer_override is not None
+        else _resolve_active_printer(_effective_printers_data())
+    )
     cfg = _with_active_printer_printability(
         _drop_phantom_config_fields(raw_cfg),
-        active=active_printer_override,
+        active=active_printer,
     )
-    _validate_solve_pitch_for_nozzle(cfg, active=dict(active_printer_override) if active_printer_override is not None else None)
+    settings_evaluation = _require_settings_valid_for(
+        cfg,
+        "solve",
+        active=active_printer,
+        module_state=module_state_override,
+    )
     cfg["palette"] = canonical_palette_order(
         palette,
         load_filament_order_registry(),
@@ -5727,10 +7784,11 @@ def _start_full_solve_job(
     solve_start_diagnostics = _build_solve_start_diagnostics(
         cfg,
         module_state=module_state_override,
+        settings_evaluation=settings_evaluation,
     )
     sc = _build_solve_config(
         cfg,
-        active_printer=active_printer_override,
+        active_printer=active_printer,
     )
     swap_banding_requested = len(sc.palette) > sc.color_slots()
     solve_stage_count = 10 if swap_banding_requested else 7
@@ -6590,7 +8648,7 @@ def _start_full_solve_job(
                 solve["solve_owned_fingerprint"] = _solve_owned_fingerprint(
                     cfg,
                     module_state=module_state_override,
-                    active_printer=active_printer_override,
+                    active_printer=active_printer,
                 )
                 artifact_progress.emit(
                     stage="artifacts",
@@ -6656,7 +8714,10 @@ def _start_full_solve_job(
 
 
 @app.post("/api/solve/start")
-def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
+def start_solve(
+    payload: SolveStartPayload = SolveStartPayload(),
+    request: Request = None,
+) -> dict:
     """Start one full solve in a background thread."""
 
     with _MODEL_RESOURCE_COORDINATION_LOCK:
@@ -6671,7 +8732,9 @@ def start_solve(payload: SolveStartPayload = SolveStartPayload()) -> dict:
             "items": [],
             "cancel_requested": False,
         })
-    return _start_full_solve_job(payload)
+    started = _start_full_solve_job(payload)
+    _register_request_guide_job(request, kind="solve", job_id=started["job_id"])
+    return started
 
 
 def _palette_batch_cancel_requested(job_id: str) -> bool:
@@ -7033,7 +9096,10 @@ def _run_palette_batch(job_id: str, payload: PaletteBatchStartPayload) -> None:
 
 
 @app.post("/api/solve/palette-batch/start")
-def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
+def start_palette_batch(
+    payload: PaletteBatchStartPayload,
+    request: Request = None,
+) -> dict:
     """Sequentially solve an ordered set of explicit Palette Deck cards."""
 
     job_id = uuid.uuid4().hex
@@ -7059,11 +9125,13 @@ def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
             frozen_cfg,
             active=active_printer,
         )
-        _validate_solve_pitch_for_nozzle(
-            frozen_cfg,
-            active=active_printer,
-        )
         module_state = deepcopy(load_module_state(_MODULES_PATH))
+        _require_settings_valid_for(
+            frozen_cfg,
+            "solve",
+            active=active_printer,
+            module_state=module_state,
+        )
         items = _validate_palette_batch_items(
             job_id=job_id,
             payload=payload,
@@ -7117,7 +9185,9 @@ def start_palette_batch(payload: PaletteBatchStartPayload) -> dict:
             started_monotonic=None,
         )
         raise HTTPException(500, f"Could not start palette batch: {exc}") from exc
-    return _serialize_palette_batch_status(session["palette_batch"])
+    status = _serialize_palette_batch_status(session["palette_batch"])
+    _register_request_guide_job(request, kind="palette_batch", job_id=job_id)
+    return status
 
 
 @app.get("/api/solve/palette-batch/{job_id}/results/{result_id}")
@@ -7649,7 +9719,10 @@ def _perform_export_files(
 
 
 @app.post("/api/export/files/start")
-def export_files_start(payload: ExportFilesPayload) -> dict:
+def export_files_start(
+    payload: ExportFilesPayload,
+    request: Request = None,
+) -> dict:
     """Start a print-file export in the background so the UI can poll progress."""
     _require_model_library()
     export = session["export"]
@@ -7723,6 +9796,7 @@ def export_files_start(payload: ExportFilesPayload) -> dict:
 
     thread = threading.Thread(target=_run_export, daemon=True)
     thread.start()
+    _register_request_guide_job(request, kind="export", job_id=job_id)
     return {"job_id": job_id, "status": "running"}
 
 
@@ -8801,6 +10875,9 @@ def _validate_loaded_archive_config(cfg: dict) -> dict:
             "detail_cap_enabled is mandatory and can no longer be disabled",
         )
     incoming.pop("detail_cap_enabled", None)
+    incoming.pop("use_corrections", None)
+    incoming.pop("stage2_boundary_mutation_current_de_percentile", None)
+    incoming.pop("stage2_boundary_mutation_min_component_mm", None)
     if "cap_fixed_thickness_mm" in incoming:
         raise _retired_config_field_error("cap_fixed_thickness_mm")
     if "printability_preferred_line_length_mm" in incoming:
@@ -8810,15 +10887,17 @@ def _validate_loaded_archive_config(cfg: dict) -> dict:
             incoming["cap_mode"] = _normalize_cap_mode(incoming["cap_mode"])
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-    if "neutral_field_protection_mode" in incoming:
+    if "neutral_field_protection_cutoff" in incoming:
         try:
-            incoming["neutral_field_protection_mode"] = (
-                normalize_neutral_field_protection_mode(
-                    incoming["neutral_field_protection_mode"]
-                )
-            )
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+            cutoff = float(incoming["neutral_field_protection_cutoff"])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, "neutral_field_protection_cutoff must be a number") from exc
+        if not math.isfinite(cutoff) or cutoff < 0 or cutoff > 1:
+            raise HTTPException(422, "neutral_field_protection_cutoff must be between 0 and 1")
+        incoming["neutral_field_protection_cutoff"] = cutoff
+    incoming["use_corrections"] = True
+    incoming["stage2_boundary_mutation_current_de_percentile"] = None
+    incoming["stage2_boundary_mutation_min_component_mm"] = None
     return incoming
 
 

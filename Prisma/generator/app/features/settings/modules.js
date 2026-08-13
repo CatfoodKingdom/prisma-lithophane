@@ -28,7 +28,14 @@ export function installFeaturesSettingsModules(app) {
   }
 
   function preprocessingPresetSpec(moduleId) {
-    return app.state.ui.PREPROCESSING_PRESET_UI[moduleId] || null;
+    const descriptor = app.commands.moduleDescriptorById(moduleId);
+    const presetUi = descriptor?.preset_ui;
+    if (!presetUi) return null;
+    return {
+      controlLabel: presetUi.control_label,
+      defaultPreset: presetUi.default_preset,
+      presets: presetUi.presets || [],
+    };
   }
 
   function preprocessingParamBlock(moduleId, configValues = app.state.settings.config) {
@@ -138,20 +145,20 @@ export function installFeaturesSettingsModules(app) {
     const tr = document.createElement("tr");
     const inputId = `mod_${moduleId}_${param.name}`;
     const presetSpec = app.commands.preprocessingPresetSpec(moduleId);
-    const tooltip = presetSpec?.paramTooltips?.[param.name] || param.tooltip || param.description || "";
+    const tooltip = param.tooltip || param.description || "";
     const currentValue = configValues[param.name] ?? param.default;
-    if (presetSpec) tr.classList.add("advanced-setting", "module-advanced-param-row");
+    if (presetSpec) {
+      tr.classList.add(
+        "advanced-setting",
+        "module-advanced-param-row",
+        "settings-child-row",
+      );
+    }
 
     // Label cell
     const tdLabel = document.createElement("td");
     tdLabel.title = tooltip;
-    tdLabel.textContent = presetSpec?.paramLabels?.[param.name] || param.label;
-    if (param.min != null && param.max != null) {
-      const rangeSpan = document.createElement("span");
-      rangeSpan.className = "stg-range";
-      rangeSpan.textContent = ` ${param.min}–${param.max}`;
-      tdLabel.appendChild(rangeSpan);
-    }
+    tdLabel.textContent = param.label;
 
     // Value cell
     const tdValue = document.createElement("td");
@@ -179,7 +186,7 @@ export function installFeaturesSettingsModules(app) {
       (param.choices || []).forEach(c => {
         const opt = document.createElement("option");
         opt.value = c;
-        const choiceLabels = presetSpec?.choiceLabels?.[param.name] || param.choice_labels;
+        const choiceLabels = param.choice_labels;
         opt.textContent = (choiceLabels && Object.prototype.hasOwnProperty.call(choiceLabels, c))
           ? choiceLabels[c]
           : c;
@@ -217,18 +224,31 @@ export function installFeaturesSettingsModules(app) {
       const wrapper = document.createElement("div");
       wrapper.className = "input-with-unit stg-iwu";
       const inp = document.createElement("input");
-      inp.type = "number";
+      // All module parameters use text inputs. Integer parameters still get
+      // the custom quantized controls below; keeping them out of native
+      // number inputs prevents a second browser-specific wheel implementation
+      // from competing with the custom one.
+      inp.type = "text";
       inp.className = "unit-input";
       inp.id = inputId;
-      inp.value = currentValue;
+      inp.value = app.commands.formatSettingsInputNumber
+        ? app.commands.formatSettingsInputNumber(currentValue)
+        : currentValue;
       inp.inputMode = param.type === "int" ? "numeric" : "decimal";
       inp.step = param.type === "int" ? "1" : "any";
+      if (param.type === "int") {
+        inp.dataset.settingsQuantized = "1";
+        inp.dataset.settingsInteger = "1";
+        if (param.default != null) inp.dataset.settingsDefaultValue = String(param.default);
+      }
       if (param.min != null) inp.min = param.min;
       if (param.max != null) inp.max = param.max;
       inp.addEventListener("change", () => {
         const fallback = app.commands.getModuleParamValue(app.state.settings.config, moduleId, param);
         const coerced = app.commands.coerceNumericParamValue(param, inp.value, fallback);
-        inp.value = coerced.value;
+        inp.value = app.commands.formatSettingsInputNumber
+          ? app.commands.formatSettingsInputNumber(coerced.value)
+          : coerced.value;
         if (coerced.ok) {
           app.commands.setModuleParamValue(moduleId, param, coerced.value);
           app.commands.syncConfigToServer();
@@ -300,7 +320,9 @@ export function installFeaturesSettingsModules(app) {
       }
       if (key === "off") {
         app.state.settings.moduleState[mod.name] = false;
-        await app.api.toggleModule(mod.name, false);
+        const ticket = app.commands.beginSettingsEvaluationRequest();
+        const response = await app.api.toggleModule(mod.name, false);
+        app.commands.applySettingsEvaluationResponse(response, ticket);
         app.commands.syncConfigFromModuleState();
         app.commands.syncConfigToServer();
         app.commands.renderModulePanel();
@@ -365,7 +387,7 @@ export function installFeaturesSettingsModules(app) {
     const presetRow = app.commands.renderPreprocessingPresetRow(mod);
     if (presetRow) {
       const presetTable = document.createElement("table");
-      presetTable.className = "settings-table module-preset-table";
+      presetTable.className = "settings-table settings-subsection-table module-preset-table";
       presetTable.appendChild(presetRow);
       section.appendChild(presetTable);
     }
@@ -378,7 +400,7 @@ export function installFeaturesSettingsModules(app) {
       const group = param.group || "";
       if (group !== currentGroup || !table) {
         table = document.createElement("table");
-        table.className = "settings-table";
+        table.className = "settings-table settings-subsection-table";
         section.appendChild(table);
         currentGroup = group;
       }
@@ -394,6 +416,8 @@ export function installFeaturesSettingsModules(app) {
       app.state.settings.moduleData = data.modules || [];
       app.state.settings.moduleState = {};
       app.state.settings.moduleData.forEach(m => { app.state.settings.moduleState[m.name] = m.enabled; });
+      const ticket = app.commands.beginSettingsEvaluationRequest();
+      app.commands.applySettingsEvaluationResponse(data, ticket);
       app.commands.syncConfigFromModuleState();
       app.commands.renderModulePanel();
       app.commands.renderDynamicSettings();
@@ -421,16 +445,13 @@ export function installFeaturesSettingsModules(app) {
   function renderModuleToggleGroup(slot, modules, { showSlotLabel = true } = {}) {
     if (!modules || modules.length === 0) return null;
 
-    const group = document.createElement("div");
-    group.className = "module-toggle-group";
+    const table = document.createElement("table");
+    table.className = "settings-table module-toggle-table";
 
     if (showSlotLabel) {
-      const slotLabel = document.createElement("span");
-      slotLabel.className = "module-slot-label";
-      slotLabel.textContent = slot === "preprocessing"
+      table.setAttribute("aria-label", slot === "preprocessing"
         ? "Pre-processing"
-        : slot.charAt(0).toUpperCase() + slot.slice(1);
-      group.appendChild(slotLabel);
+        : slot.charAt(0).toUpperCase() + slot.slice(1));
     }
 
     modules
@@ -444,9 +465,29 @@ export function installFeaturesSettingsModules(app) {
         return a.name.localeCompare(b.name);
       })
       .forEach(m => {
-        const row = document.createElement("label");
+        const row = document.createElement("tr");
         row.className = "module-toggle-row";
+        row.dataset.guideModuleToggle = m.name;
         const posture = app.commands.getModulePosture(m);
+
+        const tdLabel = document.createElement("td");
+        tdLabel.title = app.commands.moduleDisplayTooltip(m);
+
+        const text = document.createElement("span");
+        text.className = "module-toggle-label";
+        text.textContent = app.commands.moduleDisplayName(m);
+        tdLabel.appendChild(text);
+
+        if (posture?.label) {
+          const badge = document.createElement("span");
+          badge.className = `module-posture-badge is-${posture.tone}`;
+          badge.textContent = posture.label;
+          tdLabel.appendChild(badge);
+        }
+
+        const tdValue = document.createElement("td");
+        const enabledLabel = document.createElement("label");
+        enabledLabel.className = "stg-check";
 
         const cb = document.createElement("input");
         cb.type = "checkbox";
@@ -456,37 +497,24 @@ export function installFeaturesSettingsModules(app) {
           if (cb.checked && m.slot === "preprocessing") {
             app.commands.applyDefaultPreprocessingPresetIfNeeded(m.name);
           }
-          await app.api.toggleModule(m.name, cb.checked);
+          const ticket = app.commands.beginSettingsEvaluationRequest();
+          const response = await app.api.toggleModule(m.name, cb.checked);
+          app.commands.applySettingsEvaluationResponse(response, ticket);
           app.commands.syncConfigFromModuleState();
           app.commands.syncConfigToServer();
           app.commands.renderModulePanel();
           app.commands.renderDynamicSettings();
           app.commands.refreshModuleDrivenViews();
         });
-        row.appendChild(cb);
-
-        const copy = document.createElement("span");
-        copy.className = "module-toggle-copy";
-        copy.title = app.commands.moduleDisplayTooltip(m);
-
-        const text = document.createElement("span");
-        text.className = "module-toggle-label";
-        text.textContent = app.commands.moduleDisplayName(m);
-        copy.appendChild(text);
-
-        if (posture?.label) {
-          const badge = document.createElement("span");
-          badge.className = `module-posture-badge is-${posture.tone}`;
-          badge.textContent = posture.label;
-          copy.appendChild(badge);
-        }
-
-        row.appendChild(copy);
-
-        group.appendChild(row);
+        enabledLabel.appendChild(cb);
+        enabledLabel.appendChild(document.createTextNode(" Enabled"));
+        tdValue.appendChild(enabledLabel);
+        row.appendChild(tdLabel);
+        row.appendChild(tdValue);
+        table.appendChild(row);
       });
 
-    return group;
+    return table;
   }
 
   function renderDynamicSettings() {
@@ -512,6 +540,9 @@ export function installFeaturesSettingsModules(app) {
 
     // Re-distribute columns since dynamic sections changed
     app.commands.distributeSettingsColumns();
+    app.commands.enhanceSettingsNumericInputs?.();
+    app.commands.annotateSettingsRows?.();
+    app.commands.renderSettingsEvaluation?.();
   }
 
 

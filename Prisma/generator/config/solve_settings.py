@@ -7,35 +7,38 @@ must have one declaration and one set of pure derived-value helpers.
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
+import math
 from pathlib import Path
 from typing import List, Optional
 
 import data_paths
+from config.layer_budget import ResolvedLayerBudget, resolve_layer_budget
+from config.settings_contract import SETTING_SPECS_BY_KEY
 
 
-NEUTRAL_FIELD_PROTECTION_CUTOFFS: dict[str, float | None] = {
-    "off": None,
-    "narrow": 0.010,
-    "standard": 0.020,
-    "broad": 0.035,
-}
+NEUTRAL_FIELD_PROTECTION_PRESETS: dict[str, float] = dict(
+    SETTING_SPECS_BY_KEY["neutral_field_protection_cutoff"].presets
+)
+NEUTRAL_FIELD_PROTECTION_PRESET_TOLERANCE = 1e-6
 
 
-def normalize_neutral_field_protection_mode(value: object) -> str:
-    """Return the canonical neutral-field protection mode."""
-    if not isinstance(value, str):
-        raise ValueError(
-            "neutral_field_protection_mode must be a string, "
-            f"got {type(value).__name__}"
-        )
-    canonical = value.strip().lower()
-    if canonical not in NEUTRAL_FIELD_PROTECTION_CUTOFFS:
-        valid = ", ".join(repr(mode) for mode in NEUTRAL_FIELD_PROTECTION_CUTOFFS)
-        raise ValueError(
-            f"Unsupported neutral_field_protection_mode: {value!r} "
-            f"(valid: {valid})"
-        )
-    return canonical
+def neutral_field_preset_for_cutoff(cutoff: float) -> str:
+    """Return the display preset corresponding to ``cutoff`` or ``custom``."""
+    numeric = float(cutoff)
+    for preset_id, preset_cutoff in NEUTRAL_FIELD_PROTECTION_PRESETS.items():
+        if math.isclose(
+            numeric,
+            preset_cutoff,
+            rel_tol=0.0,
+            abs_tol=NEUTRAL_FIELD_PROTECTION_PRESET_TOLERANCE,
+        ):
+            return preset_id
+    return "custom"
+
+
+def resolve_neutral_field_cutoff(enabled: bool, cutoff: float) -> float | None:
+    """Return the active cutoff, or ``None`` when protection is disabled."""
+    return float(cutoff) if enabled else None
 
 
 @dataclass
@@ -54,13 +57,14 @@ class SolveSettings:
     emit_pressure_diagnostics: bool = False
     emit_geometry_attribution: bool = False
     emit_blueprint_printability: bool = True
-    printability_minimum_extrusion_width_mm: float | None = None
-    printability_minimum_line_length_mm: float | None = None
+    printability_extrusion_width_mm: float = 0.20
+    printability_minimum_line_length_mm: float = 0.40
     enforce_printability: bool = False
     color_region_target_from_printability: bool = False
     color_region_target_width_multiplier: float = 2.0
     stage2_continuity_weight: float | None = None
-    neutral_field_protection_mode: str = "off"
+    neutral_field_protection_enabled: bool = False
+    neutral_field_protection_cutoff: float = 0.020
     stage2_area_weighted_zone_choice: bool = False
     stage2_pressure_frontier_rescue: bool = False
     stage2_source_edge_subzones: bool = False
@@ -72,7 +76,7 @@ class SolveSettings:
     stage2_printability_repair_min_mean_gain: float | None = None
     stage2_fine_override_seam_penalty_weight: float | None = None
     stage2_boundary_mutation_enabled: bool = True
-    stage2_boundary_mutation_min_gain: float | None = None
+    stage2_boundary_mutation_min_gain: float = 0.010
     stage2_boundary_mutation_min_component_mm: float | None = None
     stage2_boundary_mutation_current_de_percentile: float | None = None
     stage2_boundary_mutation_max_passes: int | None = 1
@@ -116,7 +120,7 @@ class SolveSettings:
     appearance_model_provider: str = "photo_stack_bundle"
     photo_stack_bundle_path: Optional[Path] = None
     nozzle_diameter: float = 0.20
-    printer_min_line_width_mm: float | None = None
+    extrusion_width_mm: float = 0.20
     cap_mode: str = "smooth_variable"
     boundary_cap_de_budget: float = 0.004
     cap_continuity_cleanup: bool = True
@@ -129,9 +133,9 @@ class SolveSettings:
         from config.resolution_schema import _apply_resolution_backstop
         from filament_order import canonical_palette_order, load_filament_order_registry
 
-        self.neutral_field_protection_mode = normalize_neutral_field_protection_mode(
-            self.neutral_field_protection_mode
-        )
+        self.neutral_field_protection_cutoff = float(self.neutral_field_protection_cutoff)
+        if not math.isfinite(self.neutral_field_protection_cutoff) or not 0 <= self.neutral_field_protection_cutoff <= 1:
+            raise ValueError("neutral_field_protection_cutoff must be between 0 and 1")
         self.palette = canonical_palette_order(
             self.palette,
             load_filament_order_registry(),
@@ -142,9 +146,18 @@ class SolveSettings:
         return self.white_cap if self.white_cap else self.white_base
 
     def effective_max_layers(self) -> int:
-        if self.max_layers is not None:
-            return self.max_layers
-        return int((self.t_max - self.d_wb - self.d_wc_min) / self.layer_height)
+        return SolveSettings.resolved_layer_budget(self).effective_max_layers
+
+    def resolved_layer_budget(self) -> ResolvedLayerBudget:
+        """Return the canonical whole-layer budget for these settings."""
+
+        return resolve_layer_budget(
+            t_max_mm=self.t_max,
+            d_wb_mm=self.d_wb,
+            d_wc_min_mm=self.d_wc_min,
+            layer_height_mm=self.layer_height,
+            max_layers=self.max_layers,
+        )
 
     def effective_d_wc_max(self) -> float:
         if self.d_wc_max is not None:
@@ -181,8 +194,10 @@ def shared_solve_settings_values(settings: SolveSettings) -> dict[str, object]:
 
 
 __all__ = [
-    "NEUTRAL_FIELD_PROTECTION_CUTOFFS",
+    "NEUTRAL_FIELD_PROTECTION_PRESETS",
+    "NEUTRAL_FIELD_PROTECTION_PRESET_TOLERANCE",
     "SolveSettings",
-    "normalize_neutral_field_protection_mode",
+    "neutral_field_preset_for_cutoff",
+    "resolve_neutral_field_cutoff",
     "shared_solve_settings_values",
 ]

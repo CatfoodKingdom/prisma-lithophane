@@ -7,7 +7,7 @@ function renderCreationTab() {
     const suggestionMode = app.state.ui.$("#paletteSuggestMode");
     if (suggestionMode) {
       suggestionMode.value = app.commands.normalizeLuminanceMode(
-        app.state.settings.config.luminance_mode || "standard",
+        app.state.settings.config.luminance_mode || app.commands.settingDefault("luminance_mode"),
       );
     }
     const modeNote = app.state.ui.$("#creationModeNote");
@@ -16,15 +16,13 @@ function renderCreationTab() {
         ? app.state.palette.manualVariantDraft
           ? "Change this copy in the Manual builder. The source Palette Deck card remains unchanged."
           : "Select filaments to be included in the manual palette. The number chosen can exceed the available AMS slots, but will require swapping filaments mid-print."
-        : "Set max colored filaments per load, extra color-load tiers, and suggestions to use. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.";
+        : "Choose the exact number of palette colors and how many suggestions to create. Choose the Solve Mode you will use. Suggested Palettes need to be added to the Palette Deck before use in a Solve.";
     }
-
-    app.commands.syncDeckGenerationSettingsUI("settings");
 
     if (app.state.palette.creationMode === "auto") {
       app.commands.renderCandidateLibrary();   // may selectAllCandidates() on first render
-      app.commands.renderAmsPreview();
       app.commands.updateSuggestSlotHint();
+      app.commands.renderAmsPreview();
     } else {
       app.commands.renderManualLibrary();
       app.commands.renderManualAmsSlots();
@@ -49,12 +47,6 @@ function renderCreationTab() {
     if (manualChip) {
       manualChip.textContent = `${app.commands.manualVariantFilamentIds().length}`;
     }
-    const capacityNote = app.state.ui.$("#suggestCapacityNote");
-    if (capacityNote) {
-      capacityNote.textContent = app.state.palette.suggestCapacityNote;
-      capacityNote.hidden = !app.state.palette.suggestCapacityNote;
-    }
-
     app.commands.renderDeckCards();
     app.commands.syncCreationSidePanelSizing();
     app.commands.updateLibraryFilterStatus();
@@ -84,8 +76,7 @@ function applyPaletteSuggestModeToSettings(mode) {
   }
 
 function buildPaletteSuggestionPayload() {
-    const targetCount = parseInt(app.state.ui.$("#targetFilamentCount")?.value, 10) || 7;
-    const swapCount = parseInt(app.state.ui.$("#targetSwapCount")?.value, 10) || 0;
+    const targetCount = Number(app.state.ui.$("#targetFilamentCount")?.value);
     const availableIds = [...app.state.palette.candidateSelection]
       .filter(fid => !app.commands.getBaseCapIds().has(fid));
     const paletteMode = app.commands.normalizeLuminanceMode(
@@ -98,9 +89,6 @@ function buildPaletteSuggestionPayload() {
       top_k: app.commands.getRequestedPaletteSuggestionCount(),
       filament_ids: availableIds,
       palette_mode: paletteMode,
-      max_swaps: swapCount,
-      improvement_threshold: Number(app.state.settings.config.swap_improvement_threshold ?? 2.0),
-      force_all_tiers: !!app.state.settings.config.force_all_tiers,
     };
   }
 
@@ -174,24 +162,70 @@ function renderCandidateLibrary() {
     });
   }
 
+function getAmsPreviewGeometry() {
+    const units = Math.max(1, Math.trunc(Number(app.state.session.printerConfig.ams_units) || 1));
+    const slotsPerUnit = Math.max(1, Math.trunc(Number(app.state.session.printerConfig.slots_per_unit) || 4));
+    const totalSlots = units * slotsPerUnit;
+    const whiteSlots = Math.min(
+      totalSlots,
+      Math.max(0, Math.trunc(Number(app.commands.getBaseCapSlots()) || 0)),
+    );
+    return {
+      units,
+      slotsPerUnit,
+      totalSlots,
+      whiteSlots,
+      colorSlots: Math.max(0, totalSlots - whiteSlots),
+    };
+  }
+
+function validatePaletteSuggestionRequest() {
+    const requested = Number(app.state.ui.$("#targetFilamentCount")?.value);
+    if (!Number.isInteger(requested) || requested < 2 || requested > 16) {
+      app.commands.showToast("Palette Colors must be a whole number from 2 to 16", "warn");
+      return false;
+    }
+    const eligibleSelected = [...app.state.palette.candidateSelection]
+      .filter(fid => !app.commands.getBaseCapIds().has(fid));
+    if (eligibleSelected.length < requested) {
+      app.commands.showToast(
+        `Palette Colors is ${requested}, but only ${eligibleSelected.length} eligible color filaments are selected. Select more filaments or reduce Palette Colors.`,
+        "warn",
+      );
+      return false;
+    }
+    return true;
+  }
+
 function renderAmsPreview() {
     const container = app.state.ui.$("#amsPreview");
     if (!container) return;
 
-    const maxColors = parseInt(app.state.ui.$("#targetFilamentCount")?.value) || 7;
-    const totalSlots = app.state.session.printerConfig.ams_slots || 4;
-    const whiteSlots = app.commands.getBaseCapSlots();
-    const colorSlots = totalSlots - whiteSlots;
-    const filledCount = Math.min(maxColors, colorSlots);
-    const units = app.state.session.printerConfig.ams_units || 1;
-    const slotsPerUnit = app.state.session.printerConfig.slots_per_unit || 4;
+    const rawRequestedColors = String(app.state.ui.$("#targetFilamentCount")?.value ?? "").trim();
+    const parsedRequestedColors = Number(rawRequestedColors);
+    const requestedColors = rawRequestedColors
+      && Number.isInteger(parsedRequestedColors)
+      && parsedRequestedColors >= 2
+      && parsedRequestedColors <= 16
+      ? parsedRequestedColors
+      : null;
+    const {
+      units,
+      slotsPerUnit,
+      totalSlots,
+      whiteSlots,
+      colorSlots,
+    } = app.commands.getAmsPreviewGeometry();
+    const filledCount = requestedColors === null ? 0 : Math.min(requestedColors, colorSlots);
+    const additionalColors = requestedColors === null ? 0 : Math.max(0, requestedColors - colorSlots);
+    const visualColumns = Math.min(4, slotsPerUnit);
 
     let html = "";
     let slotIdx = 0;
 
     for (let u = 0; u < units; u++) {
       html += `<div class="ams-preview-unit-label">AMS ${u + 1}</div>`;
-      html += `<div class="ams-preview-slots">`;
+      html += `<div class="ams-preview-slots" style="--ams-preview-columns:${visualColumns}">`;
       for (let s = 0; s < slotsPerUnit; s++) {
         if (slotIdx < whiteSlots) {
           html += `<div class="ams-preview-slot is-white"><span class="ams-preview-base-label"><span>BASE/</span><span>CAP</span></span></div>`;
@@ -204,8 +238,38 @@ function renderAmsPreview() {
       }
       html += `</div>`;
     }
-    html += `<div class="ams-preview-status">${filledCount} / ${colorSlots} color slots</div>`;
+
+    html += requestedColors === null
+      ? `<div class="ams-preview-status">Select 2–16 palette colors</div>`
+      : `<div class="ams-preview-status">${filledCount} / ${colorSlots} color slots</div>`;
+
+    if (additionalColors > 0) {
+      const overflowSlots = Array.from(
+        { length: additionalColors },
+        () => `<span class="ams-preview-overflow-slot"><span class="ams-preview-overflow-pip"></span></span>`,
+      ).join("");
+      html += `<div class="ams-preview-overflow">
+        <div class="ams-preview-overflow-label">Additional colors (${additionalColors})</div>
+        <div class="ams-preview-overflow-slots" style="--ams-preview-columns:${visualColumns}" aria-hidden="true">${overflowSlots}</div>
+        <div class="ams-preview-overflow-note">May require filament swaps</div>
+      </div>`;
+    }
+
+    const reservedSummary = whiteSlots === 1
+      ? "One slot is reserved for the base and cap."
+      : `${whiteSlots} slots are reserved for the base and cap.`;
+    let accessibleSummary;
+    if (requestedColors === null) {
+      accessibleSummary = `AMS capacity preview. ${reservedSummary} Select 2 to 16 palette colors to preview occupancy.`;
+    } else if (additionalColors > 0) {
+      accessibleSummary = `${requestedColors} palette colors: ${filledCount} fit in ${colorSlots} simultaneous color slots, with ${additionalColors} additional colors. May require filament swaps. ${reservedSummary}`;
+    } else {
+      accessibleSummary = `Palette uses ${requestedColors} colors. ${filledCount} of ${colorSlots} simultaneous color slots are occupied. ${reservedSummary}`;
+    }
+
     container.innerHTML = html;
+    container.setAttribute("role", "img");
+    container.setAttribute("aria-label", accessibleSummary);
   }
 
 function renderManualLibrary() {
@@ -371,7 +435,7 @@ function clearManualSlots() {
     app.commands.renderCreationTab();
   }
 
-async function handleSuggestPalettes() {
+async function handleSuggestPalettes({ throwOnError = false } = {}) {
     const btn = app.state.ui.$("#suggestPalettesBtn");
     if (!btn) return;
 
@@ -379,6 +443,11 @@ async function handleSuggestPalettes() {
       app.commands.showToast("Load an image first before generating palette suggestions", "warn");
       return;
     }
+    if (app.commands.settingsBlocksOperation("suggest")) {
+      app.commands.showToast("Current print settings must be corrected before suggesting palettes", "warn");
+      return;
+    }
+    if (!app.commands.validatePaletteSuggestionRequest()) return;
 
     btn.disabled = true;
     btn.textContent = "...";
@@ -416,6 +485,7 @@ async function handleSuggestPalettes() {
       if (!st || app.state.ui._suggestPolling !== pollingOwner) return;
       if (st.status === "complete" && st.result) {
         app.commands._processSuggestResults(st.result);
+        return st.result;
       } else if (st.status === "cancelled") {
         if (st.result) app.commands._processSuggestResults(st.result);
         app.commands.showToast("Suggestion cancelled", "warn");
@@ -427,6 +497,7 @@ async function handleSuggestPalettes() {
       if (pollingOwner && app.state.ui._suggestPolling !== pollingOwner) return;
       const prefix = pollingOwner ? "Palette suggestion status failed" : "Palette suggestion failed to start";
       app.commands.showToast(`${prefix}: ${err.message}`, "error");
+      if (throwOnError) throw err;
     } finally {
       if (pollingOwner && app.state.ui._suggestPolling !== pollingOwner) return;
       if (app.state.ui._suggestPolling === pollingOwner) app.state.ui._suggestPolling = null;
@@ -457,7 +528,7 @@ async function handleSuggestBaseShadingLimit() {
       const value = app.commands.setLuminanceBaseShadingLimitFraction(
         result.recommended_base_shading_limit_fraction
           ?? result.recommended_authority_fraction
-          ?? 0.75,
+          ?? app.commands.settingDefault("luminance_base_shading_limit_fraction"),
       );
       app.commands.syncBaseShadingLimitControls(app.commands.formatLuminanceBaseShadingLimitPercent(value));
       app.commands.checkPresetModified();
@@ -475,10 +546,6 @@ function _processSuggestResults(suggestions) {
     let addedCount = 0;
     const addedCardIds = [];
     const seenSets = new Set();
-    const perLoadCapped = suggestions?.per_load_capped;
-    app.state.palette.suggestCapacityNote = perLoadCapped?.capacity
-      ? `Max colors capped to ${perLoadCapped.capacity} by AMS capacity`
-      : "";
     const paletteMode = app.commands.normalizeLuminanceMode(
       suggestions?.palette_mode || app.state.ui.$("#paletteSuggestMode")?.value || "standard",
     );
@@ -508,30 +575,10 @@ function _processSuggestResults(suggestions) {
       return true;
     };
 
-    if (suggestions.tiers) {
-      const recommendedKey = makeKey(suggestions?.recommended?.filament_ids || []);
-      const alternatives = suggestions.alternatives || [];
-      for (const cand of alternatives) {
-        const isRecommended = makeKey(cand.filament_ids || []) === recommendedKey;
-        pushSuggestionCard(
-          cand,
-          `${modePrefix} suggested ${app.state.palette.nextDeckNum++}`,
-          { recommended: isRecommended },
-        );
-      }
-      for (const tier of suggestions.tiers) {
-        const tierLabel = tier.swap_count === 0 ? "base load" : `${tier.swap_count} extra load${tier.swap_count > 1 ? "s" : ""}`;
-        for (const cand of tier.candidates) {
-          pushSuggestionCard(cand, `${modePrefix} tier ${tier.swap_count} (${tierLabel}) size ${cand.filament_ids?.length || tier.n_filaments}`, {
-            swap_count: tier.swap_count,
-          });
-        }
-      }
-    } else {
-      const candidates = suggestions.candidates || [];
-      for (const cand of candidates) {
-        pushSuggestionCard(cand, `${modePrefix} suggested ${app.state.palette.nextDeckNum++}`);
-      }
+    const candidates = (suggestions.candidates || [])
+      .slice(0, app.commands.getRequestedPaletteSuggestionCount());
+    for (const cand of candidates) {
+      pushSuggestionCard(cand, `${modePrefix} suggested ${app.state.palette.nextDeckNum++}`);
     }
 
     if (addedCount === 0) {
@@ -540,9 +587,6 @@ function _processSuggestResults(suggestions) {
     }
     app.commands.renderCreationTab();
     app.commands.updateRail();
-    if (app.state.palette.suggestCapacityNote) {
-      app.commands.showToast(app.state.palette.suggestCapacityNote, "warn");
-    }
     app.commands.showToast(`Staged ${addedCount} suggested palettes`, "success");
     app.events.emit("palette.suggestions.completed", {
       cardIds: addedCardIds,
@@ -554,6 +598,8 @@ function _processSuggestResults(suggestions) {
     renderCreationTab,
     selectAllCandidates,
     renderCandidateLibrary,
+    getAmsPreviewGeometry,
+    validatePaletteSuggestionRequest,
     renderAmsPreview,
     renderManualLibrary,
     renderManualAmsSlots,

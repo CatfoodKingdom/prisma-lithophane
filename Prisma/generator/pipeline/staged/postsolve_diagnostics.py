@@ -732,8 +732,8 @@ def _run_postsolve_diagnostics(
         )
         _set_counter(
             performance_profile,
-            "blueprint_printability_minimum_extrusion_width_mm",
-            float(blueprint_printability.minimum_extrusion_width_mm),
+            "blueprint_printability_extrusion_width_mm",
+            float(blueprint_printability.extrusion_width_mm),
         )
         _set_counter(
             performance_profile,

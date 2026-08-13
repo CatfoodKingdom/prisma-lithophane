@@ -258,7 +258,7 @@ def _stage4_detail_zone_min_pixels(state) -> int:
     cfg = state.config
     pitch = max(float(cfg.solver_fine_pitch_mm or 0.20), 1e-9)
     printability_settings = resolve_blueprint_printability_settings(cfg, pitch_mm=pitch)
-    min_width = max(float(printability_settings.minimum_extrusion_width_mm), pitch)
+    min_width = max(float(printability_settings.extrusion_width_mm), pitch)
     min_width_px = max(1, int(np.ceil(min_width / pitch - 1e-9)))
     return max(int(_STAGE4_DETAIL_ZONE_MIN_PIXELS), min_width_px)
 

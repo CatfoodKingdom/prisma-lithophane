@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+import pytest
 
 _GEN_DIR = Path(__file__).resolve().parent.parent.parent / "Prisma" / "generator"
 if str(_GEN_DIR) not in sys.path:
@@ -120,22 +121,21 @@ def _settings(
     pitch_mm: float,
 ) -> BlueprintPrintabilitySettings:
     return BlueprintPrintabilitySettings(
-        minimum_extrusion_width_mm=float(width_mm),
+        extrusion_width_mm=float(width_mm),
         minimum_line_length_mm=float(minimum_line_mm),
         pitch_mm=float(pitch_mm),
         layer_height_mm=0.20,
     )
 
 
-def test_auto_printability_width_uses_printer_min_line_width() -> None:
+def test_printability_uses_resolved_active_nozzle_width() -> None:
     config = type(
         "Cfg",
         (),
         {
-            "printability_minimum_extrusion_width_mm": None,
-            "printer_min_line_width_mm": 0.16,
+            "printability_extrusion_width_mm": 0.24,
             "nozzle_diameter": 0.20,
-            "printability_minimum_line_length_mm": None,
+            "printability_minimum_line_length_mm": 0.48,
             "solver_fine_pitch_mm": 0.20,
             "image_sample_pitch_mm": 0.20,
             "layer_height": 0.08,
@@ -144,28 +144,22 @@ def test_auto_printability_width_uses_printer_min_line_width() -> None:
 
     settings = resolve_blueprint_printability_settings(config)
 
-    assert settings.minimum_extrusion_width_mm == 0.16
-    assert settings.minimum_line_length_mm == 0.40
+    assert settings.extrusion_width_mm == 0.24
+    assert settings.minimum_line_length_mm == 0.48
 
 
-def test_user_printability_width_overrides_printer_min_line_width() -> None:
+def test_printability_requires_active_extrusion_width_thresholds() -> None:
     config = type(
         "Cfg",
         (),
         {
-            "printability_minimum_extrusion_width_mm": 0.24,
-            "printer_min_line_width_mm": 0.16,
-            "nozzle_diameter": 0.20,
+            "printability_extrusion_width_mm": None,
             "printability_minimum_line_length_mm": None,
-            "solver_fine_pitch_mm": 0.20,
-            "image_sample_pitch_mm": 0.20,
-            "layer_height": 0.08,
         },
     )()
 
-    settings = resolve_blueprint_printability_settings(config)
-
-    assert settings.minimum_extrusion_width_mm == 0.24
+    with pytest.raises(ValueError, match="active Extrusion Width"):
+        resolve_blueprint_printability_settings(config)
 
 
 def test_layered_blueprint_uses_palette_order_not_recipe_tuple_order() -> None:

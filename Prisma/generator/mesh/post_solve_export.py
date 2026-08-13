@@ -24,6 +24,7 @@ from grouping.banded_export import (
     banded_export_plan_from_metadata,
     banded_fill_maps,
 )
+from config.layer_budget import resolve_border_height
 from mesh.export_mesh_bundle import ExportMeshBundle, MeshObject
 from mesh.field_white_reconstruction import (
     FieldWhiteReconstructionConfig,
@@ -1197,6 +1198,20 @@ def _with_export_border(bundle: ExportMeshBundle, *, config: RectilinearExportCo
     bw = float(config.border_width_mm)
     bh = float(config.border_height_mm)
     enabled = bool(config.border_enabled) and bw > float(config.eps) and bh > float(config.eps)
+    if enabled:
+        border_alignment = resolve_border_height(
+            border_height_mm=bh,
+            base_thickness_mm=config.d_wb_mm,
+            layer_height_mm=config.layer_height_mm,
+        )
+        if border_alignment.below_base:
+            raise ExportPreparationError(
+                "border height must be at least the base thickness"
+            )
+        if not border_alignment.aligned:
+            raise ExportPreparationError(
+                "border height above the base must be a whole number of layer-height steps"
+            )
     content_w = float(bundle.image_domain_width_mm)
     content_h = float(bundle.image_domain_height_mm)
     outer_w = content_w + (2.0 * bw if enabled else 0.0)

@@ -17,6 +17,8 @@ def _phantom_values(server) -> dict:
         "v2_enable_cap_topology_cleanup": True,
         "v2_max_cleanup_rounds": 9,
         "v2_full_cap_quality_report": True,
+        "swap_improvement_threshold": 3.5,
+        "force_all_tiers": True,
     }
 
 
@@ -48,7 +50,7 @@ def test_phantom_session_submission_is_quiet_and_fingerprint_neutral(monkeypatch
         server.session.update(original)
 
 
-def test_stale_profile_normalizes_without_rewriting_source_or_losing_live_state(
+def test_stale_profile_migrates_with_backup_without_losing_live_state(
     tmp_path, monkeypatch
 ):
     import server
@@ -60,7 +62,7 @@ def test_stale_profile_normalizes_without_rewriting_source_or_losing_live_state(
         "id": "legacy-profile",
         "kind": "named",
         "name": "Legacy Profile",
-        "schema_version": server._SETTINGS_PROFILE_SCHEMA_VERSION,
+        "schema_version": 5,
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-01T00:00:00Z",
         "settings": {
@@ -74,9 +76,16 @@ def test_stale_profile_normalizes_without_rewriting_source_or_losing_live_state(
     source_path.write_text(json.dumps(stale, indent=2), encoding="utf-8")
     before = source_path.read_bytes()
 
-    record = server._load_settings_profile_record(source_path, kind_hint="named")
+    assert server._upgrade_settings_profile_record(source_path) is True
+    record = server._load_settings_profile_record(source_path)
 
-    assert source_path.read_bytes() == before
+    assert source_path.read_bytes() != before
+    backup = source_path.with_name(
+        f"{source_path.name}.v5.backup"
+    )
+    assert backup.read_bytes() == before
+    migrated = json.loads(source_path.read_text(encoding="utf-8"))
+    assert migrated["settings"]["solve_pitch_extrusion_width_multiplier"] == 1
     _assert_no_phantoms(server, record.settings)
     assert record.settings["source_resample_kernel"] == "area"
     assert record.settings["preprocessing_params"] == {

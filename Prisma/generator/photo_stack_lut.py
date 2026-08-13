@@ -62,7 +62,7 @@ from lib.photo_stack_model.predictor import (
     t_from_od,
 )
 
-PHOTO_STACK_LUT_BUILDER_VERSION = "photo_stack_lut_appearance_v2_2026_06_10"
+PHOTO_STACK_LUT_BUILDER_VERSION = "photo_stack_lut_appearance_v3_2026_08_08_integer_budget"
 
 
 @dataclass(frozen=True)
@@ -1006,7 +1006,8 @@ def predict_unique_stack_cap_oklab_grid(
     layer_height: float,
     max_layers: int,
     cap_values_mm: np.ndarray,
-    budget_mm: float | None = None,
+    cap_layer_counts: np.ndarray,
+    budget_steps: int | None = None,
     white_fill_profile: dict | None = None,
     band_groups: Sequence[Sequence[str]] | None = None,
     band_layers: Sequence[int] | None = None,
@@ -1032,6 +1033,21 @@ def predict_unique_stack_cap_oklab_grid(
     fid_index = {fid: idx for idx, fid in enumerate(fid_list)}
     lh = float(layer_height)
     caps = np.asarray(cap_values_mm, dtype=float)
+    raw_cap_counts = np.asarray(cap_layer_counts)
+    if not np.issubdtype(raw_cap_counts.dtype, np.integer):
+        raise ValueError("cap layer counts must contain integers")
+    cap_counts = raw_cap_counts.astype(np.int64, copy=False)
+    if cap_counts.ndim != 1 or len(cap_counts) != len(caps):
+        raise ValueError("cap layer counts must be one-dimensional and match cap values")
+    if np.any(cap_counts < 0):
+        raise ValueError("cap layer counts must be nonnegative")
+    if not np.allclose(
+        caps,
+        cap_counts.astype(np.float64) * lh,
+        rtol=0.0,
+        atol=1e-6,
+    ):
+        raise ValueError("cap values do not match their layer counts")
     n_stacks = len(unique_stacks)
     counts = np.zeros((n_stacks, len(fid_list)), dtype=np.int32)
     for uid, stack in unique_stacks.items():
@@ -1062,15 +1078,13 @@ def predict_unique_stack_cap_oklab_grid(
                 )
             )
 
-    if budget_mm is None:
+    if budget_steps is None:
         allowed_steps = np.full(len(caps), int(max_layers), dtype=np.int64)
     else:
-        allowed_steps = np.asarray(
-            [
-                max(0, min(int(max_layers), int((float(budget_mm) - float(d_wc)) / lh)))
-                for d_wc in caps
-            ],
-            dtype=np.int64,
+        allowed_steps = np.clip(
+            int(budget_steps) - cap_counts,
+            0,
+            int(max_layers),
         )
     representable = counts.max(axis=1, initial=0) <= int(max_layers)
     budgeted_steps = (
@@ -1120,6 +1134,7 @@ def iter_photo_stack_lut_arrays(
     d_wc_max: float,
     k_max: int,
     t_max: float,
+    budget_steps: int | None = None,
     verbose: bool = False,
 ) -> Iterator[PhotoStackLUTArrays]:
     """Yield raw vectorized LUT arrays for a photo-stack provider."""
@@ -1137,15 +1152,23 @@ def iter_photo_stack_lut_arrays(
         max_layers=max_layers,
         cap_steps_d=cap_steps_d,
     )
-    budget_mm = float(t_max)
+    if budget_steps is None:
+        from config.layer_budget import floor_layer_steps
+
+        budget_steps = floor_layer_steps(t_max, layer_height)
     for k in range(1, min(int(k_max), len(filament_ids)) + 1):
         for subset in itertools.combinations([str(fid) for fid in filament_ids], k):
             all_thicknesses: list[np.ndarray] = []
             all_caps: list[np.ndarray] = []
             all_rgbs: list[np.ndarray] = []
-            for cap_index, d_wc in enumerate(cap_steps_d):
-                remaining_mm = budget_mm - float(d_wc)
-                remaining_steps = max(0, min(int(max_layers), int(remaining_mm / float(layer_height))))
+            cap_step_counts = range(n_wc_min, n_wc_max + 1)
+            for cap_index, (cap_steps, d_wc) in enumerate(
+                zip(cap_step_counts, cap_steps_d)
+            ):
+                remaining_steps = max(
+                    0,
+                    min(int(max_layers), int(budget_steps) - int(cap_steps)),
+                )
                 combos = _enumerate_combos_budget(k, remaining_steps)
                 if len(combos) == 0:
                     continue

@@ -1,10 +1,12 @@
 import { assertPolledJobIdentity } from "../../core/polling.js";
+import { createAnchoredMenuController } from "../../core/anchored-menu.js?v=2026-08-11-rail-selectors-v1";
 
 /**
  * Install the shell/index feature commands.
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesShellIndex(app) {
+  let railPrintSetupMenuControllers = [];
   function getBaseFilament() {
     const sel = app.state.ui.$("#cfgBaseFilament");
     return sel ? sel.value : app.state.session.DEFAULT_BASE_FILAMENT;
@@ -48,14 +50,14 @@ export function installFeaturesShellIndex(app) {
     return mode === "smooth_variable" ? "smooth_variable" : "appearance_bounded_smooth";
   }
 
-  function loadLastColorCapMode(fallback = "appearance_bounded_smooth") {
+  function loadLastColorCapMode(fallback = null) {
     try {
       const stored = app.persistence.read(app.state.settings.COLOR_CAP_MODE_STORAGE_KEY);
       if (stored === "appearance_bounded_smooth" || stored === "smooth_variable") {
         return stored;
       }
     } catch { /* ignore */ }
-    return app.commands.normalizeColorCapModeForStorage(fallback);
+    return app.commands.normalizeColorCapModeForStorage(fallback || app.commands.settingDefault("cap_mode"));
   }
 
   function saveLastColorCapMode(mode) {
@@ -78,13 +80,13 @@ export function installFeaturesShellIndex(app) {
     app.state.settings.config.stage4_printability_gate_detail = true;
   }
 
-  function formatRegionPlanningScale(value = app.state.settings.config.stage1_coarsening_factor || 1) {
+  function formatRegionPlanningScale(value = app.state.settings.config.stage1_coarsening_factor || app.commands.settingDefault("stage1_coarsening_factor")) {
     const factor = Math.max(1, parseInt(value, 10) || 1);
     return factor === 1 ? "1x (full detail)" : `${factor}x (coarser regions)`;
   }
 
-  function formatRegionMethod(mode = app.state.settings.config.cell_mode || "felzenszwalb") {
-    switch (String(mode || "felzenszwalb").toLowerCase()) {
+  function formatRegionMethod(mode = app.state.settings.config.cell_mode || app.commands.settingDefault("cell_mode")) {
+    switch (String(mode || app.commands.settingDefault("cell_mode")).toLowerCase()) {
       case "grid": return "fixed grid";
       case "slic": return "superpixels";
       case "felzenszwalb":
@@ -97,35 +99,17 @@ export function installFeaturesShellIndex(app) {
     const domValue = parseFloat(app.state.ui.$("#cfgLayerHeight")?.value);
     if (Number.isFinite(domValue) && domValue > 0) return domValue;
     const configValue = parseFloat(app.state.settings.config.layer_height);
-    return Number.isFinite(configValue) && configValue > 0 ? configValue : 0.08;
+    return Number.isFinite(configValue) && configValue > 0 ? configValue : app.commands.settingDefault("layer_height");
   }
 
-  function minCapLayersFromThickness(thicknessMm = app.state.settings.config.d_wc_min, layerHeight = app.commands.getCurrentLayerHeight()) {
-    const lh = Math.max(Number(layerHeight) || 0.08, 1e-9);
-    const thickness = Math.max(Number(thicknessMm) || lh, lh);
-    return Math.max(1, Math.ceil(thickness / lh - 1e-9));
-  }
-
-  function minCapThicknessFromLayers(layerCount, layerHeight = app.commands.getCurrentLayerHeight()) {
+  function minimumCapThicknessMm(layerCount = app.state.settings.config.min_cap_layers, layerHeight = app.commands.getCurrentLayerHeight()) {
     const layers = Math.max(1, Math.trunc(Number(layerCount) || 1));
-    const lh = Math.max(Number(layerHeight) || 0.08, 1e-9);
+    const lh = Math.max(Number(layerHeight) || app.commands.settingDefault("layer_height"), 1e-9);
     return Math.round(layers * lh * 1e6) / 1e6;
   }
 
-  function smoothingRadiusMmFromCells(cells = app.state.settings.config.smooth_kernel, solvePitch = app.commands.getCurrentSolvePitch()) {
-    const cellCount = Math.max(0, Number(cells) || 0);
-    const pitch = Math.max(Number(solvePitch) || 0.20, 1e-9);
-    return Math.round(cellCount * pitch * 1e6) / 1e6;
-  }
-
-  function smoothingCellsFromRadiusMm(radiusMm, solvePitch = app.commands.getCurrentSolvePitch()) {
-    const radius = Math.max(0, Number(radiusMm) || 0);
-    const pitch = Math.max(Number(solvePitch) || 0.20, 1e-9);
-    return radius / pitch;
-  }
-
   function normalizeLuminanceMode(mode) {
-    const raw = String(mode || "standard").trim().toLowerCase();
+    const raw = String(mode || app.commands.settingDefault("luminance_mode")).trim().toLowerCase();
     if (["luminance", "luminance-detail", "luminance_detail", "detail"].includes(raw)) {
       return "luminance_detail";
     }
@@ -134,23 +118,24 @@ export function installFeaturesShellIndex(app) {
 
   function clampLuminanceBaseShadingLimitFraction(value) {
     const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 0.75;
+    if (!Number.isFinite(parsed)) return app.commands.settingDefault("luminance_base_shading_limit_fraction");
     return Math.max(0.0, Math.min(1.0, parsed));
   }
 
   function getLuminanceBaseShadingLimitFraction() {
+    const defaultValue = app.commands.settingDefault("luminance_base_shading_limit_fraction");
     const current = app.state.settings.config.luminance_base_shading_limit_fraction;
     const legacy = app.state.settings.config.luminance_handler_optical_authority_fraction;
     const currentParsed = Number(current);
     const legacyParsed = Number(legacy);
     if (
       Number.isFinite(legacyParsed)
-      && (!Number.isFinite(currentParsed) || (currentParsed === 0.75 && legacyParsed !== 0.75))
+      && (!Number.isFinite(currentParsed) || (currentParsed === defaultValue && legacyParsed !== defaultValue))
     ) {
       return app.commands.clampLuminanceBaseShadingLimitFraction(legacyParsed);
     }
     return app.commands.clampLuminanceBaseShadingLimitFraction(
-      Number.isFinite(currentParsed) ? currentParsed : 0.75,
+      Number.isFinite(currentParsed) ? currentParsed : defaultValue,
     );
   }
 
@@ -167,7 +152,7 @@ export function installFeaturesShellIndex(app) {
 
   function parseLuminanceBaseShadingLimitPercent(value) {
     const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 0.75;
+    if (!Number.isFinite(parsed)) return app.commands.settingDefault("luminance_base_shading_limit_fraction");
     return app.commands.clampLuminanceBaseShadingLimitFraction(parsed / 100);
   }
 
@@ -217,7 +202,7 @@ export function installFeaturesShellIndex(app) {
   }
 
   function normalizeActiveGamutMode(mode = "hull") {
-    const normalized = String(mode || "hull").trim().toLowerCase();
+    const normalized = String(mode || app.commands.settingDefault("gamut_mode")).trim().toLowerCase();
     return normalized === "chroma" ? "hue_preserving" : normalized;
   }
 
@@ -240,7 +225,7 @@ export function installFeaturesShellIndex(app) {
   }
 
   function syncChromaWeightControlFromConfig() {
-    const rawWeight = app.commands.normalizeChromaWeight(app.state.settings.config.chroma_weight ?? 1.0);
+    const rawWeight = app.commands.normalizeChromaWeight(app.state.settings.config.chroma_weight ?? app.commands.settingDefault("chroma_weight"));
     const slider = app.state.ui.$("#cfgChromaWeight");
     if (slider) {
       const position = app.commands.chromaWeightToSliderPosition(rawWeight);
@@ -261,7 +246,7 @@ export function installFeaturesShellIndex(app) {
 
   function getSolveModeControlValue() {
     const selected = document.querySelector("#cfgLuminanceMode .segmented-btn.is-active");
-    return selected?.dataset.value || app.state.settings.config.luminance_mode || "standard";
+    return selected?.dataset.value || app.state.settings.config.luminance_mode || app.commands.settingDefault("luminance_mode");
   }
 
   function setSolveModeControlValue(mode) {
@@ -616,10 +601,18 @@ export function installFeaturesShellIndex(app) {
 
   function appConfirm(
     message,
-    { ok = "OK", cancel = "Cancel", title = "Confirm", restoreFocus = null } = {},
+    {
+      ok = "OK",
+      cancel = "Cancel",
+      title = "Confirm",
+      restoreFocus = null,
+      emphasis = [],
+      detailHtml = "",
+    } = {},
   ) {
     return new Promise(resolve => {
       const overlay = app.state.ui.$("#appDialog");
+      const dialog = overlay?.querySelector?.(".app-dialog");
       const titleEl = app.state.ui.$("#appDialogTitle");
       const msg = app.state.ui.$("#appDialogMsg");
       const input = app.state.ui.$("#appDialogInput");
@@ -634,12 +627,47 @@ export function installFeaturesShellIndex(app) {
       const previousFocus = dialogDocument.activeElement;
       const focusRestoreTarget = restoreFocus || previousFocus;
       if (titleEl) titleEl.textContent = title;
-      msg.textContent = message;
+      const emphasisValues = [...new Set(
+        (Array.isArray(emphasis) ? emphasis : [])
+          .map(value => String(value))
+          .filter(Boolean),
+      )];
+      if (emphasisValues.length) {
+        const source = String(message);
+        let cursor = 0;
+        let messageHtml = "";
+        while (cursor < source.length) {
+          let nextIndex = -1;
+          let nextValue = "";
+          for (const value of emphasisValues) {
+            const index = source.indexOf(value, cursor);
+            if (
+              index >= 0
+              && (nextIndex < 0 || index < nextIndex || (index === nextIndex && value.length > nextValue.length))
+            ) {
+              nextIndex = index;
+              nextValue = value;
+            }
+          }
+          if (nextIndex < 0) {
+            messageHtml += app.commands.esc2(source.slice(cursor));
+            break;
+          }
+          messageHtml += app.commands.esc2(source.slice(cursor, nextIndex));
+          messageHtml += `<strong class="app-dialog-emphasis">${app.commands.esc2(nextValue)}</strong>`;
+          cursor = nextIndex + nextValue.length;
+        }
+        msg.innerHTML = messageHtml;
+      } else {
+        msg.textContent = message;
+      }
       input.style.display = "none";
       if (hint) {
-        hint.classList.add("is-hidden");
-        hint.innerHTML = "";
+        hint.innerHTML = detailHtml || "";
+        hint.classList.toggle("is-hidden", !detailHtml);
       }
+      dialog?.classList.toggle("is-detailed", Boolean(detailHtml));
+      dialog?.setAttribute("aria-describedby", detailHtml ? "appDialogMsg appDialogHint" : "appDialogMsg");
       buttons.innerHTML = `
         <button class="ghost-button small" id="appDialogNo">${app.commands.esc2(cancel)}</button>
         <button class="primary-button small" id="appDialogYes">${app.commands.esc2(ok)}</button>
@@ -673,6 +701,8 @@ export function installFeaturesShellIndex(app) {
         if (cancelBtn) cancelBtn.onclick = null;
         if (okBtn) okBtn.onclick = null;
         if (closeBtn) closeBtn.onclick = null;
+        dialog?.classList.remove("is-detailed");
+        dialog?.setAttribute("aria-describedby", "appDialogMsg");
       };
       const close = (val) => {
         if (settled) return;
@@ -1060,39 +1090,47 @@ export function installFeaturesShellIndex(app) {
 
     // Pixelation pass — always on in sidebar (shows actual print resolution)
     {
-      const pxSizeMm = app.state.settings.config.image_sample_pitch_mm || 0.20;
-      const gridW = Math.max(1, Math.round(app.state.image.frameState.widthMm / pxSizeMm));
-      const gridH = Math.max(1, Math.round(app.state.image.frameState.heightMm / pxSizeMm));
+      let solveGrid = null;
+      try {
+        solveGrid = app.commands.getCurrentResolvedSolveGrid();
+      } catch {
+        // Invalid pitches are reported by the Image-page warning and rejected
+        // by config sync. Keep the unpixelated preview usable in the meantime.
+      }
+      if (solveGrid) {
+        const gridW = solveGrid.cells.width;
+        const gridH = solveGrid.cells.height;
 
-      // Draw image only at solve-grid resolution, using the same crop-cover model.
-      const tmp = document.createElement("canvas");
-      tmp.width = gridW;
-      tmp.height = gridH;
-      const tmpCtx = tmp.getContext("2d");
-      const gGeom = app.commands.cropCoverImageGeometry(gridW, gridH, imgNatW, imgNatH, app.state.image.frameState.scale, app.state.image.frameState.rotation);
-      const gDispW = gGeom.displayW;
-      const gDispH = gGeom.displayH;
-      const gSlackX = Math.max(0, gGeom.visualW - gridW);
-      const gSlackY = Math.max(0, gGeom.visualH - gridH);
-      const gOffX = app.state.image.frameState.panX * gSlackX / 2;
-      const gOffY = app.state.image.frameState.panY * gSlackY / 2;
-      tmpCtx.save();
-      tmpCtx.translate(gridW / 2 - gOffX, gridH / 2 - gOffY);
-      tmpCtx.rotate(app.state.image.frameState.rotation * Math.PI / 180);
-      tmpCtx.scale(app.state.image.frameState.flipH ? -1 : 1, app.state.image.frameState.flipV ? -1 : 1);
-      tmpCtx.drawImage(srcImg, -gDispW / 2, -gDispH / 2, gDispW, gDispH);
-      tmpCtx.restore();
+        // Draw image only at solve-grid resolution, using the same crop-cover model.
+        const tmp = document.createElement("canvas");
+        tmp.width = gridW;
+        tmp.height = gridH;
+        const tmpCtx = tmp.getContext("2d");
+        const gGeom = app.commands.cropCoverImageGeometry(gridW, gridH, imgNatW, imgNatH, app.state.image.frameState.scale, app.state.image.frameState.rotation);
+        const gDispW = gGeom.displayW;
+        const gDispH = gGeom.displayH;
+        const gSlackX = Math.max(0, gGeom.visualW - gridW);
+        const gSlackY = Math.max(0, gGeom.visualH - gridH);
+        const gOffX = app.state.image.frameState.panX * gSlackX / 2;
+        const gOffY = app.state.image.frameState.panY * gSlackY / 2;
+        tmpCtx.save();
+        tmpCtx.translate(gridW / 2 - gOffX, gridH / 2 - gOffY);
+        tmpCtx.rotate(app.state.image.frameState.rotation * Math.PI / 180);
+        tmpCtx.scale(app.state.image.frameState.flipH ? -1 : 1, app.state.image.frameState.flipV ? -1 : 1);
+        tmpCtx.drawImage(srcImg, -gDispW / 2, -gDispH / 2, gDispW, gDispH);
+        tmpCtx.restore();
 
-      // Black background then pixelated image on top
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(bPx, bPx, frameW, frameH);
-      ctx.clip();
-      ctx.fillStyle = "#000";
-      ctx.fillRect(bPx, bPx, frameW, frameH);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(tmp, 0, 0, gridW, gridH, bPx, bPx, frameW, frameH);
-      ctx.restore();
+        // Black background then pixelated image on top
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(bPx, bPx, frameW, frameH);
+        ctx.clip();
+        ctx.fillStyle = "#000";
+        ctx.fillRect(bPx, bPx, frameW, frameH);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tmp, 0, 0, gridW, gridH, bPx, bPx, frameW, frameH);
+        ctx.restore();
+      }
     }
 
     // Thin outline around the whole thing
@@ -1134,95 +1172,349 @@ export function installFeaturesShellIndex(app) {
   }
 
   function renderPrinterRail() {
-    if (!app.state.session.printersData) return;
-    const printers = app.state.session.printersData.printers || [];
-    const activeId = app.state.session.printersData.active_printer_id;
+    const data = app.state.session.printersData;
+    if (!data) return;
+    const printers = data.printers || [];
+    const activeId = data.active_printer_id;
     const container = app.state.ui.$("#railPrinterSelector");
     if (!container) return;
 
+    for (const controller of railPrintSetupMenuControllers.splice(0)) controller.destroy();
+    for (const menuId of ["#railPrinterMenu", "#railNozzleMenu", "#railExtrusionWidthMenu"]) {
+      const menu = app.state.ui.$(menuId);
+      if (!menu) continue;
+      menu.hidden = true;
+      menu.innerHTML = "";
+      menu.style.left = "";
+      menu.style.top = "";
+    }
+
+    const restoreRailFocus = selector => setTimeout(() => {
+      app.state.ui.$(selector)?.focus();
+    }, 0);
+
+    const renderSelectorTrigger = ({ target, id, menuId, value, label, disabled = false }) => {
+      target.innerHTML = `
+        <button id="${id}" class="rail-selector-trigger" type="button"
+                aria-label="${app.commands.escAttr(label)}" aria-haspopup="menu"
+                aria-expanded="false" aria-controls="${menuId}"${disabled ? " disabled" : ""}>
+          <span class="rail-selector-value">${app.commands.esc(value)}</span>
+          <span class="rail-selector-chevron" aria-hidden="true"></span>
+        </button>`;
+      return app.state.ui.$(`#${id}`);
+    };
+
+    const renderStaticValue = ({ target, value, label }) => {
+      target.innerHTML = `<div class="rail-selector-static" title="${app.commands.escAttr(label)}"><span class="rail-selector-value">${app.commands.esc(value)}</span></div>`;
+    };
+
+    const installRailMenu = ({ button, menu, onActivate, onClose = null }) => {
+      if (!button || !menu) return null;
+      const controller = createAnchoredMenuController({
+        button,
+        menu,
+        itemSelector: ".rail-selector-menu-action",
+        onActivate,
+        onClose,
+      });
+      railPrintSetupMenuControllers.push(controller);
+      return controller;
+    };
+
+    const handleMutationError = async (error, label) => {
+      if (error?.status === 409 && error?.body?.detail?.error === "printer_revision_conflict") {
+        await app.commands.loadPrinters();
+        app.commands.showToast("Printer setup changed elsewhere. Review the latest values and try again.", "warning");
+        return;
+      }
+      app.commands.showToast(`Failed to change ${label}: ${error.message}`, "error");
+      app.commands.renderPrinterRail();
+    };
+
+    const printerMenu = app.state.ui.$("#railPrinterMenu");
     if (printers.length <= 1) {
       const printerName = printers.length
         ? (printers[0].name || app.state.session.printerConfig.name || "Unnamed printer")
         : "No printer configured";
-      container.innerHTML = `<div class="rail-printer-name" title="${app.commands.escAttr(printerName)}">${app.commands.esc(printerName)}</div>`;
+      renderStaticValue({ target: container, value: printerName, label: printerName });
     } else {
       const activePrinter = printers.find(p => p.id === activeId) || printers[0];
-      container.innerHTML = `<select id="railPrinterSelect" class="rail-select" title="${app.commands.escAttr(activePrinter?.name || "Active printer")}" aria-label="Active printer">
-        ${printers.map(p => `<option value="${p.id}"${p.id === activeId ? " selected" : ""}>${app.commands.esc(p.name)}</option>`).join("")}
-      </select>`;
-      const sel = app.state.ui.$("#railPrinterSelect");
-      if (sel) sel.addEventListener("change", async () => {
-        const previousId = app.state.session.printersData.active_printer_id;
-        sel.disabled = true;
-        let active;
-        try {
-          active = await app.api.setActivePrinter({ active_printer_id: sel.value });
-        } catch (error) {
-          app.state.session.printersData.active_printer_id = previousId;
-          app.commands.renderPrinterRail();
-          app.commands.showToast(`Failed to change printer: ${error.message}`, "error");
-          return;
-        }
-        app.state.session.printersData.active_printer_id = active.printer?.id || sel.value;
-        app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
-        try {
-          app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
-          app.events.emit("printer.active-changed", {
-            printerId: active.printer?.id || null,
-            source: "sidebar",
-          });
-        } catch (error) {
-          console.error("[printers] active printer could not be rendered:", error);
-          app.commands.showToast(
-            "Printer changed, but the display could not refresh. Reload Prisma.",
-            "error",
-          );
-        }
+      const printerButton = renderSelectorTrigger({
+        target: container,
+        id: "railPrinterButton",
+        menuId: "railPrinterMenu",
+        value: activePrinter?.name || "Active printer",
+        label: "Active Printer",
+      });
+      printerMenu.innerHTML = printers.map(item => `
+        <button class="rail-selector-option rail-selector-menu-action" type="button" role="menuitemradio"
+                data-printer-id="${app.commands.escAttr(item.id)}" aria-checked="${item.id === activePrinter?.id ? "true" : "false"}">
+          <span>${app.commands.esc(item.name || "Unnamed printer")}</span>
+        </button>`).join("");
+      installRailMenu({
+        button: printerButton,
+        menu: printerMenu,
+        onActivate: async item => {
+          printerButton.disabled = true;
+          let active;
+          try {
+            active = await app.commands.selectActivePrintSetup({
+              intent_kind: "select_printer",
+              active_printer_id: item.dataset.printerId,
+            });
+          } catch (error) {
+            await handleMutationError(error, "Printer");
+            return;
+          }
+          if (!active) { app.commands.renderPrinterRail(); return; }
+          try {
+            app.commands.applyAuthoritativePrinterState(data, active);
+            restoreRailFocus("#railPrinterButton");
+            app.events.emit("printer.active-changed", {
+              printerId: active.printer?.id || null,
+              source: "sidebar",
+            });
+          } catch (error) {
+            console.error("[printers] active printer could not be rendered:", error);
+            app.commands.showToast(
+              "Printer changed, but the display could not refresh. Reload Prisma.",
+              "error",
+            );
+          }
+        },
       });
     }
 
-    // Nozzle dropdown
+    // Nozzle and numeric Extrusion Width are independent active-print-setup controls.
     const printer = printers.find(p => p.id === activeId) || printers[0];
-    const nozzleSel = app.state.ui.$("#railNozzleSelect");
-    if (nozzleSel && printer) {
-      const profiles = printer.nozzle_profiles || [];
-      nozzleSel.innerHTML = profiles.map(n =>
-        `<option value="${n.size}"${n.size === app.state.session.printersData.active_nozzle_size ? " selected" : ""}>${n.size}mm</option>`
-      ).join("");
-      nozzleSel.onchange = async () => {
-        const previousSize = app.state.session.printersData.active_nozzle_size;
-        nozzleSel.disabled = true;
+    const setup = data.printer_setup_state?.[printer?.id];
+    const nozzles = printer?.nozzle_profiles || [];
+    const nozzle = nozzles.find(item => item.id === setup?.active_nozzle_id) || nozzles[0];
+    const setupMmLabel = valueUm => {
+      const fixed = (Number(valueUm) / 1000).toFixed(3);
+      return fixed.endsWith("0") ? fixed.slice(0, -1) : fixed;
+    };
+    const nozzleContainer = app.state.ui.$("#railNozzleSelector");
+    const nozzleMenu = app.state.ui.$("#railNozzleMenu");
+    if (nozzleContainer) {
+      if (!nozzles.length) {
+        renderStaticValue({ target: nozzleContainer, value: "No Nozzle Profile", label: "No Nozzle Profile" });
+      } else {
+        const nozzleButton = renderSelectorTrigger({
+          target: nozzleContainer,
+          id: "railNozzleButton",
+          menuId: "railNozzleMenu",
+          value: `${setupMmLabel(nozzle.diameter_um)} mm`,
+          label: "Active Nozzle",
+        });
+        nozzleMenu.innerHTML = nozzles.map(item => `
+          <button class="rail-selector-option rail-selector-menu-action" type="button" role="menuitemradio"
+                  data-nozzle-id="${app.commands.escAttr(item.id)}" aria-checked="${item.id === nozzle?.id ? "true" : "false"}">
+            <span>${setupMmLabel(item.diameter_um)} mm</span>
+          </button>`).join("");
+        installRailMenu({
+          button: nozzleButton,
+          menu: nozzleMenu,
+          onActivate: async item => {
+            nozzleButton.disabled = true;
+            let active;
+            try {
+              active = await app.commands.selectActivePrintSetup({
+                intent_kind: "select_nozzle",
+                active_printer_id: printer.id,
+                active_nozzle_id: item.dataset.nozzleId,
+              });
+            } catch (error) {
+              await handleMutationError(error, "Nozzle");
+              return;
+            }
+            if (!active) { app.commands.renderPrinterRail(); return; }
+            app.commands.applyAuthoritativePrinterState(data, active);
+            restoreRailFocus("#railNozzleButton");
+            app.events.emit("printer.nozzle-changed", {
+              printerId: active.printer?.id || null,
+              nozzleId: active.nozzle?.id || null,
+              nozzleDiameterMm: Number(active.nozzle?.diameter_um) / 1000,
+            });
+          },
+        });
+      }
+    }
+
+    const picker = app.state.ui.$("#railExtrusionWidthPicker");
+    const widthMenu = app.state.ui.$("#railExtrusionWidthMenu");
+    if (picker && widthMenu) {
+      const widthState = setup?.nozzle_width_state?.[nozzle?.id];
+      const currentWidthUm = widthState?.current_width_um;
+      const savedWidths = widthState?.saved_widths_um || [];
+      const widthLabel = widthUm => `${setupMmLabel(widthUm)} mm`;
+      const widthButton = renderSelectorTrigger({
+        target: picker,
+        id: "railExtrusionWidthButton",
+        menuId: "railExtrusionWidthMenu",
+        value: currentWidthUm ? widthLabel(currentWidthUm) : "No Extrusion Width",
+        label: "Active Extrusion Width",
+        disabled: !nozzle || !widthState,
+      });
+      if (!nozzle || !widthState) return;
+      widthMenu.innerHTML = `
+        <div class="rail-selector-options">
+          ${savedWidths.map(widthUm => `
+            <div class="rail-selector-row" data-width-um="${widthUm}">
+              <button class="rail-selector-option rail-selector-menu-action" type="button" role="menuitemradio"
+                      data-width-um="${widthUm}" aria-checked="${widthUm === currentWidthUm ? "true" : "false"}">
+                <span>${app.commands.esc(widthLabel(widthUm))}</span>
+              </button>
+              <button class="rail-selector-remove" type="button" data-width-um="${widthUm}" aria-label="Remove ${app.commands.escAttr(widthLabel(widthUm))} from saved widths">${app.commands.xIconSvg("icon-x rail-selector-remove-icon")}</button>
+            </div>`).join("")}
+        </div>
+        <div class="rail-selector-add-row">
+          <button class="rail-selector-option rail-selector-add rail-selector-menu-action" type="button" role="menuitem"
+                  data-action="add-width" data-menu-stay-open="true"><span>Add New</span></button>
+          <div class="rail-selector-add-form is-hidden">
+            <div class="rail-selector-add-controls">
+              <input id="railWidthNewValue" type="text" inputmode="decimal" autocomplete="off"
+                     aria-label="New Extrusion Width in millimeters"><span>mm</span>
+              <button type="button" class="rail-selector-add-save">Add</button>
+            </div>
+          </div>
+        </div>`;
+
+      const options = widthMenu.querySelector(".rail-selector-options");
+      const addButton = widthMenu.querySelector(".rail-selector-add");
+      const addForm = widthMenu.querySelector(".rail-selector-add-form");
+      const addInput = widthMenu.querySelector("#railWidthNewValue");
+
+      const showWidthList = ({ focus = false } = {}) => {
+        options.classList.remove("is-hidden");
+        addButton.classList.remove("is-hidden");
+        addForm.classList.add("is-hidden");
+        addInput.removeAttribute("aria-invalid");
+        if (focus) addButton.focus();
+      };
+
+      const selectWidth = async requestedWidthUm => {
         let active;
         try {
-          active = await app.api.setActivePrinter({ active_nozzle_size: parseFloat(nozzleSel.value) });
-        } catch (error) {
-          app.state.session.printersData.active_nozzle_size = previousSize;
-          app.commands.renderPrinterRail();
-          app.commands.showToast(`Failed to change nozzle: ${error.message}`, "error");
-          return;
-        }
-        app.state.session.printersData.active_nozzle_size = active.nozzle?.size ?? null;
-        try {
-          app.commands.applyAuthoritativePrinterState(app.state.session.printersData, active);
-          app.events.emit("printer.nozzle-changed", {
-            printerId: active.printer?.id || null,
-            nozzleSize: active.nozzle?.size ?? null,
+          active = await app.commands.selectActivePrintSetup({
+            intent_kind: "select_extrusion_width",
+            active_printer_id: printer.id,
+            active_nozzle_id: nozzle.id,
+            current_width_um: requestedWidthUm,
           });
         } catch (error) {
-          console.error("[printers] active nozzle could not be rendered:", error);
+          await handleMutationError(error, "Extrusion Width");
+          return;
+        }
+        if (!active) { app.commands.renderPrinterRail(); return; }
+        app.commands.applyAuthoritativePrinterState(data, active);
+        restoreRailFocus("#railExtrusionWidthButton");
+        app.events.emit("printer.extrusion-width-changed", {
+          printerId: active.printer?.id || null,
+          extrusionWidthUm: active.extrusion_width?.width_um || null,
+          extrusionWidthMm: Number(active.extrusion_width?.width_um) / 1000,
+          nozzleDiameterMm: Number(active.nozzle?.diameter_um) / 1000,
+        });
+      };
+
+      const showAddWidth = () => {
+        addButton.classList.add("is-hidden");
+        addForm.classList.remove("is-hidden");
+        addInput.value = currentWidthUm ? Number(currentWidthUm) / 1000 : Number(nozzle.diameter_um) / 1000;
+        addInput.removeAttribute("aria-invalid");
+        widthController.position();
+        addInput.focus();
+        addInput.select();
+      };
+
+      const widthController = installRailMenu({
+        button: widthButton,
+        menu: widthMenu,
+        onActivate: item => {
+          if (item.dataset.action === "add-width") showAddWidth();
+          else void selectWidth(Number(item.dataset.widthUm));
+        },
+        onClose: () => showWidthList(),
+      });
+
+      widthMenu.querySelectorAll(".rail-selector-remove").forEach(button => {
+        button.onclick = async () => {
+          if (button.dataset.confirm !== "true") {
+            widthMenu.querySelectorAll(".rail-selector-remove").forEach(item => {
+              item.dataset.confirm = "false";
+              item.innerHTML = app.commands.xIconSvg("icon-x rail-selector-remove-icon");
+              item.classList.remove("is-confirming");
+            });
+            button.dataset.confirm = "true";
+            button.textContent = "?";
+            button.classList.add("is-confirming");
+            button.setAttribute("aria-label", `Confirm removal of ${widthLabel(Number(button.dataset.widthUm))}`);
+            setTimeout(() => {
+              if (!button.isConnected || button.dataset.confirm !== "true") return;
+              button.dataset.confirm = "false";
+              button.innerHTML = app.commands.xIconSvg("icon-x rail-selector-remove-icon");
+              button.classList.remove("is-confirming");
+              button.setAttribute("aria-label", `Remove ${widthLabel(Number(button.dataset.widthUm))} from saved widths`);
+            }, 2000);
+            return;
+          }
+          try {
+            const active = await app.commands.removePrinterWidthShortcut({
+              active_printer_id: printer.id,
+              active_nozzle_id: nozzle.id,
+              width_um: Number(button.dataset.widthUm),
+            });
+            app.commands.applyAuthoritativePrinterState(data, active);
+            restoreRailFocus("#railExtrusionWidthButton");
+          } catch (error) {
+            await handleMutationError(error, "saved Extrusion Widths");
+          }
+        };
+      });
+      const submitWidth = async () => {
+        const rawWidth = addInput.value.trim();
+        const numeric = Number(rawWidth);
+        const widthUm = Math.round(numeric * 1000);
+        const exact = /^(?:\d+(?:\.\d{1,3})?|\.\d{1,3})$/.test(rawWidth)
+          && Number.isFinite(numeric)
+          && numeric > 0
+          && Math.abs(numeric - widthUm / 1000) <= 5e-7;
+        if (!exact || widthUm < nozzle.diameter_um || widthUm > nozzle.max_extrusion_width_um) {
+          addInput.setAttribute("aria-invalid", "true");
           app.commands.showToast(
-            "Nozzle changed, but the display could not refresh. Reload Prisma.",
+            `Enter an Extrusion Width from ${widthLabel(nozzle.diameter_um)} through ${widthLabel(nozzle.max_extrusion_width_um)}, with no more than three decimal places.`,
             "error",
           );
+          addInput.focus();
+          return;
+        }
+        try {
+          const active = await app.commands.addPrinterWidthShortcut({
+            intent_kind: "add_and_select_extrusion_width",
+            active_printer_id: printer.id,
+            active_nozzle_id: nozzle.id,
+            width_um: widthUm,
+          });
+          if (active) {
+            app.commands.applyAuthoritativePrinterState(data, active);
+            restoreRailFocus("#railExtrusionWidthButton");
+          }
+          else app.commands.renderPrinterRail();
+        } catch (error) {
+          await handleMutationError(error, "Extrusion Width");
         }
       };
-      nozzleSel.disabled = profiles.length === 0;
-      nozzleSel.title = profiles.length ? "Active nozzle" : "No nozzle profiles configured";
-    } else if (nozzleSel) {
-      nozzleSel.innerHTML = "";
-      nozzleSel.onchange = null;
-      nozzleSel.disabled = true;
-      nozzleSel.title = "No printer configured";
+      widthMenu.querySelector(".rail-selector-add-save").onclick = submitWidth;
+      addInput.oninput = () => addInput.removeAttribute("aria-invalid");
+      addInput.onkeydown = event => {
+        if (event.key === "Enter") { event.preventDefault(); submitWidth(); }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          showWidthList({ focus: true });
+          widthController.position();
+        }
+      };
     }
   }
 
@@ -1240,10 +1532,7 @@ export function installFeaturesShellIndex(app) {
     formatRegionPlanningScale,
     formatRegionMethod,
     getCurrentLayerHeight,
-    minCapLayersFromThickness,
-    minCapThicknessFromLayers,
-    smoothingRadiusMmFromCells,
-    smoothingCellsFromRadiusMm,
+    minimumCapThicknessMm,
     normalizeLuminanceMode,
     clampLuminanceBaseShadingLimitFraction,
     getLuminanceBaseShadingLimitFraction,

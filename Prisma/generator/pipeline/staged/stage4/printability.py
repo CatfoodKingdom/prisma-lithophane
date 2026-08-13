@@ -286,7 +286,7 @@ def _grow_stage4_boundary_cap_component(
     max_growth_steps = max(
         1,
         int(np.ceil(float(settings.minimum_line_length_mm) / max(float(settings.pitch_mm), 1e-9))),
-        int(np.ceil(float(settings.minimum_extrusion_width_mm) / max(float(settings.pitch_mm), 1e-9))),
+        int(np.ceil(float(settings.extrusion_width_mm) / max(float(settings.pitch_mm), 1e-9))),
     )
     y0 = max(0, int(np.min(ys)) - max_growth_steps)
     y1 = min(height, int(np.max(ys)) + max_growth_steps + 1)

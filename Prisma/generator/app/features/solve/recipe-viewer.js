@@ -621,7 +621,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
     return `Can't solve. ${parts.join(" ")}`.trim();
   }
 
-  async function handleStartSolve() {
+  async function handleStartSolve({ runId = null, throwOnError = false } = {}) {
     if (app.state.solve.solveStartPending || app.state.solve.solveStatus.status === "running") return;
     app.state.solve.solveStartPending = true;
     try {
@@ -640,9 +640,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         // If the status check fails, continue through the normal solve-start path
         // and let the server return any authoritative error.
       }
-      const preparedSettings = await app.commands.syncSolveSettingsWithPitchRemediation({
-        intent: "single",
-      });
+      const preparedSettings = await app.commands.syncSolveSettings();
       if (!preparedSettings.proceed) return;
 
       const settingsIssues = app.commands.getSolveSettingsPreflightIssues();
@@ -673,8 +671,14 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         // Precheck unavailable — fall through and let the normal solve path run.
       }
 
+      const preparedDimensions = await app.commands.syncSolveDimensionsWithGridRemediation({
+        intent: "single",
+      });
+      if (!preparedDimensions.proceed) return;
+
       const recipeContext = app.commands.buildSolveRecipeContext(palette, app.commands._currentSettingsSnapshot());
       const run = app.commands.createSolveRun(palette, { ...app.state.settings.config }, recipeContext);
+      if (runId) run.id = String(runId);
       delete app.state.ui.surfaceDataCache[run.id];
       delete app.state.ui.explorerMaterialDataCache[run.id];
       app.state.solve.solveRuns.push(run);
@@ -709,12 +713,14 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         if (app.state.settings.settingsDrawerOpen) app.commands.closeSettingsDrawer();
         app.commands.switchTab("solve");
         app.commands.startSolvePolling(run);
+        return { run, started };
       } catch (err) {
         app.commands.resetSolveRunDeleteConfirm({ render: false });
         app.state.solve.solveRuns = app.state.solve.solveRuns.filter(r => r.id !== run.id);
         app.state.solve.selectedRunIds.delete(run.id);
         if (app.state.solve.activeSolveRunId === run.id) app.state.solve.activeSolveRunId = null;
         app.commands.showToast(`Solve failed to start: ${err.message}`, "error");
+        if (throwOnError) throw err;
       }
     } finally {
       app.state.solve.solveStartPending = false;
@@ -786,10 +792,6 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
           run.results = status.result;
           run.solve_elapsed_s = Number.isFinite(Number(status.elapsed_s)) ? Math.max(0, Number(status.elapsed_s)) : null;
           if (app.state.solve.activeSolveRunId === run.id) app.state.solve.activeSolveRunId = null;
-          app.events.emit("solve.completed", {
-            runId: run.id,
-            deckCardId: run.deck_card_id || null,
-          });
         } else if (status.status === "cancelled") {
           app.commands.removePendingSolveRun(run.id);
           if (app.state.solve.activeSolveRunId === run.id) app.state.solve.activeSolveRunId = null;
@@ -801,6 +803,10 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         app.commands.updateRail();
         if (status.status === "complete") {
           app.commands.showToast("Solve complete!", "success");
+          app.events.emit("solve.completed", {
+            runId: run.id,
+            deckCardId: run.deck_card_id || null,
+          });
         } else if (status.status === "error") {
           app.commands.showToast(`Solve error: ${status.progress}`, "error");
         }
@@ -1405,7 +1411,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
       app.state.ui.$("#swapInstructions").textContent = instructions || "No swap instructions available";
     }
 
-  async function handleExportFiles() {
+  async function handleExportFiles({ throwOnError = false } = {}) {
       const btn = app.state.ui.$("#exportFilesBtn");
       const exportRun = app.commands.getExportSelectedRun();
       if (!btn || !exportRun || exportRun.cache_unavailable || app.state.export.exportRunning) return;
@@ -1436,6 +1442,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
       app.commands.startProgress("Starting export...", "export");
 
       let pollingOwner = null;
+      let completedExportRecord = null;
       try {
         const started = await app.api.startExportPrintFiles({
           geometrySource: requestedPolicy.geometrySource,
@@ -1471,7 +1478,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
         if (!status) return;
         if (status.status === "complete" && status.result) {
           const originatingRun = app.state.solve.solveRuns.find((run) => run.id === originatingRunId) || null;
-          const exportRecord = app.commands.appendExportRecordToRun(
+          completedExportRecord = app.commands.appendExportRecordToRun(
             originatingRun,
             status.result,
             Date.now(),
@@ -1479,7 +1486,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
           );
           app.events.emit("export.completed", {
             runId: originatingRunId,
-            exportId: exportRecord?.id || null,
+            exportId: completedExportRecord?.id || null,
           });
         } else if (status.status === "cancelled") {
           const cancelled = new Error("Export cancelled");
@@ -1492,6 +1499,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
 
         app.commands.renderExportTab();
         app.commands.updateRail();
+        return { status, exportRecord: completedExportRecord };
       } catch (err) {
         if (err.name === "AbortError") return;
         if (pollingOwner && app.state.export.exportPollingOwner !== pollingOwner) return;
@@ -1506,6 +1514,7 @@ function buildRecipeIdentityMap(stackLabels, stackKeyById) {
           ? "Export status could not be verified"
           : "Export failed";
         app.commands.showToast(`${prefix}: ${err.message}`, "error");
+        if (throwOnError) throw err;
       } finally {
         if (pollingOwner && app.state.export.exportPollingOwner !== pollingOwner) return;
         if (app.state.export.exportPollingOwner === pollingOwner) app.state.export.exportPollingOwner = null;

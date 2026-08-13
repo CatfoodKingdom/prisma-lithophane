@@ -168,7 +168,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force-guided-setup",
         action="store_true",
-        help="Developer option: show Guided Setup without changing saved first-launch state.",
+        help="Developer option: show First-Time Setup without changing saved first-launch state.",
     )
     return parser
 
@@ -196,7 +196,7 @@ def run_generator(
         if open_browser:
             webbrowser.open(browser_url)
         elif force_guided_setup:
-            print(f"Guided Setup test address: {browser_url}", flush=True)
+            print(f"First-Time Setup test address: {browser_url}", flush=True)
         return 0
 
     try:
@@ -222,7 +222,7 @@ def run_generator(
                 if open_browser:
                     webbrowser.open(browser_url)
                 elif force_guided_setup:
-                    print(f"Guided Setup test address: {browser_url}", flush=True)
+                    print(f"First-Time Setup test address: {browser_url}", flush=True)
                 return 0
             raise LauncherError(str(exc)) from exc
 
@@ -296,7 +296,7 @@ def run_generator(
                 print(f"Library Recovery Mode: {report.get('model_library_error')}", flush=True)
             print(f"Address: {url}", flush=True)
             if force_guided_setup:
-                print(f"Guided Setup test address: {browser_url}", flush=True)
+                print(f"First-Time Setup test address: {browser_url}", flush=True)
             print(f"Images: {layout.generator_images_root}", flush=True)
             print(f"Exports: {layout.generator_exports_root}", flush=True)
             print("Keep this window open while using Prisma. Press Ctrl+C or close it to stop.", flush=True)

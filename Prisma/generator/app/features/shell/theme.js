@@ -90,7 +90,7 @@ export function installFeaturesShellTheme(app) {
       : focus === "last"
         ? items.at(-1)
         : items.find((item) => item.getAttribute("aria-checked") === "true") || items[0];
-    target.focus();
+    target.focus({ preventScroll: true });
   }
 
   function toggleThemeMenu() {
@@ -162,7 +162,7 @@ export function installFeaturesShellTheme(app) {
       closeThemeMenu();
     });
     app.lifecycle.listen(viewport, "resize", () => closeThemeMenu());
-    app.lifecycle.listen(viewport, "scroll", () => closeThemeMenu(), true);
+    app.lifecycle.listen(viewport, "scroll", () => closeThemeMenu());
     app.lifecycle.listen(mediaQuery, "change", () => {
       if (app.state.ui.themePreference === "system") applyThemePreference("system", { persist: false });
     });

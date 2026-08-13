@@ -76,13 +76,13 @@ def _base_config() -> dict:
         "palette": ["bambu-basic-cyan"],
         "base_filament": "panchroma-matte-cotton-white",
         "cap_filament": "__same__",
-        "d_wb": 0.20, "d_wc_min": 0.08, "t_max": 2.5, "k_max": 3,
+        "d_wb": 0.20, "min_cap_layers": 1, "t_max": 2.5, "k_max": 3,
         "de_threshold": 0.05, "gamut_mode": "hull", "chroma_weight": 1.0,
         "use_corrections": True, "layer_height": 0.08,
         "image_sample_pitch_mm": 0.20, "solver_fine_pitch_mm": 0.20,
         "color_region_target_mm": 0.60,
         "image_path": "test.jpg", "image_adjust": None, "max_dim_mm": 130.0,
-        "frame": None, "smooth_kernel": 15.0,
+        "frame": None, "boundary_cap_smoothing_radius_mm": 3.0,
         "border": False, "border_width_mm": 3.0,
     }
 

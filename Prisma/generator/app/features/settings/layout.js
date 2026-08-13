@@ -31,39 +31,45 @@ function restoreSettingsFlowUnits(grid = document.querySelector(".settings-grid"
       unit.classList.remove("preprocessing-flow-unit");
       unit.removeAttribute("data-settings-flow-owner");
       unit.removeAttribute("data-settings-flow-order");
+      unit.removeAttribute("data-settings-flow-group");
       unit.removeAttribute("data-bucket");
     });
   }
 
 function extractSettingsSubsectionFlowUnits(grid) {
-    const groups = Array.from(grid?.querySelectorAll(".settings-group.is-expanded") || []);
-    groups.forEach((group) => {
-      const body = Array.from(group.children).find((child) => child.classList.contains("section-collapse-body"));
-      if (!body) return;
-      if (!body.id) {
-        const key = group.dataset.settingsGroup || group.dataset.bucket || "section";
-        body.id = `settingsFlowOwner-${key}`;
-      }
+    const groups = Array.from(grid?.children || [])
+      .filter((child) => child.classList.contains("settings-group"));
 
-      const parentTitle = group.querySelector(".section-collapse-title")?.textContent?.trim()
-        || group.dataset.settingsGroup
-        || "Settings";
-      const heads = Array.from(body.children).filter((child) => child.classList.contains("settings-subsection-head"));
+    groups.forEach((group, groupIndex) => {
+      const groupKey = group.dataset.settingsGroup || group.dataset.bucket || `section-${groupIndex}`;
+      if (!group.id) group.id = `settingsFlowOwner-${groupKey}`;
+
+      const children = Array.from(group.children);
+      const subsectionHeads = children
+        .filter((child) => child.classList.contains("settings-subsection-head"));
+      if (!subsectionHeads.length) return;
+
+      const sectionHead = children.find((child) => child.classList.contains("settings-section-head"));
+      const firstSubsectionIndex = children.indexOf(subsectionHeads[0]);
+      const hasPreamble = children
+        .slice(0, firstSubsectionIndex)
+        .some((child) => child !== sectionHead);
       let insertionPoint = group;
 
-      heads.forEach((head, order) => {
+      subsectionHeads.forEach((head, order) => {
         const wrapper = document.createElement("div");
         wrapper.className = "settings-subsection-flow-unit";
-        wrapper.dataset.settingsFlowOwner = body.id;
+        wrapper.dataset.settingsFlowOwner = group.id;
         wrapper.dataset.settingsFlowOrder = String(order);
         wrapper.dataset.settingsFlowWrapper = "true";
-        wrapper.dataset.bucket = group.dataset.bucket || group.dataset.settingsGroup || "settings";
+        wrapper.dataset.settingsFlowGroup = groupKey;
+        wrapper.dataset.bucket = group.dataset.bucket || groupKey;
         insertionPoint.after(wrapper);
-        if (order === 0) {
-          wrapper.appendChild(group);
-        } else {
-          head.dataset.settingsParentTitle = parentTitle;
-        }
+
+        // A section with no introductory controls (for example White Cap)
+        // keeps its title attached to its first subsection. Sections with a
+        // preamble (for example Color Solver) may break before subsection one.
+        if (order === 0 && !hasPreamble) wrapper.appendChild(group);
 
         let node = head;
         while (node) {
@@ -72,28 +78,31 @@ function extractSettingsSubsectionFlowUnits(grid) {
           wrapper.appendChild(node);
           node = next;
         }
-
         insertionPoint = wrapper;
       });
     });
-  }
+    return grid;
+}
 
 function extractPreprocessingFlowUnits(grid) {
-    const group = grid?.querySelector('[data-settings-group="preprocessing"]');
+    const group = Array.from(grid?.children || [])
+      .find((child) => child.dataset.settingsGroup === "preprocessing");
     const owner = document.getElementById("preprocessingSettingsContainer");
-    if (!group || !owner || !group.classList.contains("is-expanded")) return;
+    if (!group || !owner) return grid;
 
     let insertionPoint = group;
     Array.from(owner.children)
       .filter((unit) => unit.classList.contains("module-settings-section"))
       .sort((a, b) => Number(a.dataset.settingsFlowOrder) - Number(b.dataset.settingsFlowOrder))
       .forEach((unit) => {
-      unit.classList.add("preprocessing-flow-unit");
-      unit.dataset.settingsFlowOwner = owner.id;
-      unit.dataset.bucket = "preprocessing";
-      insertionPoint.after(unit);
-      insertionPoint = unit;
+        unit.classList.add("preprocessing-flow-unit");
+        unit.dataset.settingsFlowOwner = owner.id;
+        unit.dataset.settingsFlowGroup = "preprocessing";
+        unit.dataset.bucket = "preprocessing";
+        insertionPoint.after(unit);
+        insertionPoint = unit;
       });
+    return grid;
   }
 
 function partitionSettingsItems(items, heights, maxColumns, availableHeight, gap = 8) {
@@ -101,43 +110,66 @@ function partitionSettingsItems(items, heights, maxColumns, availableHeight, gap
     if (!count) return [];
     const totalHeight = heights.reduce((sum, height) => sum + height, 0)
       + (gap * Math.max(0, count - 1));
-    const columnCount = Math.max(
+    const minimumColumnCount = Math.max(
       1,
       Math.min(maxColumns, count, Math.ceil(totalHeight / Math.max(1, availableHeight))),
     );
-    if (columnCount === 1) return [items.slice()];
 
     const prefix = [0];
     heights.forEach((height) => prefix.push(prefix[prefix.length - 1] + height));
     const segmentHeight = (start, end) => (
       (prefix[end] - prefix[start]) + (gap * Math.max(0, end - start - 1))
     );
-    const best = Array.from({ length: columnCount + 1 }, () => (
-      Array(count + 1).fill(Number.POSITIVE_INFINITY)
-    ));
-    const split = Array.from({ length: columnCount + 1 }, () => Array(count + 1).fill(-1));
-    best[0][0] = 0;
 
-    for (let columns = 1; columns <= columnCount; columns++) {
-      for (let end = columns; end <= count; end++) {
-        for (let start = columns - 1; start < end; start++) {
-          const cost = Math.max(best[columns - 1][start], segmentHeight(start, end));
-          if (cost < best[columns][end]) {
-            best[columns][end] = cost;
-            split[columns][end] = start;
+    const partitionForColumnCount = (columnCount) => {
+      if (columnCount === 1) {
+        return { columns: [items.slice()], tallest: totalHeight };
+      }
+      const best = Array.from({ length: columnCount + 1 }, () => (
+        Array(count + 1).fill(Number.POSITIVE_INFINITY)
+      ));
+      const split = Array.from({ length: columnCount + 1 }, () => Array(count + 1).fill(-1));
+      best[0][0] = 0;
+
+      for (let columns = 1; columns <= columnCount; columns++) {
+        for (let end = columns; end <= count; end++) {
+          for (let start = columns - 1; start < end; start++) {
+            const cost = Math.max(best[columns - 1][start], segmentHeight(start, end));
+            if (cost < best[columns][end]) {
+              best[columns][end] = cost;
+              split[columns][end] = start;
+            }
           }
         }
       }
-    }
 
-    const ranges = [];
-    let end = count;
-    for (let columns = columnCount; columns > 0; columns--) {
-      const start = split[columns][end];
-      ranges.push([start, end]);
-      end = start;
+      const ranges = [];
+      let end = count;
+      for (let columns = columnCount; columns > 0; columns--) {
+        const start = split[columns][end];
+        ranges.push([start, end]);
+        end = start;
+      }
+      return {
+        columns: ranges.reverse().map(([start, stop]) => items.slice(start, stop)),
+        tallest: best[columnCount][count],
+      };
+    };
+
+    // Total height only provides a lower bound. Atomic flow units can make that
+    // many columns impossible to pack within the height budget even when their
+    // combined height would fit mathematically. Add a column whenever no legal
+    // contiguous split fits, provided the viewport has room for one.
+    const allowedColumnCount = Math.max(1, Math.min(maxColumns, count));
+    let result = partitionForColumnCount(minimumColumnCount);
+    for (
+      let columnCount = minimumColumnCount + 1;
+      result.tallest > availableHeight && columnCount <= allowedColumnCount;
+      columnCount++
+    ) {
+      result = partitionForColumnCount(columnCount);
     }
-    return ranges.reverse().map(([start, stop]) => items.slice(start, stop));
+    return result.columns;
   }
 
 function distributeSettingsColumns() {
@@ -179,15 +211,16 @@ function distributeSettingsColumns() {
       col.remove();
     });
 
-    // Enabled preprocessing cards must leave their canonical subsection before
-    // the parent group is wrapped with its first static subsection.
+    // Enabled preprocessing modules are independent atomic flow units. Extract
+    // them before the general subsection pass so the Preprocessing heading,
+    // resample control, and toggle table remain together as the base unit.
     app.commands.extractPreprocessingFlowUnits(grid);
-    // Static subsections and enabled preprocessing module cards are independent
-    // layout units. Moving the live nodes lets them flow across columns without
-    // splitting a heading from its controls or losing input state and handlers.
+
+    // Subsection headings are safe column-break opportunities. Each wrapper
+    // keeps its heading attached to its controls, while restoreSettingsFlowUnits
+    // returns the live controls to their canonical section before every reflow.
     app.commands.extractSettingsSubsectionFlowUnits(grid);
 
-    // All items participate in column distribution — no exceptions
     const items = Array.from(grid.children);
     if (items.length === 0) return;
 
@@ -293,57 +326,9 @@ function distributeSettingsColumns() {
   }
 
 function initCollapsibleSections() {
-    document.querySelectorAll(".settings-grid .settings-group").forEach(group => {
-      const h4 = group.querySelector(".settings-section-head");
-      if (!h4) return;
-
-      // Build header bar
-      const header = document.createElement("div");
-      header.className = "section-collapse-header";
-      header.setAttribute("role", "button");
-      header.setAttribute("tabindex", "0");
-      header.setAttribute("aria-expanded", "true");
-      const arrow = document.createElement("span");
-      arrow.className = "section-collapse-arrow";
-      arrow.setAttribute("aria-hidden", "true");
-      const title = document.createElement("span");
-      title.className = "section-collapse-title";
-      title.textContent = h4.textContent;
-      header.appendChild(arrow);
-      header.appendChild(title);
-
-      // Wrap remaining content in a body div
-      const body = document.createElement("div");
-      body.className = "section-collapse-body";
-      // Move all children except h4 into body
-      while (group.children.length > 0) {
-        const child = group.children[0];
-        if (child === h4) { h4.remove(); continue; }
-        body.appendChild(child);
-      }
-
-      group.appendChild(header);
-      group.appendChild(body);
-      group.classList.add("is-collapsible", "is-expanded");
-
-      const setExpanded = (expanded) => {
-        group.classList.toggle("is-expanded", expanded);
-        header.setAttribute("aria-expanded", expanded ? "true" : "false");
-        body.classList.toggle("is-hidden", !expanded);
-        app.commands.distributeSettingsColumns();
-      };
-
-      header.addEventListener("click", () => {
-        const expanded = group.classList.toggle("is-expanded");
-        setExpanded(expanded);
-      });
-      header.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        setExpanded(!group.classList.contains("is-expanded"));
-      });
-    });
-  }
+    // Retained as a no-op command for startup callers and guide integrations.
+    // Section headers are now informational and never collapse.
+}
 
   Object.assign(app.commands, {
     restoreSettingsFlowUnits,

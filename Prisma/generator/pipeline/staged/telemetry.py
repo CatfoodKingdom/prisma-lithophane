@@ -131,7 +131,7 @@ def _record_stage1_metrics(performance_profile, state, zone_plan, stage_start: f
     _set_counter(
         performance_profile,
         "stage1_color_region_target_to_min_width_ratio",
-        float(color_region_target_mm) / max(float(printability_settings.minimum_extrusion_width_mm), 1e-9),
+        float(color_region_target_mm) / max(float(printability_settings.extrusion_width_mm), 1e-9),
     )
     _set_counter(
         performance_profile,

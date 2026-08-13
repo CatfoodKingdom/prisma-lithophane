@@ -84,24 +84,25 @@
 }
 
 .settings-section-head {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--muted);
-  margin: 0 0 6px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid var(--line);
+  letter-spacing: 0.8px;
+  color: color-mix(in srgb, var(--ink) 82%, var(--muted));
+  margin: 0 0 4px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--selected) 28%, transparent);
 }
 .settings-subsection-head {
-  margin: 12px 0 6px;
+  margin: 14px 0 2px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--muted);
-  padding-top: 5px;
-  padding-bottom: 3px;
+  letter-spacing: 0.55px;
+  color: color-mix(in srgb, var(--ink) 62%, var(--muted));
+  padding: 4px 0 3px 8px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -113,18 +114,65 @@
   border-collapse: collapse;
   font-size: 13px;
 }
+.settings-grid.in-drawer .settings-table {
+  max-width: 100%;
+  display: block;
+}
+.settings-grid.in-drawer .settings-table > tbody {
+  display: block;
+}
+.settings-grid.in-drawer .settings-table > tbody > tr,
+.settings-grid.in-drawer .settings-table > tr {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
 .settings-table td {
   padding: 3px 0;
   vertical-align: middle;
 }
+.settings-grid.in-drawer .settings-table td {
+  min-width: 0;
+}
 .settings-table td:first-child {
   color: var(--ink);
   padding-right: 10px;
+  padding-left: 8px;
   white-space: nowrap;
+}
+.settings-grid.in-drawer .settings-table td:first-child {
+  flex: 1 1 auto;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .settings-table td:last-child {
   text-align: right;
   white-space: nowrap;
+}
+.settings-grid.in-drawer .settings-table td:last-child {
+  flex: 0 1 auto;
+  margin-left: auto;
+}
+.settings-grid.in-drawer .settings-table td:last-child > * {
+  max-width: 100%;
+}
+.settings-grid.in-drawer .settings-table .range-row {
+  width: 100%;
+  min-width: 0;
+}
+.settings-table .settings-child-row > td:first-child {
+  padding-left: 20px;
+}
+.settings-subsection-table td:first-child {
+  padding-left: 20px;
+}
+.settings-subsection-table .settings-child-row > td:first-child {
+  padding-left: 32px;
+}
+.settings-table select.stg-select,
+.settings-table .stg-select {
+  text-align: left;
+  text-align-last: left;
 }
 .settings-grid:not(.show-advanced-settings) .advanced-setting {
   display: none !important;
@@ -174,7 +222,6 @@
   color: var(--muted);
   text-align: right;
 }
-.stg-range { font-size: 10px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
 .range-row {
   display: inline-grid;
   grid-template-columns: auto minmax(96px, 1fr) auto auto;
@@ -200,6 +247,97 @@
 /* Settings table reuses .input-with-unit from the Image tab */
 .stg-iwu { width: 72px; }
 .stg-iwu .unit-input { width: 42px; }
+.settings-grid .input-with-unit.settings-has-steppers.solve-pitch-control {
+  width: 72px;
+  font-variant-numeric: tabular-nums;
+}
+.settings-grid .solve-pitch-control .settings-number-steppers {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  margin-left: 0;
+}
+.settings-grid .input-with-unit {
+  position: relative;
+  min-height: 22px;
+  overflow: visible;
+}
+.settings-grid .input-with-unit.settings-has-steppers {
+  /* Keep the arrows inside the same border as the value and unit. The
+     original fixed 72px width is too narrow for unit-bearing controls. */
+  width: max-content;
+  min-width: 72px;
+}
+.settings-grid .unit-input {
+  text-align: right;
+  padding-right: 3px;
+}
+.settings-grid .input-with-unit.settings-has-steppers.settings-compact-integer-control {
+  width: 72px;
+  padding-right: 12px;
+  justify-content: flex-end;
+}
+.settings-grid .settings-compact-integer-control .unit-input {
+  width: 26px;
+}
+.settings-grid .settings-compact-integer-control .settings-number-steppers {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  margin-left: 0;
+}
+.settings-grid input[type="number"] {
+  -moz-appearance: textfield;
+  -webkit-appearance: textfield;
+  appearance: textfield;
+}
+.settings-grid input[type="number"]::-webkit-inner-spin-button,
+.settings-grid input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.settings-number-steppers {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  align-self: stretch;
+  flex: 0 0 12px;
+  width: 12px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.settings-grid .settings-number-steppers {
+  margin-left: auto;
+}
+.input-with-unit:hover .settings-number-steppers,
+.input-with-unit:focus-within .settings-number-steppers {
+  opacity: 1;
+}
+.settings-number-step {
+  display: block;
+  width: 12px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 8px;
+}
+.settings-number-step:hover,
+.settings-number-step:focus-visible {
+  color: var(--ink);
+  background: var(--control-hover);
+  outline: none;
+}
+.settings-number-step:disabled {
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.55;
+}
 .luminance-limit-control {
   display: inline-flex;
   align-items: center;
@@ -240,14 +378,15 @@
 }
 
 /* Superpixel fields: visible but disabled when per-pixel mode */
-.stg-range-note { font-size: 10px; color: var(--muted); font-style: italic; }
 .stg-select {
   font-size: 12px;
-  padding: 2px 4px;
+  padding: 2px 24px 2px 6px;
   border: 1px solid var(--line);
   border-radius: 3px;
   background: var(--panel);
   max-width: 100%;
+  text-align: left;
+  text-align-last: left;
 }
 /* Filament dropdowns can hold long "Manufacturer Name" values (e.g. "Bambu
    Bambu Tough White"). Without a cap the <select> auto-widens its table cell
@@ -259,13 +398,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#cfgBaseFilament { text-align-last: right; }
+#cfgBaseFilament { text-align: left; text-align-last: left; }
 .stg-check { font-size: 13px; cursor: pointer; }
 .stg-check input { margin-right: 4px; vertical-align: middle; }
 
 .settings-derived {
-  margin-top: 4px;
-  padding-top: 6px;
+  margin-top: 8px;
+  padding-top: 7px;
   border-top: 1px solid var(--line);
   font-size: 12px;
   color: var(--muted);
@@ -277,6 +416,16 @@
   line-height: 0;
 }
 .settings-derived strong { color: var(--ink); }
+.settings-derived-footnote {
+  clear: both;
+  margin-top: 6px;
+  padding-top: 2px;
+  border-top: 1px solid var(--line-strong);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 400;
+}
+.settings-derived-footnote strong { color: var(--ink); }
 .border-sub { padding-left: 20px; }
 .border-sub.is-hidden { display: none; }
 
@@ -284,4 +433,38 @@
   font-size: 11px;
   color: var(--muted);
   padding: 4px 0 0 0;
+}
+.settings-row-status {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: italic;
+  white-space: nowrap;
+}
+
+.settings-context-summary {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.settings-context-summary:empty {
+  display: none;
+}
+
+.settings-contract-status {
+  margin: 0.75rem;
+}
+
+tr.is-setting-inactive > td {
+  opacity: 0.68;
+}
+
+tr.is-setting-invalid .unit-input,
+tr.is-setting-invalid .stg-select {
+  border-color: var(--warn-ink);
 }

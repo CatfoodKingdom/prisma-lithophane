@@ -3,6 +3,7 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesSettingsProfiles(app) {
+  let activeSettingsProfileBrowserClose = null;
   function _configSettingsProfileSnapshot() {
     app.commands.applyMandatoryProductSettings();
     const snap = {};
@@ -24,6 +25,9 @@ export function installFeaturesSettingsProfiles(app) {
       "protect" + "_confidence_floor",
       `${retiredMask}_provider`,
       `${retiredMask}_override`,
+      "use_corrections",
+      "stage2_boundary_mutation_current_de_percentile",
+      "stage2_boundary_mutation_min_component_mm",
     ].forEach((key) => delete out[key]);
     return out;
   }
@@ -100,8 +104,11 @@ export function installFeaturesSettingsProfiles(app) {
     }
 
     if (persist && app.state.session.apiConnected) {
+      app.state.settings.moduleState = { ...normalized };
+      const ticket = app.commands.beginSettingsEvaluationRequest();
       const response = await app.api.setModuleState(normalized);
       app.state.settings.moduleState = response.state || normalized;
+      app.commands.applySettingsEvaluationResponse(response, ticket);
     } else {
       app.state.settings.moduleState = { ...normalized };
     }
@@ -122,6 +129,9 @@ export function installFeaturesSettingsProfiles(app) {
       if (k === "gamut_mode") value = app.commands.normalizeActiveGamutMode(value);
       app.state.settings.config[k] = value;
     }
+    app.state.settings.config.use_corrections = true;
+    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = null;
+    app.state.settings.config.stage2_boundary_mutation_min_component_mm = null;
   }
 
   function _setLoadedSettingsProfile(record, snapshot = null) {
@@ -488,6 +498,7 @@ export function installFeaturesSettingsProfiles(app) {
       modules: app.commands._currentSettingsProfileModulesSnapshot(),
     });
     app.commands.renderSettingsProfileBar();
+    app.events.emit("settings.profile.loaded", { profileId: profile.id, kind: profile.kind, name: profile.name });
     return true;
   }
 
@@ -501,7 +512,7 @@ export function installFeaturesSettingsProfiles(app) {
     return true;
   }
 
-  async function loadSettingsProfiles() {
+  async function loadSettingsProfiles({ applyPreferred = true, syncServer = true } = {}) {
     try {
       const data = await app.api.fetchSettingsProfiles();
       app.commands._refreshSettingsProfilesFromResponse(data);
@@ -509,8 +520,8 @@ export function installFeaturesSettingsProfiles(app) {
         || app.commands.findSettingsProfile(data?.system_profile_id || app.state.ui.SYSTEM_SETTINGS_PROFILE_ID)
         || app.state.settings.settingsProfiles[0]
         || null;
-      if (preferredProfile) {
-        await app.commands._doLoadSettingsProfile(preferredProfile, { syncServer: true });
+      if (preferredProfile && applyPreferred) {
+        await app.commands._doLoadSettingsProfile(preferredProfile, { syncServer });
       }
     } catch (e) {
       console.warn("[settings profiles] load failed:", e.message);
@@ -528,8 +539,8 @@ export function installFeaturesSettingsProfiles(app) {
     app.commands.renderSettingsTab();
   }
 
-  async function loadPresets() {
-    return app.commands.loadSettingsProfiles();
+  async function loadPresets(options = {}) {
+    return app.commands.loadSettingsProfiles(options);
   }
 
   function renderSettingsProfileBar() {
@@ -747,6 +758,10 @@ export function installFeaturesSettingsProfiles(app) {
           input?.select();
           return false;
         }
+        if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.overwrite", {
+          profile_id: state.profile.id,
+          name: state.trimmed,
+        })) return false;
         const response = await app.api.updateSettingsProfile(state.profile.id, {
           name: state.trimmed,
           settings: state.profile.settings,
@@ -760,7 +775,7 @@ export function installFeaturesSettingsProfiles(app) {
         app.commands.renderSettingsTab({ preservePendingUi: true });
         cancelInlineRename();
         app.commands.showToast(`Renamed Settings Profile to "${state.trimmed}"`, "success");
-        render();
+        if (!settled) render();
         return true;
       };
 
@@ -922,21 +937,39 @@ export function installFeaturesSettingsProfiles(app) {
       };
 
       const render = () => {
+        if (settled) return;
         renderList();
         renderSelection();
       };
 
+      let settled = false;
       const close = (result) => {
+        if (settled) return;
+        settled = true;
         overlay.classList.add("is-hidden");
         overlay.setAttribute("aria-hidden", "true");
+        restoreBtn.onclick = null;
+        loadRunBtn.onclick = null;
+        closeBtn.onclick = null;
+        overlay.onclick = null;
+        listEl.querySelectorAll(".settings-profile-modal-item, [data-profile-action], [data-profile-rename-input]")
+          .forEach(element => {
+            element.onclick = null;
+            element.onkeydown = null;
+            element.oninput = null;
+          });
+        selectionEl.querySelectorAll("[data-browser-action]").forEach(element => { element.onclick = null; });
+        if (activeSettingsProfileBrowserClose === close) activeSettingsProfileBrowserClose = null;
         resolve(result);
       };
+      activeSettingsProfileBrowserClose = close;
 
       titleEl.textContent = title || "Settings Profiles";
       render();
 
       overlay.classList.remove("is-hidden");
       overlay.setAttribute("aria-hidden", "false");
+      app.events.emit("settings.profile-browser.opened", { selectedProfileId: selectedId });
 
       restoreBtn.onclick = () => close({ action: "restore", profileId: selectedId });
       loadRunBtn.onclick = () => close({ action: "load_saved_run", profileId: selectedId });
@@ -945,6 +978,10 @@ export function installFeaturesSettingsProfiles(app) {
         if (event.target === overlay) close(null);
       };
     });
+  }
+
+  function closeSettingsProfileBrowserModal() {
+    activeSettingsProfileBrowserClose?.(null);
   }
 
   async function showSettingsProfileSaveAsModal({
@@ -1090,12 +1127,31 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   async function _saveDraftAsSettingsProfileWithName(name) {
-    const beforeIds = new Set(app.state.settings.settingsProfiles.map((profile) => profile.id));
-    const response = await app.api.createSettingsProfile({
+    const settings = app.commands._currentSettingsSnapshot();
+    const modules = app.commands._currentSettingsProfileModulesSnapshot();
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.create", {
       name,
-      settings: app.commands._currentSettingsSnapshot(),
-      modules: app.commands._currentSettingsProfileModulesSnapshot(),
+      source_profile_id: app.state.settings.loadedProfileRef?.id || "",
+      t_max: Number(settings.t_max),
+    })) return null;
+    const beforeIds = new Set(app.state.settings.settingsProfiles.map((profile) => profile.id));
+    const create = () => app.api.createSettingsProfile({
+      name,
+      settings,
+      modules,
     });
+    const response = app.commands.performGuideDurableMutation
+      ? await app.commands.performGuideDurableMutation({
+        direction: "create",
+        operationId: "saving-loading-profile",
+        kind: "settings-profile",
+        name,
+        fingerprint: { settings, modules },
+        resolveId: result => result?.profiles?.find(profile => (
+          !beforeIds.has(profile.id) && profile.name?.toLocaleLowerCase() === name.toLocaleLowerCase()
+        ))?.id,
+      }, create)
+      : await create();
     app.commands._refreshSettingsProfilesFromResponse(response);
     const created = app.state.settings.settingsProfiles.find((profile) => !beforeIds.has(profile.id))
       || app.state.settings.settingsProfiles.find((profile) => (profile.name || "").toLocaleLowerCase() === name.toLocaleLowerCase())
@@ -1108,11 +1164,16 @@ export function installFeaturesSettingsProfiles(app) {
       });
     }
     app.commands.renderSettingsTab({ preservePendingUi: true });
+    if (created) app.events.emit("settings.profile.created", { profileId: created.id, name: created.name });
     return created;
   }
 
   async function _overwriteSettingsProfile(profile, { nameOverride = null } = {}) {
     if (!profile || profile.kind !== "named") return null;
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.overwrite", {
+      profile_id: profile.id,
+      name: nameOverride || profile.name,
+    })) return null;
     const response = await app.api.updateSettingsProfile(profile.id, {
       name: nameOverride || profile.name,
       settings: app.commands._currentSettingsSnapshot(),
@@ -1181,10 +1242,24 @@ export function installFeaturesSettingsProfiles(app) {
       { ok: "Delete", cancel: "Cancel" }
     );
     if (!confirmed) return false;
-    const response = await app.api.deleteSettingsProfile(profile.id);
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.delete", {
+      profile_id: profile.id,
+    })) return false;
+    const remove = () => app.api.deleteSettingsProfile(profile.id);
+    const response = app.commands.performGuideDurableMutation
+      ? await app.commands.performGuideDurableMutation({
+        direction: "delete",
+        operationId: "saving-loading-profile",
+        kind: "settings-profile",
+        id: profile.id,
+        name: profile.name,
+        fingerprint: { settings: profile.settings, modules: profile.modules },
+      }, remove)
+      : await remove();
     app.commands._refreshSettingsProfilesFromResponse(response);
     app.commands.renderSettingsTab({ preservePendingUi: true });
     app.commands.showToast(`Deleted Settings Profile "${profile.name}"`, "success");
+    app.events.emit("settings.profile.deleted", { profileId: profile.id, name: profile.name });
     return true;
   }
 
@@ -1194,6 +1269,9 @@ export function installFeaturesSettingsProfiles(app) {
     if (profile.id === app.state.settings.userDefaultProfileId) {
       return false;
     }
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.set-startup", {
+      profile_id: profile.id,
+    })) return false;
     const response = await app.api.setUserDefaultSettingsProfile(profile.id);
     app.commands._refreshSettingsProfilesFromResponse(response);
     app.commands.renderSettingsTab({ preservePendingUi: true });
@@ -1339,6 +1417,9 @@ export function installFeaturesSettingsProfiles(app) {
         { ok: "Make Default", cancel: "Not Now" }
       );
       if (!makeDefault) return;
+      if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.set-startup", {
+        profile_id: created.id,
+      })) return;
       const response = await app.api.setUserDefaultSettingsProfile(created.id);
       app.commands._refreshSettingsProfilesFromResponse(response);
       app.commands.renderSettingsTab({ preservePendingUi: true });
@@ -1348,6 +1429,7 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   async function handleRestoreSystemSettingsProfile() {
+    if (app.commands.authorizeGuideDurableMutation && !app.commands.authorizeGuideDurableMutation("settings.profile.restore-system", {})) return;
     const proceed = await app.commands._guardSettingsProfileTransition("restoring the system default");
     if (!proceed) return;
     try {
@@ -1388,7 +1470,7 @@ export function installFeaturesSettingsProfiles(app) {
     const el = typeof app.state.ui.$ === "function" ? app.state.ui.$("#cfgDWcMin") : null;
     const domValue = parseInt(el?.value, 10);
     if (Number.isFinite(domValue) && domValue >= 1) return domValue;
-    return app.commands.minCapLayersFromThickness(app.state.settings.config?.d_wc_min, layerHeight);
+    return Math.max(1, parseInt(app.state.settings.config?.min_cap_layers, 10) || 2);
   }
 
   function calculateStackLayerAlignment(layerHeight, baseThickness, minCapThickness, maxTotalThickness) {
@@ -1407,69 +1489,105 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   function buildStackLayerAlignmentIssue(alignment) {
-    return `${alignment.remainderMm.toFixed(2)} mm of Max Total Thickness cannot be allocated in whole Layer Height steps. `
-      + `Set Max Total Thickness to ${alignment.lowerTotalMm.toFixed(2)} mm (${alignment.maxLayers} color layers) `
-      + `or ${alignment.upperTotalMm.toFixed(2)} mm (${alignment.maxLayers + 1} color layers)`;
+    return `Max Thickness must align with a layer. `
+      + `Use ${alignment.lowerTotalMm.toFixed(2)} mm or ${alignment.upperTotalMm.toFixed(2)} mm.`;
   }
 
-  function buildSolvePitchNozzleIssue(pitch, nozzleSize) {
-    const pitchText = app.commands.formatSolvePitchMm(pitch);
-    const nozzleText = app.commands.formatSolvePitchMm(nozzleSize);
-    return `Solve Pitch (${pitchText} mm) cannot be smaller than the active nozzle diameter (${nozzleText} mm). `
-      + "Increase Solve Pitch or choose a smaller nozzle.";
-  }
-
-  function formatSolvePitchMm(value) {
-    return Number(value).toFixed(3).replace(/\.?0+$/, "");
-  }
-
-  function getSolvePitchNozzleMismatch() {
-    const pitch = app.commands.readSolvePreflightNumber(
-      "cfgSolvePitch",
-      "solver_fine_pitch_mm",
-      parseFloat(app.state.settings.config?.image_sample_pitch_mm) || 0.20,
-    );
-    const nozzleSize = Number(app.state.session.activeNozzle?.size);
-    const pitchEps = 1e-6;
-    if (!Number.isFinite(nozzleSize) || !(nozzleSize > 0) || pitch >= nozzleSize - pitchEps) {
-      return null;
+  function calculateBorderHeightAlignment(borderHeight, baseThickness, layerHeight) {
+    const height = Number(borderHeight);
+    const base = Number(baseThickness);
+    const layer = Number(layerHeight);
+    if (![height, base, layer].every(Number.isFinite) || layer <= 0) return null;
+    const excess = Math.round((height - base) * 1e6) / 1e6;
+    if (excess < -1e-6) {
+      return { belowBase: true, aligned: false, lowerHeightMm: base, upperHeightMm: base };
     }
+    const nearestSteps = Math.round(excess / layer);
+    const nearestExcess = nearestSteps * layer;
+    if (Math.abs(excess - nearestExcess) <= 1e-6) {
+      const resolved = Math.round((base + nearestExcess) * 1e6) / 1e6;
+      return { belowBase: false, aligned: true, lowerHeightMm: resolved, upperHeightMm: resolved };
+    }
+    const lowerSteps = Math.floor(excess / layer + 1e-9);
     return {
-      pitch,
-      nozzleSize,
-      message: app.commands.buildSolvePitchNozzleIssue(pitch, nozzleSize),
+      belowBase: false,
+      aligned: false,
+      lowerHeightMm: Math.round((base + lowerSteps * layer) * 1e6) / 1e6,
+      upperHeightMm: Math.round((base + (lowerSteps + 1) * layer) * 1e6) / 1e6,
     };
+  }
+
+  function buildBorderHeightIssue(alignment, baseThickness) {
+    if (!alignment) return null;
+    if (alignment.belowBase) {
+      return `Border Height must be at least ${Number(baseThickness).toFixed(2)} mm.`;
+    }
+    if (!alignment.aligned) {
+      return `Border Height must align with a layer. `
+        + `Use ${alignment.lowerHeightMm.toFixed(2)} mm or ${alignment.upperHeightMm.toFixed(2)} mm.`;
+    }
+    return null;
+  }
+
+  function getBorderHeightIssue() {
+    const enabled = app.state.ui.$("#cfgBorder")?.checked ?? Boolean(app.state.settings.config.border);
+    const borderWidth = app.commands.readSolvePreflightNumber("cfgBorderWidth", "border_width_mm", 0);
+    if (!enabled || borderWidth <= 0) return null;
+    const layerHeight = app.commands.readSolvePreflightNumber("cfgLayerHeight", "layer_height", 0.08);
+    const baseThickness = app.commands.readSolvePreflightNumber("cfgDWb", "d_wb", 0.20);
+    const borderHeight = app.commands.readSolvePreflightNumber("cfgBorderHeight", "border_height_mm", 0);
+    return app.commands.buildBorderHeightIssue(
+      app.commands.calculateBorderHeightAlignment(borderHeight, baseThickness, layerHeight),
+      baseThickness,
+    );
+  }
+
+  function renderBorderHeightWarning() {
+    const warning = app.state.ui.$("#borderHeightWarning");
+    const marker = app.state.ui.$("#borderHeightWarningMarker");
+    const input = app.state.ui.$("#cfgBorderHeight");
+    const message = app.commands.getBorderHeightIssue();
+    marker?.classList.toggle("is-visible", !!message);
+    if (input) {
+      input.setAttribute("aria-invalid", message ? "true" : "false");
+      if (message) input.setAttribute("aria-describedby", "borderHeightWarning");
+      else input.removeAttribute("aria-describedby");
+    }
+    if (!warning) return message;
+    warning.textContent = message ? `⚠ ${message}` : "";
+    warning.classList.toggle("is-hidden", !message);
+    return message;
   }
 
   function getSolveSettingsPreflightIssues() {
     const lh = app.commands.readSolvePreflightNumber("cfgLayerHeight", "layer_height", 0.08);
     const dwb = app.commands.readSolvePreflightNumber("cfgDWb", "d_wb", 0.20);
     const dwcMinLayers = app.commands.readSolvePreflightMinCapLayers(lh);
-    const dwcMin = app.commands.minCapThicknessFromLayers(dwcMinLayers, lh);
+    const dwcMin = app.commands.minimumCapThicknessMm(dwcMinLayers, lh);
     const tMax = app.commands.readSolvePreflightNumber("cfgTMax", "t_max", 2.5);
     const nozzle = typeof app.state.session.activeNozzle !== "undefined" ? app.state.session.activeNozzle : null;
     const eps = 0.001;
     const issues = [];
 
     if (nozzle) {
-      if (lh < nozzle.min_layer_height - eps) {
-        issues.push(`Layer Height (${lh} mm) is below the ${nozzle.size} mm nozzle minimum (${nozzle.min_layer_height} mm)`);
-      } else if (lh > nozzle.max_layer_height + eps) {
-        issues.push(`Layer Height (${lh} mm) exceeds the ${nozzle.size} mm nozzle maximum (${nozzle.max_layer_height} mm)`);
+      const minimum = Number(nozzle.min_layer_height_um) / 1000;
+      const maximum = Number(nozzle.max_layer_height_um) / 1000;
+      const diameter = Number(nozzle.diameter_um) / 1000;
+      if (lh < minimum - eps) {
+        issues.push(`Layer Height is too low for the ${diameter} mm nozzle. Use at least ${minimum} mm.`);
+      } else if (lh > maximum + eps) {
+        issues.push(`Layer Height is too high for the ${diameter} mm nozzle. Use no more than ${maximum} mm.`);
       }
     }
-    const pitchMismatch = app.commands.getSolvePitchNozzleMismatch();
-    if (pitchMismatch) issues.push(pitchMismatch.message);
 
     const alignment = app.commands.calculateStackLayerAlignment(lh, dwb, dwcMin, tMax);
-    if (alignment.colorBudget <= 0) {
-      issues.push("No color space — base + cap exceed max total thickness");
-      return issues;
-    }
-
-    if (alignment.remainderMm > eps) {
+    if (alignment.maxLayers < 1) {
+      issues.push(`Max Thickness is too small. Use at least ${alignment.upperTotalMm.toFixed(2)} mm.`);
+    } else if (alignment.remainderMm > eps) {
       issues.push(app.commands.buildStackLayerAlignmentIssue(alignment));
     }
+    const borderIssue = app.commands.getBorderHeightIssue();
+    if (borderIssue) issues.push(borderIssue);
     return issues;
   }
 
@@ -1477,98 +1595,218 @@ export function installFeaturesSettingsProfiles(app) {
     return `Can't solve. Fix settings: ${(issues || []).join(" ")}`.trim();
   }
 
-  async function syncSolveSettingsWithPitchRemediation({ intent = "single" } = {}) {
-    const mismatch = app.commands.getSolvePitchNozzleMismatch();
-    let corrected = false;
-    if (mismatch) {
-      const allIssues = app.commands.getSolveSettingsPreflightIssues();
-      const otherIssues = allIssues.filter(issue => issue !== mismatch.message);
-      const requiredText = app.commands.formatSolvePitchMm(mismatch.nozzleSize);
-      const currentText = app.commands.formatSolvePitchMm(mismatch.pitch);
-      const canSolveImmediately = intent === "single" && otherIssues.length === 0;
-      const confirmed = await app.commands.appConfirm(
-        `The current Solve Pitch is ${currentText} mm. The active ${requiredText} mm nozzle requires a Solve Pitch of at least ${requiredText} mm.\n\n`
-          + `Prisma can change Solve Pitch to ${requiredText} mm and continue.`,
-        {
-          ok: canSolveImmediately
-            ? `Use ${requiredText} mm and Solve`
-            : `Use ${requiredText} mm and Continue`,
-          cancel: "Cancel",
-          title: "Solve Pitch Is Too Small",
-          restoreFocus: app.state.ui.$("#startSolveBtn"),
-        },
-      );
-      if (!confirmed) return { proceed: false, corrected: false };
-
-      const pitchInput = app.state.ui.$("#cfgSolvePitch");
-      if (!app.commands.applySolvePitchDraft(requiredText, pitchInput)) {
-        app.commands.showToast("Couldn't apply the required Solve Pitch.", "error");
-        return { proceed: false, corrected: false };
-      }
-      app.commands.updateDerivedParams();
-      corrected = true;
-    }
-
+  async function syncSolveSettings() {
     try {
       await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
     } catch {
-      return { proceed: false, corrected };
+      return { proceed: false };
+    }
+    return { proceed: true };
+  }
+
+  function normalizeAuthoritativeSolveGrid(value) {
+    const grid = value && typeof value === "object" ? value : null;
+    const requested = grid?.requested;
+    const cells = grid?.cells;
+    const resolved = grid?.resolved;
+    const delta = grid?.delta;
+    const aligned = grid?.aligned;
+    const pitch = Number(grid?.pitch_mm);
+    const requestedWidth = Number(requested?.width_mm);
+    const requestedHeight = Number(requested?.height_mm);
+    const cellsWidth = Number(cells?.width);
+    const cellsHeight = Number(cells?.height);
+    const resolvedWidth = Number(resolved?.width_mm);
+    const resolvedHeight = Number(resolved?.height_mm);
+    const deltaWidth = Number(delta?.width_mm);
+    const deltaHeight = Number(delta?.height_mm);
+    const finite = [
+      pitch,
+      requestedWidth,
+      requestedHeight,
+      cellsWidth,
+      cellsHeight,
+      resolvedWidth,
+      resolvedHeight,
+      deltaWidth,
+      deltaHeight,
+    ].every(Number.isFinite);
+    if (
+      !finite
+      || grid?.rounding_mode !== "half_up"
+      || !(pitch > 0)
+      || !Number.isInteger(cellsWidth)
+      || !Number.isInteger(cellsHeight)
+      || cellsWidth < 1
+      || cellsHeight < 1
+      || typeof aligned?.width !== "boolean"
+      || typeof aligned?.height !== "boolean"
+      || typeof aligned?.all !== "boolean"
+    ) return null;
+
+    const eps = 1e-6;
+    const close = (left, right) => Math.abs(left - right) <= eps;
+    const expectedWidthAligned = Math.abs(resolvedWidth - requestedWidth) <= eps;
+    const expectedHeightAligned = Math.abs(resolvedHeight - requestedHeight) <= eps;
+    if (
+      !close(resolvedWidth, cellsWidth * pitch)
+      || !close(resolvedHeight, cellsHeight * pitch)
+      || !close(deltaWidth, resolvedWidth - requestedWidth)
+      || !close(deltaHeight, resolvedHeight - requestedHeight)
+      || aligned.width !== expectedWidthAligned
+      || aligned.height !== expectedHeightAligned
+      || aligned.all !== (aligned.width && aligned.height)
+    ) return null;
+
+    return {
+      rounding_mode: "half_up",
+      pitch_mm: pitch,
+      requested: { width_mm: requestedWidth, height_mm: requestedHeight },
+      cells: { width: cellsWidth, height: cellsHeight },
+      resolved: { width_mm: resolvedWidth, height_mm: resolvedHeight },
+      delta: { width_mm: deltaWidth, height_mm: deltaHeight },
+      aligned: { width: aligned.width, height: aligned.height, all: aligned.all },
+    };
+  }
+
+  function buildSolveGridAdjustmentMessage(grid) {
+    const requested = `${app.commands.formatPhysicalMm(grid.requested.width_mm)} × ${app.commands.formatPhysicalMm(grid.requested.height_mm)} mm`;
+    const resolved = `${app.commands.formatPhysicalMm(grid.resolved.width_mm)} × ${app.commands.formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    const adjusted = `${resolved} (${grid.cells.width} × ${grid.cells.height} px)`;
+    const widthIncompatible = grid.aligned.width === false;
+    const heightIncompatible = grid.aligned.height === false;
+    let reason;
+    if (widthIncompatible && heightIncompatible) {
+      reason = "neither the width nor the height resolves to a whole number of solve pixels";
+    } else if (widthIncompatible) {
+      reason = "the width does not resolve to a whole number of solve pixels";
+    } else {
+      reason = "the height does not resolve to a whole number of solve pixels";
+    }
+    const lines = [
+      `The requested lithophane size is incompatible with the selected ${app.commands.formatPhysicalMm(grid.pitch_mm)} mm Solve Pitch because ${reason}.`,
+      `Requested size: ${requested}\nAdjusted size: ${adjusted}`,
+      "Select Accept & Continue to apply the adjusted size. Select Cancel to return to the Image page without changing the dimensions.",
+    ];
+    const borderEnabled = Boolean(app.state.settings.config.border);
+    const borderWidth = Number(app.state.settings.config.border_width_mm);
+    if (borderEnabled && Number.isFinite(borderWidth) && borderWidth > 0) {
+      const footprintWidth = grid.resolved.width_mm + 2 * borderWidth;
+      const footprintHeight = grid.resolved.height_mm + 2 * borderWidth;
+      lines.push(
+        `With the border, the finished footprint will be ${app.commands.formatPhysicalMm(footprintWidth)} × ${app.commands.formatPhysicalMm(footprintHeight)} mm.`,
+      );
+    }
+    return lines.join("\n\n");
+  }
+
+  function buildSolveGridAdjustmentEmphasis(grid) {
+    const requested = `${app.commands.formatPhysicalMm(grid.requested.width_mm)} × ${app.commands.formatPhysicalMm(grid.requested.height_mm)} mm`;
+    const resolved = `${app.commands.formatPhysicalMm(grid.resolved.width_mm)} × ${app.commands.formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    const values = [
+      `${app.commands.formatPhysicalMm(grid.pitch_mm)} mm`,
+      requested,
+      `${resolved} (${grid.cells.width} × ${grid.cells.height} px)`,
+    ];
+    const borderEnabled = Boolean(app.state.settings.config.border);
+    const borderWidth = Number(app.state.settings.config.border_width_mm);
+    if (borderEnabled && Number.isFinite(borderWidth) && borderWidth > 0) {
+      values.push(
+        `${app.commands.formatPhysicalMm(grid.resolved.width_mm + 2 * borderWidth)} × `
+          + `${app.commands.formatPhysicalMm(grid.resolved.height_mm + 2 * borderWidth)} mm`,
+      );
+    }
+    return values;
+  }
+
+  function showSolveGridVerificationError() {
+    app.commands.showToast(
+      "Couldn't verify the resolved image dimensions with the server. The solve was not started.",
+      "error",
+    );
+  }
+
+  async function syncSolveDimensionsWithGridRemediation({ intent = "single" } = {}) {
+    let response;
+    try {
+      response = await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+    } catch {
+      return { proceed: false, corrected: false };
     }
 
-    const unresolved = app.commands.getSolvePitchNozzleMismatch();
-    if (unresolved) {
-      app.commands.showToast(
-        `Couldn't apply the required Solve Pitch. ${unresolved.message}`,
-        "error",
-      );
-      return { proceed: false, corrected };
+    const grid = app.commands.normalizeAuthoritativeSolveGrid(response?.resolved_solve_grid);
+    if (!grid) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: false };
     }
-    return { proceed: true, corrected };
+    if (grid.aligned.all) return { proceed: true, corrected: false, grid };
+
+    const confirmed = await app.commands.appConfirm(
+      app.commands.buildSolveGridAdjustmentMessage(grid),
+      {
+        ok: "Accept & Continue",
+        cancel: "Cancel",
+        title: "Error: Invalid Lithophane Size",
+        restoreFocus: app.state.ui.$("#startSolveBtn"),
+        emphasis: app.commands.buildSolveGridAdjustmentEmphasis(grid),
+      },
+    );
+    if (!confirmed) return { proceed: false, corrected: false, grid };
+
+    if (!app.commands.applyResolvedSolveGrid(grid)) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: false };
+    }
+
+    let verifiedResponse;
+    try {
+      verifiedResponse = await app.commands.syncConfigToServer({ throwOnError: true, showErrorToast: true });
+    } catch {
+      return { proceed: false, corrected: true };
+    }
+    const verified = app.commands.normalizeAuthoritativeSolveGrid(verifiedResponse?.resolved_solve_grid);
+    const eps = 1e-6;
+    if (
+      !verified?.aligned.all
+      || Math.abs(verified.requested.width_mm - grid.resolved.width_mm) > eps
+      || Math.abs(verified.requested.height_mm - grid.resolved.height_mm) > eps
+      || Math.abs(verified.resolved.width_mm - grid.resolved.width_mm) > eps
+      || Math.abs(verified.resolved.height_mm - grid.resolved.height_mm) > eps
+    ) {
+      app.commands.showSolveGridVerificationError();
+      return { proceed: false, corrected: true };
+    }
+    return { proceed: true, corrected: true, grid: verified };
   }
 
   function updateDerivedParams() {
-    const lh = parseFloat(app.state.ui.$("#cfgLayerHeight").value) || 0.08;
-    const dwb = parseFloat(app.state.ui.$("#cfgDWb").value) || 0.20;
+    const lh = parseFloat(app.state.ui.$("#cfgLayerHeight").value) || app.commands.settingDefault("layer_height");
+    const dwb = parseFloat(app.state.ui.$("#cfgDWb").value) || app.commands.settingDefault("d_wb");
     const dwcMinEl = app.state.ui.$("#cfgDWcMin");
     let dwcMinLayers = parseInt(dwcMinEl?.value, 10);
     if (!Number.isFinite(dwcMinLayers) || dwcMinLayers < 1) {
       dwcMinLayers = 1;
       if (dwcMinEl) dwcMinEl.value = "1";
     }
-    const dwcMin = app.commands.minCapThicknessFromLayers(dwcMinLayers, lh);
+    const dwcMin = app.commands.minimumCapThicknessMm(dwcMinLayers, lh);
     const tMax = parseFloat(app.state.ui.$("#cfgTMax").value) || 2.5;
 
-    // Update layer height range label from active nozzle
-    const lhLabel = app.state.ui.$("#cfgLayerHeight")?.closest("tr")?.querySelector(".stg-range");
-    if (lhLabel) {
-      const lo = app.state.session.activeNozzle?.min_layer_height ?? 0.04;
-      const hi = app.state.session.activeNozzle?.max_layer_height ?? 0.20;
-      lhLabel.textContent = `${lo}\u2013${hi}`;
-    }
-    const solvePitchHint = app.state.ui.$("#cfgSolvePitchHint");
-    if (solvePitchHint) {
-      const minimumPitch = Number(app.state.session.activeNozzle?.size ?? 0.20);
-      const pitchText = Number.isFinite(minimumPitch)
-        ? minimumPitch.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
-        : "0.2";
-      solvePitchHint.textContent = `minimum ${pitchText} mm`;
-    }
-
     const alignment = app.commands.calculateStackLayerAlignment(lh, dwb, dwcMin, tMax);
-    const { colorBudget, maxLayers, usedBudget, remainderMm } = alignment;
+    const { maxLayers, usedBudget, remainderMm } = alignment;
     const eps = 0.001;
     const el = app.state.ui.$("#derivedParams");
-    const footnote = app.state.ui.$("#stackDerived");
+    const stackSummary = app.state.ui.$("#stackColorLayerSummary");
 
-    if (colorBudget <= 0) {
-      if (footnote) footnote.innerHTML = `<div class="stg-warn">No color space — base + cap exceed max total thickness</div>`;
+    if (maxLayers < 1) {
+      if (stackSummary) stackSummary.innerHTML = `<div class="stg-warn">Max Thickness is too small. Use at least ${alignment.upperTotalMm.toFixed(2)} mm.</div>`;
       el.innerHTML = "";
+      app.commands.renderBorderHeightWarning();
       return;
     }
 
     // Stack geometry footnote — keep it clean, one line each
-    if (footnote) {
-      footnote.innerHTML = `
+    if (stackSummary) {
+      stackSummary.innerHTML = `
         <div>Color layers: <strong>${maxLayers}</strong> at ${lh} mm = <strong>${usedBudget.toFixed(2)} mm</strong></div>
       `;
     }
@@ -1578,15 +1816,13 @@ export function installFeaturesSettingsProfiles(app) {
 
     // Nozzle compatibility
     if (app.state.session.activeNozzle) {
-      if (lh < app.state.session.activeNozzle.min_layer_height - eps) {
-        warnings.push(`Layer Height (${lh} mm) is below the ${app.state.session.activeNozzle.size} mm nozzle minimum (${app.state.session.activeNozzle.min_layer_height} mm)`);
-      } else if (lh > app.state.session.activeNozzle.max_layer_height + eps) {
-        warnings.push(`Layer Height (${lh} mm) exceeds the ${app.state.session.activeNozzle.size} mm nozzle maximum (${app.state.session.activeNozzle.max_layer_height} mm)`);
-      }
-      const solvePitch = app.commands.getCurrentSolvePitch();
-      const nozzleSize = Number(app.state.session.activeNozzle.size);
-      if (Number.isFinite(nozzleSize) && solvePitch < nozzleSize - 1e-6) {
-        warnings.push(app.commands.buildSolvePitchNozzleIssue(solvePitch, nozzleSize));
+      const minimum = Number(app.state.session.activeNozzle.min_layer_height_um) / 1000;
+      const maximum = Number(app.state.session.activeNozzle.max_layer_height_um) / 1000;
+      const diameter = Number(app.state.session.activeNozzle.diameter_um) / 1000;
+      if (lh < minimum - eps) {
+        warnings.push(`Layer Height is too low for the ${diameter} mm nozzle. Use at least ${minimum} mm.`);
+      } else if (lh > maximum + eps) {
+        warnings.push(`Layer Height is too high for the ${diameter} mm nozzle. Use no more than ${maximum} mm.`);
       }
     }
 
@@ -1594,54 +1830,28 @@ export function installFeaturesSettingsProfiles(app) {
     if (remainderMm > eps) {
       warnings.push(app.commands.buildStackLayerAlignmentIssue(alignment));
     }
-    // Soft range hints (not printability issues, just gentle nudges)
-    const hints = [];
-    const rangeChecks = [
-      { id: "cfgLayerHeight", val: lh, min: app.state.session.activeNozzle?.min_layer_height ?? 0.04, max: app.state.session.activeNozzle?.max_layer_height ?? 0.20, name: "Layer Height" },
-      { id: "cfgDWb", val: dwb, min: 0.08, max: 1.0, name: "Base Thickness" },
-      { id: "cfgDWcMin", val: dwcMin, min: lh, max: 0.50, name: "Min Cap Thickness" },
-      { id: "cfgTMax", val: tMax, min: 1.0, max: 5.0, name: "Max Total Thickness" },
-      { id: "cfgKMax", val: parseInt(app.state.ui.$("#cfgKMax")?.value) || 3, min: 1, max: 7, name: "Max Colors per Region" },
-      { id: "cfgDeThreshold", val: parseFloat(app.state.ui.$("#cfgDeThreshold")?.value) || 0.01, min: 0.01, max: 0.20, name: "Color Mismatch Tolerance" },
-      { id: "cfgSmoothKernel", val: Number.isNaN(parseFloat(app.state.ui.$("#cfgSmoothKernel")?.value)) ? app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel) : parseFloat(app.state.ui.$("#cfgSmoothKernel")?.value), min: 0, max: 20, name: "Smoothing Radius" },
-    ];
-    for (const { val, min, max, name } of rangeChecks) {
-      if (val < min - eps) hints.push(`${name} (${val}) is below the suggested minimum of ${min}`);
-      else if (val > max + eps) hints.push(`${name} (${val}) is above the suggested maximum of ${max}`);
-    }
-
     // Clear all field-level warning indicators
-    document.querySelectorAll(".stg-field-warn").forEach(el => el.remove());
+    document.querySelectorAll(".settings-field-warn").forEach(el => el.remove());
 
     // Add ⚠ glyph next to fields that triggered warnings
     const warnFieldIds = new Set();
-    if (app.state.session.activeNozzle && (lh < app.state.session.activeNozzle.min_layer_height - eps || lh > app.state.session.activeNozzle.max_layer_height + eps)) {
+    if (app.state.session.activeNozzle && (
+      lh < Number(app.state.session.activeNozzle.min_layer_height_um) / 1000 - eps
+      || lh > Number(app.state.session.activeNozzle.max_layer_height_um) / 1000 + eps
+    )) {
       warnFieldIds.add("cfgLayerHeight");
     }
     if (remainderMm > eps) {
       warnFieldIds.add("cfgLayerHeight");
       warnFieldIds.add("cfgTMax");
     }
-    if (app.state.session.activeNozzle && app.commands.getCurrentSolvePitch() < Number(app.state.session.activeNozzle.size) - 1e-6) {
-      warnFieldIds.add("cfgSolvePitch");
-    }
-
-    // Border height must be >= base thickness (d_wb)
-    if (app.state.settings.config.border) {
-      const borderHeightVal = parseFloat(app.state.ui.$("#cfgBorderHeight")?.value) || 0;
-      if (borderHeightVal < dwb - eps) {
-        warnings.push(`Border Height (${borderHeightVal} mm) must be at least the base thickness (${dwb} mm)`);
-        warnFieldIds.add("cfgBorderHeight");
-      }
-    }
-
     for (const id of warnFieldIds) {
       const input = app.state.ui.$(`#${id}`);
       if (input) {
         const wrapper = input.closest(".input-with-unit");
-        if (wrapper && !wrapper.querySelector(".stg-field-warn")) {
+        if (wrapper && !wrapper.parentElement?.querySelector(".settings-field-warn")) {
           const mark = document.createElement("span");
-          mark.className = "stg-field-warn";
+          mark.className = "stg-field-warn settings-field-warn";
           mark.textContent = "\u26a0";
           wrapper.parentElement.insertBefore(mark, wrapper);
         }
@@ -1652,10 +1862,8 @@ export function installFeaturesSettingsProfiles(app) {
     if (warnings.length) {
       html += warnings.map(w => `<div class="stg-warn">\u26a0 ${w}</div>`).join("");
     }
-    if (hints.length) {
-      html += hints.map(h => `<div class="stg-hint">${h}</div>`).join("");
-    }
     el.innerHTML = html;
+    app.commands.renderBorderHeightWarning();
   }
 
   function applyDraftNumberField(key, rawValue, {
@@ -1680,7 +1888,9 @@ export function installFeaturesSettingsProfiles(app) {
     const el = app.state.ui.$(`#${id}`);
     if (!el) return fallback;
     const coerced = app.commands.coerceNumberValue(el.value, fallback, options);
-    if (coerced.ok) el.value = coerced.value;
+    if (coerced.ok) {
+      el.value = app.commands.formatSettingsInputNumber?.(coerced.value) ?? coerced.value;
+    }
     return coerced.value;
   }
 
@@ -1691,7 +1901,7 @@ export function installFeaturesSettingsProfiles(app) {
     if (!raw) return null;
     const coerced = app.commands.coerceNumberValue(raw, null, options);
     if (coerced.ok) {
-      el.value = coerced.value;
+      el.value = app.commands.formatSettingsInputNumber?.(coerced.value) ?? coerced.value;
       return coerced.value;
     }
     el.value = "";
@@ -1701,39 +1911,39 @@ export function installFeaturesSettingsProfiles(app) {
   function setOptionalNumberInput(id, value) {
     const el = app.state.ui.$(`#${id}`);
     if (!el) return;
-    el.value = value === null || value === undefined ? "" : value;
+    el.value = value === null || value === undefined
+      ? ""
+      : (app.commands.formatSettingsInputNumber?.(value) ?? value);
   }
 
   function readConfigFromUI() {
     app.state.settings.config.base_filament = app.state.ui.$("#cfgBaseFilament")?.value || app.state.session.DEFAULT_BASE_FILAMENT;
     app.state.settings.config.cap_filament = "__same__";
-    app.state.settings.config.layer_height = app.commands.readBoundedNumberInput("cfgLayerHeight", app.state.settings.config.layer_height, { min: 0.001 });
-    app.state.settings.config.d_wb = app.commands.readBoundedNumberInput("cfgDWb", app.state.settings.config.d_wb, { min: 0.001 });
+    app.state.settings.config.layer_height = app.commands.readBoundedNumberInput("cfgLayerHeight", app.state.settings.config.layer_height, app.commands.settingNumberOptions("layer_height"));
+    app.state.settings.config.d_wb = app.commands.readBoundedNumberInput("cfgDWb", app.state.settings.config.d_wb, app.commands.settingNumberOptions("d_wb"));
     {
-      const capLayers = app.commands.readBoundedNumberInput(
+      app.state.settings.config.min_cap_layers = app.commands.readBoundedNumberInput(
         "cfgDWcMin",
-        app.commands.minCapLayersFromThickness(app.state.settings.config.d_wc_min, app.state.settings.config.layer_height),
-        { parse: (value) => parseInt(value, 10), min: 1, integer: true },
+        app.state.settings.config.min_cap_layers,
+        app.commands.settingNumberOptions("min_cap_layers"),
       );
-      app.state.settings.config.d_wc_min = app.commands.minCapThicknessFromLayers(capLayers, app.state.settings.config.layer_height);
     }
-    app.state.settings.config.t_max = app.commands.readBoundedNumberInput("cfgTMax", app.state.settings.config.t_max, { min: 0.001 });
-    app.state.settings.config.k_max = app.commands.readBoundedNumberInput("cfgKMax", app.state.settings.config.k_max, { parse: (value) => parseInt(value, 10), min: 1, max: 7, integer: true });
-    app.state.settings.config.de_threshold = app.commands.readBoundedNumberInput("cfgDeThreshold", app.state.settings.config.de_threshold, { min: 0 });
-    app.state.settings.config.gamut_mode = app.commands.normalizeActiveGamutMode(app.state.ui.$("#cfgGamutMode")?.value || app.state.settings.config.gamut_mode || "hull");
+    app.state.settings.config.t_max = app.commands.readBoundedNumberInput("cfgTMax", app.state.settings.config.t_max, app.commands.settingNumberOptions("t_max"));
+    app.state.settings.config.k_max = app.commands.readBoundedNumberInput("cfgKMax", app.state.settings.config.k_max, app.commands.settingNumberOptions("k_max"));
+    app.state.settings.config.de_threshold = app.commands.readBoundedNumberInput("cfgDeThreshold", app.state.settings.config.de_threshold, app.commands.settingNumberOptions("de_threshold"));
+    app.state.settings.config.gamut_mode = app.commands.normalizeActiveGamutMode(app.state.ui.$("#cfgGamutMode")?.value || app.state.settings.config.gamut_mode || app.commands.settingDefault("gamut_mode"));
     app.state.settings.config.gamut_white_rescale = app.state.ui.$("#cfgGamutWhiteRescale")?.checked ?? app.state.settings.config.gamut_white_rescale;
     app.state.settings.config.model_domain_ingress = true;
     {
-      const radiusMm = app.commands.readBoundedNumberInput(
+      app.state.settings.config.boundary_cap_smoothing_radius_mm = app.commands.readBoundedNumberInput(
         "cfgSmoothKernel",
-        app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel),
-        { min: 0 },
+        app.state.settings.config.boundary_cap_smoothing_radius_mm,
+        app.commands.settingNumberOptions("boundary_cap_smoothing_radius_mm"),
       );
-      app.state.settings.config.smooth_kernel = app.commands.smoothingCellsFromRadiusMm(radiusMm, app.commands.getCurrentSolvePitch());
     }
     app.commands.syncChromaWeightControlFromConfig();
-    app.state.settings.config.source_resample_kernel = app.state.ui.$("#cfgSourceResampleKernel")?.value || app.state.settings.config.source_resample_kernel || "lanczos";
-    app.state.settings.config.appearance_model_provider = app.state.ui.$("#cfgAppearanceModelProvider")?.value || app.state.settings.config.appearance_model_provider || "photo_stack_bundle";
+    app.state.settings.config.source_resample_kernel = app.state.ui.$("#cfgSourceResampleKernel")?.value || app.state.settings.config.source_resample_kernel || app.commands.settingDefault("source_resample_kernel");
+    app.state.settings.config.appearance_model_provider = app.state.ui.$("#cfgAppearanceModelProvider")?.value || app.state.settings.config.appearance_model_provider || app.commands.settingDefault("appearance_model_provider");
     if (app.state.settings.config.appearance_model_provider !== "photo_stack_bundle") {
       app.state.settings.config.photo_stack_bundle_path = null;
     }
@@ -1743,12 +1953,10 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.border = app.state.ui.$("#cfgBorder")?.checked ?? app.state.settings.config.border;
     app.state.settings.config.border_width_mm = app.commands.readBoundedNumberInput("cfgBorderWidth", app.state.settings.config.border_width_mm, { min: 0 });
     app.state.settings.config.border_height_mm = app.commands.readBoundedNumberInput("cfgBorderHeight", app.state.settings.config.border_height_mm, { min: 0 });
-    app.state.settings.config.use_corrections = app.state.ui.$("#cfgUseCorrections")?.checked ?? app.state.settings.config.use_corrections;
-    const solvePitch = app.commands.getCurrentSolvePitch();
-    app.state.settings.config.image_sample_pitch_mm = solvePitch;
-    app.state.settings.config.solver_fine_pitch_mm = solvePitch;
+    // Color corrections are mandatory in the Generator-facing contract.
+    app.state.settings.config.use_corrections = true;
     const selectedLuminanceMode = app.commands.normalizeLuminanceMode(app.commands.getSolveModeControlValue());
-    const selectedCapMode = app.state.ui.$("#cfgCapMode")?.value || app.state.settings.config.cap_mode || "appearance_bounded_smooth";
+    const selectedCapMode = app.state.ui.$("#cfgCapMode")?.value || app.state.settings.config.cap_mode || app.commands.settingDefault("cap_mode");
     if (selectedLuminanceMode !== "luminance_detail") {
       app.state.settings.config.cap_mode = selectedCapMode;
       app.commands.saveLastColorCapMode(app.state.settings.config.cap_mode);
@@ -1759,7 +1967,7 @@ export function installFeaturesSettingsProfiles(app) {
       const capModeEl = app.state.ui.$("#cfgCapMode");
       if (capModeEl) capModeEl.value = "smooth_variable";
     }
-    app.state.settings.config.boundary_cap_de_budget = app.commands.readBoundedNumberInput("cfgBoundaryCapDeBudget", app.state.settings.config.boundary_cap_de_budget ?? 0.004, { min: 0 });
+    app.state.settings.config.boundary_cap_de_budget = app.commands.readBoundedNumberInput("cfgBoundaryCapDeBudget", app.state.settings.config.boundary_cap_de_budget ?? app.commands.settingDefault("boundary_cap_de_budget"), app.commands.settingNumberOptions("boundary_cap_de_budget"));
     app.state.settings.config.detail_cap_enabled = true;
     {
       const detailLayerRaw = String(app.state.ui.$("#cfgDetailCapMaxLayers")?.value || "").trim();
@@ -1768,21 +1976,26 @@ export function installFeaturesSettingsProfiles(app) {
         : NaN;
       app.state.settings.config.detail_cap_max_layers = Number.isFinite(detailMaxLayers)
         ? Math.max(0, detailMaxLayers)
-        : (app.state.settings.config.detail_cap_max_layers ?? 5);
+        : (app.state.settings.config.detail_cap_max_layers ?? app.commands.settingDefault("detail_cap_max_layers"));
     }
     app.commands.applyMandatoryProductSettings();
-    app.state.settings.config.cell_mode = app.state.ui.$("#cfgCellMode")?.value || app.state.settings.config.cell_mode || "felzenszwalb";
-    app.state.settings.config.stage1_coarsening_factor = app.commands.readBoundedNumberInput("cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor || 1, { parse: (value) => parseInt(value, 10), min: 1, max: 4, integer: true });
-    app.state.settings.config.color_region_target_mm = app.commands.readBoundedNumberInput("cfgColorRegionTarget", app.state.settings.config.color_region_target_mm, { min: 0.001 });
-    app.state.settings.config.neutral_field_protection_mode = app.state.ui.$("#cfgNeutralFieldProtection")?.value || "off";
+    app.state.settings.config.cell_mode = app.state.ui.$("#cfgCellMode")?.value || app.state.settings.config.cell_mode || app.commands.settingDefault("cell_mode");
+    app.state.settings.config.stage1_coarsening_factor = app.commands.readBoundedNumberInput("cfgStage1Coarsening", app.state.settings.config.stage1_coarsening_factor || app.commands.settingDefault("stage1_coarsening_factor"), app.commands.settingNumberOptions("stage1_coarsening_factor"));
+    app.state.settings.config.color_region_target_mm = app.commands.readBoundedNumberInput("cfgColorRegionTarget", app.state.settings.config.color_region_target_mm, app.commands.settingNumberOptions("color_region_target_mm"));
+    app.state.settings.config.neutral_field_protection_enabled = app.state.ui.$("#cfgNeutralFieldProtectionEnabled")?.checked ?? app.state.settings.config.neutral_field_protection_enabled;
+    app.state.settings.config.neutral_field_protection_cutoff = app.commands.readBoundedNumberInput(
+      "cfgNeutralFieldProtectionCutoff",
+      app.state.settings.config.neutral_field_protection_cutoff ?? app.commands.settingDefault("neutral_field_protection_cutoff"),
+      app.commands.settingNumberOptions("neutral_field_protection_cutoff"),
+    );
     // Blueprint printability diagnostics stay on for normal app solves.
     // Heavier pressure/geometry attribution artifacts are research-only and
     // can still be enabled from scripts or API payloads.
     app.state.settings.config.emit_pressure_diagnostics = false;
     app.state.settings.config.emit_geometry_attribution = false;
     app.state.settings.config.emit_blueprint_printability = true;
-    app.state.settings.config.printability_minimum_extrusion_width_mm =
-      app.state.session.activePrintability?.minimum_extrusion_width_mm ?? null;
+    app.state.settings.config.printability_extrusion_width_mm =
+      app.state.session.activePrintability?.extrusion_width_mm ?? null;
     app.state.settings.config.printability_minimum_line_length_mm =
       app.state.session.activePrintability?.minimum_line_length_mm ?? null;
     // Product printability enforcement is mandatory. Width multiplier remains
@@ -1790,10 +2003,10 @@ export function installFeaturesSettingsProfiles(app) {
     app.state.settings.config.color_region_target_from_printability = true;
     app.state.settings.config.stage2_fine_override_enabled = app.state.ui.$("#cfgStage2FineOverride")?.checked ?? app.state.settings.config.stage2_fine_override_enabled;
     app.state.settings.config.stage2_boundary_mutation_enabled = app.state.ui.$("#cfgStage2BoundaryMutation")?.checked ?? app.state.settings.config.stage2_boundary_mutation_enabled;
-    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationPercentile", { min: 0, max: 100 });
-    app.state.settings.config.stage2_boundary_mutation_max_passes = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMaxPasses", { min: 1, max: 16 }) ?? 1;
-    app.state.settings.config.stage2_boundary_mutation_min_gain = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMinGain", { min: 0 });
-    app.state.settings.config.stage2_boundary_mutation_min_component_mm = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMinComponent", { min: 0 });
+    app.state.settings.config.stage2_boundary_mutation_current_de_percentile = null;
+    app.state.settings.config.stage2_boundary_mutation_max_passes = app.commands.readOptionalNumberInput("cfgStage2BoundaryMutationMaxPasses", app.commands.settingNumberOptions("stage2_boundary_mutation_max_passes")) ?? app.commands.settingDefault("stage2_boundary_mutation_max_passes");
+    app.state.settings.config.stage2_boundary_mutation_min_gain = app.commands.readBoundedNumberInput("cfgStage2BoundaryMutationMinGain", app.state.settings.config.stage2_boundary_mutation_min_gain ?? app.commands.settingDefault("stage2_boundary_mutation_min_gain"), app.commands.settingNumberOptions("stage2_boundary_mutation_min_gain"));
+    app.state.settings.config.stage2_boundary_mutation_min_component_mm = null;
     const baseShadingLimitEl = app.commands.getBaseShadingLimitInput();
     if (baseShadingLimitEl) {
       const fraction = app.commands.setLuminanceBaseShadingLimitFraction(
@@ -1802,8 +2015,6 @@ export function installFeaturesSettingsProfiles(app) {
       app.commands.syncBaseShadingLimitControls(app.commands.formatLuminanceBaseShadingLimitPercent(fraction));
     }
     app.state.settings.config.luminance_mode = app.commands.applyLuminanceMode(selectedLuminanceMode, { resetStandard: true });
-    app.state.settings.config.swap_improvement_threshold = app.commands.readBoundedNumberInput("paletteSwapThreshold", app.state.settings.config.swap_improvement_threshold || 2.0, { min: 0 });
-    app.state.settings.config.force_all_tiers = app.state.ui.$("#paletteForceAllTiers")?.checked || false;
   }
 
   function _formatConfigSyncError(err) {
@@ -1828,6 +2039,12 @@ export function installFeaturesSettingsProfiles(app) {
       flip_h: app.state.image.frameState.flipH,
       flip_v: app.state.image.frameState.flipV,
     } : null;
+    Object.assign(app.state.settings.config, {
+      image_path: app.state.image.selectedImage?.filename || null,
+      image_source_ref: app.state.image.selectedImage?.source_ref || null,
+      frame,
+      image_adjust: app.state.image.imageAdjust,
+    });
     const payload = {
       ...app.state.settings.config,
       image_path: app.state.image.selectedImage?.filename || null,
@@ -1840,17 +2057,31 @@ export function installFeaturesSettingsProfiles(app) {
       frame,
       image_adjust: app.state.image.imageAdjust,
     };
+    delete payload.image_sample_pitch_mm;
+    delete payload.solver_fine_pitch_mm;
+    delete payload.resolved_print_setup;
+    delete payload.extrusion_width_mm;
+    delete payload.nozzle_diameter;
+    const evaluationTicket = app.commands.beginSettingsEvaluationRequest();
     const runSync = async () => {
       const response = await app.api.updateConfig(payload);
       if (response?.config) {
         Object.assign(app.state.settings.config, response.config);
+        app.state.session.resolvedPrintSetup = response.config.resolved_print_setup
+          || app.state.session.resolvedPrintSetup;
+      }
+      app.commands.applySettingsEvaluationResponse(response, evaluationTicket);
+      if (response?.print_setup_repair) {
+        app.commands.showToast("Solve Pitch was adjusted to the nearest supported value.", "warning");
       }
       return response;
     };
     const pendingSync = app.state.settings._configSyncChain.catch(() => {}).then(runSync);
     app.state.settings._configSyncChain = pendingSync.catch(() => {});
     try {
-      return await pendingSync;
+      const response = await pendingSync;
+      app.events.emit("config.synced", { config: app.commands._cloneValue(app.state.settings.config) });
+      return response;
     } catch (err) {
       console.warn("[config] sync failed:", err.message);
       if (showErrorToast) {
@@ -1869,24 +2100,28 @@ export function installFeaturesSettingsProfiles(app) {
   }
 
   function getCurrentSolvePitch() {
-    return parseFloat(app.state.ui.$("#cfgSolvePitch")?.value)
-      || app.state.settings.config.image_sample_pitch_mm
-      || 0.20;
+    return Number(app.state.session.resolvedPrintSetup?.effective_solve_pitch_mm)
+      || Number(app.state.settings.config.solver_fine_pitch_mm)
+      || Number(app.state.settings.config.image_sample_pitch_mm)
+      || 0.2;
   }
 
-  function applySolvePitchDraft(rawValue, mirrorEl = null) {
-    const previousPitch = app.commands.getCurrentSolvePitch();
-    const radiusMm = app.commands.smoothingRadiusMmFromCells(app.state.settings.config.smooth_kernel, previousPitch);
-    const v = parseFloat(rawValue);
-    if (!(v > 0)) return false;
-    app.state.settings.config.image_sample_pitch_mm = v;
-    app.state.settings.config.solver_fine_pitch_mm = v;
-    app.state.settings.config.smooth_kernel = app.commands.smoothingCellsFromRadiusMm(radiusMm, v);
-    const smoothEl = app.state.ui.$("#cfgSmoothKernel");
-    if (smoothEl) smoothEl.value = radiusMm;
-    if (mirrorEl && mirrorEl.value !== rawValue) mirrorEl.value = rawValue;
-    app.commands.updateInfoGrid();
-    app.commands.renderPreview();
+  function stepSolvePitchMultiplier(delta) {
+    const current = Math.max(1, Number(app.state.settings.config.solve_pitch_extrusion_width_multiplier) || 1);
+    const maximum = Math.max(1, Number(app.state.session.resolvedPrintSetup?.max_solve_pitch_extrusion_width_multiplier) || 1);
+    const next = Math.min(maximum, Math.max(1, current + Number(delta)));
+    if (!Number.isInteger(next) || next === current) return false;
+    const widthMm = Number(app.state.session.activeExtrusionWidth?.width_um) / 1000;
+    if (!(widthMm > 0)) return false;
+    const effective = Number((widthMm * next).toFixed(6));
+    app.state.settings.config.solve_pitch_extrusion_width_multiplier = next;
+    app.state.settings.config.image_sample_pitch_mm = effective;
+    app.state.settings.config.solver_fine_pitch_mm = effective;
+    app.state.session.resolvedPrintSetup = {
+      ...(app.state.session.resolvedPrintSetup || {}),
+      solve_pitch_extrusion_width_multiplier: next,
+      effective_solve_pitch_mm: effective,
+    };
     return true;
   }
 
@@ -1899,7 +2134,10 @@ export function installFeaturesSettingsProfiles(app) {
     const hasPalette = isBatch
       ? batchCount >= 2 && batchCount <= 10
       : app.commands.getActivePalette().length > 0;
-    const canSolve = app.state.session.apiConnected && app.state.image.selectedImage && hasPalette;
+    const canSolve = app.state.session.apiConnected
+      && app.state.image.selectedImage
+      && hasPalette
+      && !app.commands.settingsBlocksOperation("solve");
     const isRunning = ["running", "cancelling"].includes(app.state.solve.solveStatus.status);
     const isStarting = app.state.solve.solveStartPending || app.state.solve.paletteBatchStartPending;
     btn.disabled = !(canSolve && !isStarting && !isRunning && !app.state.export.exportRunning);
@@ -1951,6 +2189,7 @@ export function installFeaturesSettingsProfiles(app) {
     _renderSettingsProfileList,
     _settingsProfileSelectionHtml,
     showSettingsProfileBrowserModal,
+    closeSettingsProfileBrowserModal,
     showSettingsProfileSaveAsModal,
     _guardSettingsProfileTransition,
     _saveDraftAsSettingsProfileWithName,
@@ -1970,12 +2209,18 @@ export function installFeaturesSettingsProfiles(app) {
     readSolvePreflightMinCapLayers,
     calculateStackLayerAlignment,
     buildStackLayerAlignmentIssue,
-    buildSolvePitchNozzleIssue,
-    formatSolvePitchMm,
-    getSolvePitchNozzleMismatch,
+    calculateBorderHeightAlignment,
+    buildBorderHeightIssue,
+    getBorderHeightIssue,
+    renderBorderHeightWarning,
     getSolveSettingsPreflightIssues,
     buildSolveSettingsPreflightMessage,
-    syncSolveSettingsWithPitchRemediation,
+    syncSolveSettings,
+    normalizeAuthoritativeSolveGrid,
+    buildSolveGridAdjustmentMessage,
+    buildSolveGridAdjustmentEmphasis,
+    showSolveGridVerificationError,
+    syncSolveDimensionsWithGridRemediation,
     updateDerivedParams,
     applyDraftNumberField,
     bindDraftNumberInput,
@@ -1987,6 +2232,6 @@ export function installFeaturesSettingsProfiles(app) {
     syncConfigToServer,
     renderSolveTab,
     getCurrentSolvePitch,
-    applySolvePitchDraft,
+    stepSolvePitchMultiplier,
     updateSolveReadiness,
   });}

@@ -25,27 +25,27 @@ def client():
     return TestClient(server.app)
 
 
-def _assert_canonical_resolution_only(cfg: dict) -> None:
-    assert cfg["image_sample_pitch_mm"] == pytest.approx(0.25)
-    assert cfg["solver_fine_pitch_mm"] == pytest.approx(0.25)
+def _assert_canonical_print_setup(cfg: dict) -> None:
+    assert cfg["solve_pitch_extrusion_width_multiplier"] == 2
+    assert cfg["image_sample_pitch_mm"] == pytest.approx(0.4)
+    assert cfg["solver_fine_pitch_mm"] == pytest.approx(0.4)
     assert cfg["color_region_target_mm"] == pytest.approx(0.80)
     assert "pixel_size_mm" not in cfg
     assert "color_pixel_mm" not in cfg
 
 
-def test_session_config_accepts_canonical_resolution_and_egress_is_canonical_only(client):
+def test_session_config_accepts_multiplier_and_egress_includes_derived_pitch(client):
     resp = client.post("/api/session/config", json={
-        "image_sample_pitch_mm": 0.25,
-        "solver_fine_pitch_mm": 0.25,
+        "solve_pitch_extrusion_width_multiplier": 2,
         "color_region_target_mm": 0.80,
     })
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    _assert_canonical_resolution_only(body["config"])
+    _assert_canonical_print_setup(body["config"])
 
     readback = client.get("/api/session")
     assert readback.status_code == 200, readback.text
-    _assert_canonical_resolution_only(readback.json()["config"])
+    _assert_canonical_print_setup(readback.json()["config"])
 
 
 def test_session_config_rejects_legacy_pixel_size_alias(client):
@@ -161,8 +161,7 @@ def test_session_config_quiet_drops_retired_preview_resolution(client):
 
 def test_session_config_allows_repeated_canonical_updates(client):
     first = client.post("/api/session/config", json={
-        "image_sample_pitch_mm": 0.25,
-        "solver_fine_pitch_mm": 0.25,
+        "solve_pitch_extrusion_width_multiplier": 2,
         "color_region_target_mm": 0.60,
     })
     assert first.status_code == 200, first.text
@@ -178,7 +177,7 @@ def test_session_config_uses_active_printer_for_printability_thresholds(client):
     resp = client.post("/api/session/config", json={
         "stage1_coarsening_factor": 2,
         "emit_blueprint_printability": True,
-        "printability_minimum_extrusion_width_mm": 9.0,
+        "printability_extrusion_width_mm": 9.0,
         "printability_minimum_line_length_mm": 9.0,
         "stage2_boundary_mutation_enabled": True,
         "stage2_boundary_mutation_current_de_percentile": 80.0,
@@ -188,11 +187,11 @@ def test_session_config_uses_active_printer_for_printability_thresholds(client):
     cfg = resp.json()["config"]
     assert cfg["stage1_coarsening_factor"] == 2
     assert cfg["emit_blueprint_printability"] is True
-    assert cfg["printability_minimum_extrusion_width_mm"] == pytest.approx(0.2)
+    assert cfg["printability_extrusion_width_mm"] == pytest.approx(0.2)
     assert cfg["printability_minimum_line_length_mm"] == pytest.approx(0.4)
     assert cfg["stage2_boundary_mutation_enabled"] is True
     assert "stage2_boundary_mutation_edge_run_mode" not in cfg
-    assert cfg["stage2_boundary_mutation_current_de_percentile"] == pytest.approx(80.0)
+    assert cfg["stage2_boundary_mutation_current_de_percentile"] is None
     assert cfg["stage2_boundary_mutation_max_passes"] == 12
 
 
@@ -267,12 +266,11 @@ def test_luminance_mode_preset_preserves_base_shading_limit_alias(client):
     assert cfg["luminance_detail_authoring_printability"] == "absolute_finalgate"
 
 
-def test_create_settings_profile_uses_canonical_only_settings(client):
+def test_create_settings_profile_stores_multiplier_not_derived_pitch(client):
     resp = client.post("/api/settings-profiles", json={
         "name": "canonical-profile",
         "settings": {
-            "image_sample_pitch_mm": 0.25,
-            "solver_fine_pitch_mm": 0.25,
+            "solve_pitch_extrusion_width_multiplier": 2,
             "color_region_target_mm": 0.80,
         },
         "modules": {},
@@ -281,7 +279,9 @@ def test_create_settings_profile_uses_canonical_only_settings(client):
     profiles = resp.json()["profiles"]
     created = next(p for p in profiles if p["name"] == "canonical-profile")
     settings = created["settings"]
-    _assert_canonical_resolution_only(settings)
+    assert settings["solve_pitch_extrusion_width_multiplier"] == 2
+    assert "image_sample_pitch_mm" not in settings
+    assert "solver_fine_pitch_mm" not in settings
     client.delete(f"/api/settings-profiles/{created['id']}")
 
 
@@ -301,8 +301,7 @@ def test_update_settings_profile_rejects_legacy_aliases(client):
     create = client.post("/api/settings-profiles", json={
         "name": "to-update",
         "settings": {
-            "image_sample_pitch_mm": 0.25,
-            "solver_fine_pitch_mm": 0.25,
+            "solve_pitch_extrusion_width_multiplier": 2,
             "color_region_target_mm": 0.80,
         },
         "modules": {},
@@ -336,6 +335,9 @@ def test_settings_profiles_api_migrates_legacy_bundles_and_keeps_top_level_crud_
         "name": "Wing C Minimal",
         "settings": {},
         "modules": {},
+        "created_at": "2026-04-22T00:00:00Z",
+        "updated_at": "2026-04-22T00:00:00Z",
+        "schema_version": 1,
     }), encoding="utf-8")
     (wing_c_dir / "standard.json").write_text(json.dumps({
         "id": "wing-c-standard",
@@ -343,6 +345,9 @@ def test_settings_profiles_api_migrates_legacy_bundles_and_keeps_top_level_crud_
         "name": "Wing C Standard",
         "settings": {},
         "modules": {},
+        "created_at": "2026-04-22T00:00:00Z",
+        "updated_at": "2026-04-22T00:00:00Z",
+        "schema_version": 1,
     }), encoding="utf-8")
 
     initial = client.get("/api/settings-profiles")
@@ -355,6 +360,8 @@ def test_settings_profiles_api_migrates_legacy_bundles_and_keeps_top_level_crud_
     assert "refinement-strong" in initial_ids
     assert not (wing_c_dir / "minimal.json").exists()
     assert not (wing_c_dir / "standard.json").exists()
+    assert (wing_c_dir / "minimal.json.v1.backup").exists()
+    assert (wing_c_dir / "standard.json.v1.backup").exists()
 
     created = client.post("/api/settings-profiles", json={
         "name": "top-level-profile",

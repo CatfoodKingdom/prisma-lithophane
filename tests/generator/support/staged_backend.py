@@ -19,6 +19,8 @@ def offline_solve_config(**kwargs):
     defaults = {
         "appearance_model_provider": "historical_spline",
         "model_domain_ingress": False,
+        "printability_extrusion_width_mm": 0.20,
+        "printability_minimum_line_length_mm": 0.40,
     }
     defaults.update(kwargs)
     return SolveConfig(**defaults)

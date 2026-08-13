@@ -60,6 +60,10 @@ function authoritativeRuntimeLibraryId() {
   }
 
 function saveEnabledFilaments() {
+    // A teaching guide owns an ephemeral environment. Its baseline and any
+    // hands-on filament changes must not overwrite the user's once-per-library
+    // preference; recovery restores the in-memory selection from its snapshot.
+    if (app.state.guides.workspaceSessionId) return false;
     const runtimeLibraryId = app.commands.authoritativeRuntimeLibraryId();
     if (
       !app.state.palette.enabledFilamentPersistenceReady

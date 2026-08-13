@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, FrozenSet, List, Mapping, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -69,6 +69,32 @@ class ParamDef:
         return d
 
 
+@dataclass(frozen=True)
+class PresetDef:
+    """Named product preset for a preprocessing module.
+
+    Presets live beside the operator parameter contract so the application,
+    saved-run inspector, and analysis tools cannot acquire independent copies
+    of the values.
+    """
+
+    key: str
+    label: str
+    values: Mapping[str, Any] = field(default_factory=dict)
+    enabled: bool | None = None
+    custom: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"key": self.key, "label": self.label}
+        if self.values:
+            result["values"] = dict(self.values)
+        if self.enabled is not None:
+            result["enabled"] = self.enabled
+        if self.custom:
+            result["custom"] = True
+        return result
+
+
 class PreprocessingModule(ABC):
     """Interface for image preprocessing operators (F1).
 
@@ -92,6 +118,11 @@ class PreprocessingModule(ABC):
     output_domain: "ColorDomain" = "srgb_u8"
     order: float = 1000.0
     required_context: FrozenSet["ContextKey"] = frozenset()
+    display_label: str = ""
+    display_tooltip: str = ""
+    preset_control_label: str = ""
+    default_preset: str | None = None
+    presets: tuple[PresetDef, ...] = ()
 
     @abstractmethod
     def apply(
@@ -104,7 +135,7 @@ class PreprocessingModule(ABC):
         ...
 
     def describe(self) -> dict:
-        return {
+        descriptor = {
             "name": self.name,
             "description": self.description,
             "slot": "preprocessing",
@@ -115,3 +146,15 @@ class PreprocessingModule(ABC):
             "order": self.order,
             "required_context": sorted(self.required_context),
         }
+        if self.display_label or self.display_tooltip:
+            descriptor["display"] = {
+                "label": self.display_label or self.name,
+                "tooltip": self.display_tooltip or self.description,
+            }
+        if self.presets:
+            descriptor["preset_ui"] = {
+                "control_label": self.preset_control_label or self.display_label or self.name,
+                "default_preset": self.default_preset,
+                "presets": [preset.to_dict() for preset in self.presets],
+            }
+        return descriptor

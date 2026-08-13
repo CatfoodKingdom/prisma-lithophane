@@ -22,21 +22,16 @@ from palette.suggest import (
     _compute_triple_gamut,
     _PaletteSearchContext,
     PaletteCandidate,
-    PaletteSuggestionSweep,
-    SwapTierResult,
     _candidate_sort_key,
     _exhaustive_search,
-    _apply_three_color_rescore_to_sweep,
+    _apply_three_color_rescore_to_candidates,
     _select_diverse_candidates,
     _precompute_centroid_distances,
     _score_palette_metrics,
     _scale_oklab_l,
     _thorough_search,
-    _recommended_ladder_size,
-    _tier_palette_sizes,
     SUGGESTION_COVERAGE_DE_THRESHOLD,
     MODEL_OKLAB_DOMAIN,
-    suggest_palettes_swap_aware,
 )
 import palette.suggest as suggest_module
 from model import load_profile, predict_transmission, srgb_to_linear, to_oklab
@@ -176,6 +171,7 @@ def test_precomputed_scoring_matches_kdtree():
 
 from palette.suggest import (
     suggest_palettes,
+    suggest_palettes_detailed,
     extract_color_signature,
     extract_color_signature_from_oklab,
     extract_luminance_residual_signature,
@@ -755,228 +751,103 @@ def test_suggest_search_mode_parameter_is_removed():
         )
 
 
-def _candidate_with_coverage(size: int, coverage: float, suffix: str = "") -> PaletteCandidate:
-    ids = [f"unit-{idx}" for idx in range(size)]
-    if suffix:
-        ids[-1] = f"unit-{suffix}"
+def _unit_candidate(ids, score=0.25):
     return PaletteCandidate(
-        filament_ids=ids,
-        mean_de=(100.0 - coverage) / 100.0,
-        max_de=(100.0 - coverage) / 50.0,
-        pct_above_threshold=100.0 - coverage,
-        gamut_points=size,
-        rank_score=(100.0 - coverage) / 100.0,
+        filament_ids=list(ids),
+        mean_de=score,
+        max_de=score,
+        pct_above_threshold=100.0,
+        gamut_points=len(ids),
+        p90_de=score,
+        rank_score=score,
         rank_mode="mean",
     )
 
 
-def test_swap_ladder_math_uses_physical_per_load_cap():
-    assert _tier_palette_sizes(0, per_load=3, available_count=10) == [3]
-    assert _tier_palette_sizes(1, per_load=3, available_count=10) == [4, 5, 6]
-    assert _tier_palette_sizes(2, per_load=3, available_count=7) == [7]
-    assert _tier_palette_sizes(3, per_load=3, available_count=7) == []
+def test_exact_suggestion_rejects_duplicate_candidate_ids():
+    sig = _make_sig()
+
+    with pytest.raises(ValueError, match="must not contain duplicates"):
+        suggest_palettes_detailed(
+            sig,
+            n_filaments=2,
+            top_k=1,
+            filament_ids=["a", "a"],
+            verbose=False,
+        )
 
 
-def test_recommended_size_uses_lookahead_for_pair_unlock_jump():
-    ladder = [
-        (3, 0, _candidate_with_coverage(3, 80.0)),
-        (4, 1, _candidate_with_coverage(4, 80.5)),
-        (5, 1, _candidate_with_coverage(5, 85.0)),
-        (6, 1, _candidate_with_coverage(6, 85.2)),
-    ]
+def test_exact_suggestion_rejects_insufficient_supported_filaments():
+    sig = _make_sig()
 
-    size, tier, candidate = _recommended_ladder_size(ladder, improvement_threshold=2.0)
-
-    assert size == 5
-    assert tier == 1
-    assert candidate.filament_ids == ladder[2][2].filament_ids
+    with pytest.raises(ValueError, match="requests 3 filaments, but only 2"):
+        suggest_module._prepare_palette_search_context(
+            sig,
+            filament_ids=["a", "b"],
+            gamut_backend=_UnitTripleBackend({}),
+            required_filaments=3,
+            verbose=False,
+        )
 
 
-def test_swap_aware_ladder_alternatives_and_early_stop(monkeypatch):
+def test_exact_suggestion_uses_requested_size_count_and_monotonic_progress(monkeypatch):
     sig = ColorSignature(
         centroids=np.zeros((1, 3), dtype=np.float32),
         weights=np.array([1.0], dtype=np.float64),
         n_pixels=1,
     )
-    fids = [f"unit-{idx}" for idx in range(9)]
-    context = suggest_module._PaletteSearchContext(
-        filament_ids=fids,
-        single_gamuts={fid: np.zeros((1, 3), dtype=np.float32) for fid in fids},
-        profiles={},
-        wb_profile={},
-        wc_profile={},
-        d_wb=0.20,
-        d_wc_min=0.08,
-        layer_height=0.08,
-        max_layers=25,
-        d_wc_max=0.08,
-        t_max=0.16,
-        dist_single={fid: np.zeros(1, dtype=np.float32) for fid in fids},
-        dist_pair={},
-        ranking_mode="mean",
-        gamut_luminance_weight=1.0,
-    )
-    coverages = {3: 80.0, 4: 80.5, 5: 85.0, 6: 85.2, 7: 85.8, 8: 86.0, 9: 86.1}
-
-    monkeypatch.setattr(
-        suggest_module,
-        "_prepare_palette_search_context",
-        lambda *args, **kwargs: context,
-    )
-
-    def fake_search(*args, **kwargs):
-        size = kwargs.get("n_filaments")
-        if size is None:
-            size = args[11]
-        top_k = kwargs.get("top_k")
-        if top_k is None:
-            top_k = args[12]
-        candidates = [_candidate_with_coverage(size, coverages[size])]
-        if top_k > 1:
-            candidates.append(_candidate_with_coverage(size, coverages[size] - 0.1, "alt"))
-        return candidates[:top_k]
-
-    monkeypatch.setattr(suggest_module, "_thorough_search", fake_search)
-
-    sweep = suggest_palettes_swap_aware(
-        sig,
-        max_colors_per_load=4,
-        slots_per_ams=4,
-        n_ams_units=1,
-        reserved_white=1,
-        max_swaps=2,
-        improvement_threshold=2.0,
-        top_k=2,
-        verbose=False,
-        three_color_rescore=False,
-    )
-
-    assert [[len(c.filament_ids) for c in tier.candidates] for tier in sweep.tiers] == [
-        [3],
-        [4, 5, 6],
-    ]
-    assert sweep.recommended["n_filaments"] == 5
-    assert sweep.recommended["swap_count"] == 1
-    assert len(sweep.alternatives) == 2
-    assert sweep.per_load_capped == {"requested": 4, "capacity": 3}
-
-
-def test_swap_aware_progress_is_monotonic_across_prepare_and_search_scopes(monkeypatch):
-    sig = ColorSignature(
-        centroids=np.zeros((1, 3), dtype=np.float32),
-        weights=np.array([1.0], dtype=np.float64),
-        n_pixels=1,
-    )
-    fids = [f"unit-{idx}" for idx in range(14)]
-    context = suggest_module._PaletteSearchContext(
-        filament_ids=fids,
-        single_gamuts={fid: np.zeros((1, 3), dtype=np.float32) for fid in fids},
-        profiles={},
-        wb_profile={},
-        wc_profile={},
-        d_wb=0.20,
-        d_wc_min=0.08,
-        layer_height=0.08,
-        max_layers=25,
-        d_wc_max=0.08,
-        t_max=0.16,
-        dist_single={fid: np.zeros(1, dtype=np.float32) for fid in fids},
-        dist_pair={},
-        ranking_mode="mean",
-        gamut_luminance_weight=1.0,
-    )
+    context = _unit_search_context(sig, {})
     events = []
+    captured = {}
 
     def fake_prepare(*args, **kwargs):
         progress = kwargs["progress"]
         progress("prepare start", 0.0)
-        progress("prepare middle", 0.6)
         progress("prepare complete", 1.0)
+        assert kwargs["required_filaments"] == 3
         return context
 
     def fake_search(*args, **kwargs):
-        size = args[11]
+        captured["n_filaments"] = args[11]
+        captured["top_k"] = args[12]
         progress = args[16]
-        progress(f"search {size} start", 0.0)
-        progress(f"search {size} middle", 0.5)
-        progress(f"search {size} complete", 1.0)
-        return [_candidate_with_coverage(size, 80.0 + size)]
+        progress("search start", 0.0)
+        progress("search complete", 1.0)
+        return [
+            _unit_candidate(["a", "b", "c"], 0.20),
+            _unit_candidate(["d", "e", "f"], 0.21),
+        ]
+
+    def fake_rescore(candidates, *args, **kwargs):
+        progress = kwargs["progress"]
+        progress("rescore start", 0.0)
+        progress("rescore complete", 1.0)
+        return candidates, {
+            "estimated_with_three_color_rescore": True,
+            "three_color_rescore_finalists": len(candidates),
+            "three_color_rescore_elapsed_s": 0.01,
+        }
 
     monkeypatch.setattr(suggest_module, "_prepare_palette_search_context", fake_prepare)
     monkeypatch.setattr(suggest_module, "_thorough_search", fake_search)
+    monkeypatch.setattr(suggest_module, "_apply_three_color_rescore_to_candidates", fake_rescore)
 
-    suggest_palettes_swap_aware(
+    result = suggest_palettes_detailed(
         sig,
-        max_colors_per_load=7,
-        slots_per_ams=8,
-        n_ams_units=1,
-        reserved_white=1,
-        max_swaps=1,
-        force_all_tiers=True,
-        top_k=1,
-        verbose=False,
-        three_color_rescore=False,
+        n_filaments=3,
+        top_k=2,
         progress=lambda label, fraction: events.append((label, fraction)),
+        verbose=False,
     )
 
+    assert captured == {"n_filaments": 3, "top_k": 2}
+    assert len(result.candidates) == 2
+    assert all(len(candidate.filament_ids) == 3 for candidate in result.candidates)
     fractions = [fraction for _label, fraction in events]
     assert fractions == sorted(fractions)
     assert fractions[0] == 0.0
     assert fractions[-1] == 1.0
-    assert all(0.0 <= fraction <= 1.0 for fraction in fractions)
-
-
-def test_swap_aware_no_clamp_omits_per_load_capped(monkeypatch):
-    sig = ColorSignature(
-        centroids=np.zeros((1, 3), dtype=np.float32),
-        weights=np.array([1.0], dtype=np.float64),
-        n_pixels=1,
-    )
-    fids = [f"unit-{idx}" for idx in range(4)]
-    context = suggest_module._PaletteSearchContext(
-        filament_ids=fids,
-        single_gamuts={fid: np.zeros((1, 3), dtype=np.float32) for fid in fids},
-        profiles={},
-        wb_profile={},
-        wc_profile={},
-        d_wb=0.20,
-        d_wc_min=0.08,
-        layer_height=0.08,
-        max_layers=25,
-        d_wc_max=0.08,
-        t_max=0.16,
-        dist_single={fid: np.zeros(1, dtype=np.float32) for fid in fids},
-        dist_pair={},
-        ranking_mode="mean",
-        gamut_luminance_weight=1.0,
-    )
-    monkeypatch.setattr(
-        suggest_module,
-        "_prepare_palette_search_context",
-        lambda *args, **kwargs: context,
-    )
-
-    def fake_search(*args, **kwargs):
-        size = kwargs.get("n_filaments")
-        if size is None:
-            size = args[11]
-        return [_candidate_with_coverage(size, 80.0)]
-
-    monkeypatch.setattr(suggest_module, "_thorough_search", fake_search)
-
-    sweep = suggest_palettes_swap_aware(
-        sig,
-        max_colors_per_load=3,
-        slots_per_ams=4,
-        n_ams_units=1,
-        reserved_white=1,
-        max_swaps=0,
-        top_k=1,
-        verbose=False,
-        three_color_rescore=False,
-    )
-
-    assert sweep.per_load_capped is None
+    assert result.model_metadata["three_color_rescore_finalists"] == 2
 
 
 def test_three_color_rescore_flips_triple_reachable_coverage():
@@ -986,100 +857,62 @@ def test_three_color_rescore_flips_triple_reachable_coverage():
         n_pixels=1,
         domain=MODEL_OKLAB_DOMAIN,
     )
-    candidate = PaletteCandidate(["a", "b", "c"], 0.25, 0.25, 100.0, 1, p90_de=0.25, rank_score=0.25)
-    sweep = PaletteSuggestionSweep(
-        tiers=[SwapTierResult(0, 3, [candidate], 0.25, 0.0, None)],
-        alternatives=[candidate],
-        recommended={"swap_count": 0, "n_filaments": 3, "filament_ids": ["a", "b", "c"]},
-        candidates_by_size={3: [candidate]},
-    )
+    candidate = _unit_candidate(["a", "b", "c"])
     context = _unit_search_context(sig, {("a", "b", "c"): [[0.50, 0.10, 0.00]]})
 
-    rescored = _apply_three_color_rescore_to_sweep(
-        sweep,
+    rescored, metadata = _apply_three_color_rescore_to_candidates(
+        [candidate],
         sig,
         context,
-        improvement_threshold=2.0,
-        top_k=1,
         de_threshold=0.02,
     )
 
-    rescored_candidate = rescored.tiers[0].candidates[0]
-    assert rescored_candidate.pct_above_threshold == pytest.approx(0.0)
-    assert rescored_candidate.mean_de == pytest.approx(0.0)
-    assert rescored.model_metadata["estimated_with_three_color_rescore"] is True
+    assert rescored[0].pct_above_threshold == pytest.approx(0.0)
+    assert rescored[0].mean_de == pytest.approx(0.0)
+    assert metadata["estimated_with_three_color_rescore"] is True
+    assert metadata["three_color_rescore_finalists"] == 1
 
 
-def test_three_color_rescore_recomputes_recommendation_after_coverage_flip():
+def test_three_color_rescore_reranks_only_the_bounded_finalist_set():
     sig = ColorSignature(
         centroids=np.array([[0.50, 0.10, 0.00]], dtype=np.float32),
         weights=np.array([1.0], dtype=np.float64),
         n_pixels=1,
         domain=MODEL_OKLAB_DOMAIN,
     )
-    size3 = PaletteCandidate(["a", "b", "c"], 0.20, 0.20, 100.0, 1, p90_de=0.20, rank_score=0.20)
-    size4 = PaletteCandidate(["a", "b", "d", "e"], 0.19, 0.19, 100.0, 1, p90_de=0.19, rank_score=0.19)
-    sweep = PaletteSuggestionSweep(
-        tiers=[
-            SwapTierResult(0, 3, [size3], 0.20, 0.0, None),
-            SwapTierResult(1, 4, [size4], 0.19, 0.0, 0.0),
-        ],
-        alternatives=[size3],
-        recommended={"swap_count": 0, "n_filaments": 3, "filament_ids": ["a", "b", "c"]},
-        candidates_by_size={3: [size3], 4: [size4]},
-    )
-    context = _unit_search_context(sig, {("a", "d", "e"): [[0.50, 0.10, 0.00]]})
+    initially_best = _unit_candidate(["d", "e", "f"], 0.20)
+    triple_reachable = _unit_candidate(["a", "b", "c"], 0.25)
+    context = _unit_search_context(sig, {("a", "b", "c"): [[0.50, 0.10, 0.00]]})
 
-    rescored = _apply_three_color_rescore_to_sweep(
-        sweep,
+    rescored, metadata = _apply_three_color_rescore_to_candidates(
+        [initially_best, triple_reachable],
         sig,
         context,
-        improvement_threshold=2.0,
-        top_k=1,
         de_threshold=0.02,
     )
 
-    assert rescored.recommended == {
-        "swap_count": 1,
-        "n_filaments": 4,
-        "filament_ids": ["a", "b", "d", "e"],
-    }
-    assert rescored.alternatives[0].filament_ids == ["a", "b", "d", "e"]
-
-
-def test_three_color_rescore_preserves_alternative_count_and_diversity():
-    sig = ColorSignature(
-        centroids=np.array([[0.1, 0.0, 0.0], [0.2, 0.0, 0.0]], dtype=np.float32),
-        weights=np.array([0.5, 0.5], dtype=np.float64),
-        n_pixels=2,
-        domain=MODEL_OKLAB_DOMAIN,
-    )
-    candidates = [
-        PaletteCandidate(["a", "b", "c"], 0.11, 0.12, 100.0, 1, p90_de=0.12, rank_score=0.11),
-        PaletteCandidate(["a", "d", "e"], 0.10, 0.11, 100.0, 1, p90_de=0.11, rank_score=0.10),
-        PaletteCandidate(["b", "d", "f"], 0.09, 0.10, 100.0, 1, p90_de=0.10, rank_score=0.09),
+    assert [candidate.filament_ids for candidate in rescored] == [
+        ["a", "b", "c"],
+        ["d", "e", "f"],
     ]
-    sweep = PaletteSuggestionSweep(
-        tiers=[SwapTierResult(0, 3, [candidates[0]], 0.11, 0.0, None)],
-        alternatives=candidates,
-        recommended={"swap_count": 0, "n_filaments": 3, "filament_ids": ["a", "b", "c"]},
-        candidates_by_size={3: candidates},
-    )
-    context = _unit_search_context(sig, {})
+    assert len(rescored) == 2
+    assert metadata["three_color_rescore_finalists"] == 2
 
-    rescored = _apply_three_color_rescore_to_sweep(
-        sweep,
+
+def test_two_color_candidates_skip_triple_rescore():
+    sig = _make_sig()
+    candidates = [_unit_candidate(["a", "b"])]
+
+    rescored, metadata = _apply_three_color_rescore_to_candidates(
+        candidates,
         sig,
-        context,
-        improvement_threshold=2.0,
-        top_k=3,
+        _unit_search_context(sig, {}),
         de_threshold=0.02,
     )
 
-    keys = [tuple(sorted(candidate.filament_ids)) for candidate in rescored.alternatives]
-    assert len(rescored.alternatives) == 3
-    assert len(set(keys)) == 3
-    assert all(
-        len(set(a.filament_ids).symmetric_difference(b.filament_ids)) >= 4
-        for a, b in itertools.combinations(rescored.alternatives, 2)
-    )
+    assert rescored == candidates
+    assert metadata == {
+        "estimated_with_three_color_rescore": False,
+        "three_color_rescore_finalists": 0,
+        "three_color_rescore_elapsed_s": 0.0,
+    }

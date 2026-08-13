@@ -3,6 +3,177 @@
  * @param {import("../../core/types.js").ApplicationContext} app
  */
 export function installFeaturesImageIndex(app) {
+  const SOLVE_GRID_ALIGNMENT_EPS_MM = 1e-6;
+
+  function stableSolveGridNumber(value) {
+    const numeric = Number(value);
+    const magnitude = Math.floor(Math.abs(numeric) * 1e6 + 0.5) / 1e6;
+    return magnitude === 0 ? 0 : Math.sign(numeric) * magnitude;
+  }
+
+  function roundHalfUpPositive(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      throw new Error("Solve-grid rounding requires a finite non-negative value");
+    }
+    return Math.floor(numeric + 0.5);
+  }
+
+  function resolveSolveGrid(widthMm, heightMm, pitchMm, {
+    minimumMm = 10,
+    maximumMm = 300,
+  } = {}) {
+    const width = Number(widthMm);
+    const height = Number(heightMm);
+    const pitch = Number(pitchMm);
+    const minimum = Number(minimumMm);
+    const maximum = Number(maximumMm);
+    if (![width, height, pitch, minimum, maximum].every(Number.isFinite)) {
+      throw new Error("Solve-grid dimensions and pitch must be finite");
+    }
+    if (!(width > 0) || !(height > 0) || !(pitch > 0)) {
+      throw new Error("Solve-grid dimensions and pitch must be positive");
+    }
+    if (!(minimum > 0) || maximum < minimum) {
+      throw new Error("Invalid solve-grid dimension range");
+    }
+    const minimumCells = Math.max(1, Math.ceil((minimum / pitch) - 1e-12));
+    const maximumCells = Math.floor((maximum / pitch) + 1e-12);
+    if (maximumCells < minimumCells) {
+      throw new Error(
+        `Solve Pitch (${formatPhysicalMm(pitch)} mm) is too large for the supported `
+          + `image dimension range (${formatPhysicalMm(minimum)}-${formatPhysicalMm(maximum)} mm)`,
+      );
+    }
+    const widthCells = Math.max(minimumCells, Math.min(maximumCells, roundHalfUpPositive(width / pitch)));
+    const heightCells = Math.max(minimumCells, Math.min(maximumCells, roundHalfUpPositive(height / pitch)));
+    const requestedWidth = stableSolveGridNumber(width);
+    const requestedHeight = stableSolveGridNumber(height);
+    const resolvedWidth = stableSolveGridNumber(widthCells * pitch);
+    const resolvedHeight = stableSolveGridNumber(heightCells * pitch);
+    const widthAligned = Math.abs(requestedWidth - resolvedWidth) <= SOLVE_GRID_ALIGNMENT_EPS_MM;
+    const heightAligned = Math.abs(requestedHeight - resolvedHeight) <= SOLVE_GRID_ALIGNMENT_EPS_MM;
+    return {
+      rounding_mode: "half_up",
+      pitch_mm: stableSolveGridNumber(pitch),
+      requested: {
+        width_mm: requestedWidth,
+        height_mm: requestedHeight,
+      },
+      cells: { width: widthCells, height: heightCells },
+      resolved: { width_mm: resolvedWidth, height_mm: resolvedHeight },
+      delta: {
+        width_mm: stableSolveGridNumber(resolvedWidth - requestedWidth),
+        height_mm: stableSolveGridNumber(resolvedHeight - requestedHeight),
+      },
+      aligned: { width: widthAligned, height: heightAligned, all: widthAligned && heightAligned },
+    };
+  }
+
+  function formatPhysicalMm(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return "";
+    const trimmed = numeric.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+    return trimmed.includes(".") ? trimmed : `${trimmed}.0`;
+  }
+
+  function getCurrentResolvedSolveGrid() {
+    return resolveSolveGrid(
+      app.state.image.frameState.widthMm,
+      app.state.image.frameState.heightMm,
+      app.commands.getCurrentSolvePitch(),
+      {
+        minimumMm: Math.max(
+          app.commands.frameDimensionMin("width"),
+          app.commands.frameDimensionMin("height"),
+        ),
+        maximumMm: Math.min(
+          app.commands.frameDimensionMax("width"),
+          app.commands.frameDimensionMax("height"),
+        ),
+      },
+    );
+  }
+
+  function renderSolveGridWarning(grid = null) {
+    const warning = app.state.ui.$("#imageSolveGridWarning");
+    const selected = !!app.state.image.selectedImage;
+    const widthIncompatible = selected && grid?.aligned?.width === false;
+    const heightIncompatible = selected && grid?.aligned?.height === false;
+    const axisStates = [
+      ["#outputWidthSolveGridWarning", "#outputWidthMm", widthIncompatible],
+      ["#outputHeightSolveGridWarning", "#outputHeightMm", heightIncompatible],
+    ];
+    for (const [markerSelector, inputSelector, incompatible] of axisStates) {
+      app.state.ui.$(markerSelector)?.classList.toggle("is-visible", incompatible);
+      const input = app.state.ui.$(inputSelector);
+      if (input) {
+        input.setAttribute("aria-invalid", incompatible ? "true" : "false");
+        if (incompatible) input.setAttribute("aria-describedby", "imageSolveGridWarning");
+        else input.removeAttribute("aria-describedby");
+      }
+    }
+    if (!warning) return;
+    if (!app.state.image.selectedImage || !grid || grid.aligned.all) {
+      warning.textContent = "";
+      warning.classList.add("is-hidden");
+      return;
+    }
+    let dimensions;
+    let resolvedDimensions;
+    if (widthIncompatible && heightIncompatible) {
+      dimensions = "Width & Height";
+      resolvedDimensions = `${formatPhysicalMm(grid.resolved.width_mm)} \u00d7 ${formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    } else if (widthIncompatible) {
+      dimensions = "Width";
+      resolvedDimensions = `${formatPhysicalMm(grid.resolved.width_mm)} mm`;
+    } else {
+      dimensions = "Height";
+      resolvedDimensions = `${formatPhysicalMm(grid.resolved.height_mm)} mm`;
+    }
+    warning.textContent = `\u26a0 ${dimensions} must be divisible by the ${formatPhysicalMm(grid.pitch_mm)} mm Solve Pitch. `
+      + `If not changed, the current ${dimensions} will be rounded to ${resolvedDimensions}.`;
+    warning.classList.remove("is-hidden");
+  }
+
+  function renderAxisAwareSummary(element, {
+    width,
+    height,
+    trailingText,
+    widthIncompatible = false,
+    heightIncompatible = false,
+  }) {
+    if (!element) return;
+    const widthClass = widthIncompatible ? " summary-axis-value is-solve-grid-incompatible" : " summary-axis-value";
+    const heightClass = heightIncompatible ? " summary-axis-value is-solve-grid-incompatible" : " summary-axis-value";
+    const plainText = `${width} \u00d7 ${height}${trailingText}`;
+    element.innerHTML = `<span class="${widthClass.trim()}" data-axis="width">${width}</span> \u00d7 `
+      + `<span class="${heightClass.trim()}" data-axis="height">${height}</span>${trailingText}`;
+    // The lightweight controller harness does not parse assigned HTML. Preserve
+    // its text contract while leaving the real DOM's per-axis spans intact.
+    if (!element.querySelector?.(".summary-axis-value")) element.textContent = plainText;
+  }
+
+  function applyResolvedSolveGrid(grid) {
+    const width = Number(grid?.resolved?.width_mm);
+    const height = Number(grid?.resolved?.height_mm);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || !(width > 0) || !(height > 0)) {
+      return false;
+    }
+    app.state.image.frameState.widthMm = width;
+    app.state.image.frameState.heightMm = height;
+    app.state.image.frameState.arMode = "specified";
+    app.state.image.lastTouchedDim = "width";
+    app.commands.syncDimFields();
+    app.commands.syncWidthSlider();
+    app.commands.syncHeightSlider();
+    app.commands.updateARButtons();
+    app.commands.renderFrameCanvas();
+    app.commands.renderPreview();
+    app.commands.updateInfoGrid();
+    return true;
+  }
+
   async function refreshImageLibrary({ announce = false } = {}) {
     if (!app.state.session.apiConnected) {
       app.commands.showToast("Start the server to refresh the image library", "warn");
@@ -32,6 +203,46 @@ export function installFeaturesImageIndex(app) {
       const count = app.state.image.availableImages.length;
       app.commands.showToast(`Image library refreshed (${count} ${count === 1 ? "image" : "images"})`, "success");
     }
+  }
+
+  function imageLibraryKey(image) {
+    return `${image?.source_ref || "physical"}\u0000${image?.filename || ""}`;
+  }
+
+  function imageLibraryEntries() {
+    return [
+      ...(app.state.image.availableImages || []),
+      ...(app.state.image.guideImages || []),
+    ].sort((left, right) => (
+      String(left.filename).toLocaleLowerCase()
+        .localeCompare(String(right.filename).toLocaleLowerCase())
+    ));
+  }
+
+  function mountGuideImage(image) {
+    if (!image?.filename || !image?.source_ref?.startsWith("guide-image:")) {
+      throw new Error("Mounted guide images require a filename and guide-image source reference");
+    }
+    const incoming = {
+      ...image,
+      virtual: true,
+      deletable: false,
+      renameable: false,
+    };
+    const key = imageLibraryKey(incoming);
+    app.state.image.guideImages = [
+      ...(app.state.image.guideImages || []).filter(candidate => imageLibraryKey(candidate) !== key),
+      incoming,
+    ];
+    app.commands.renderImageTab();
+    return incoming;
+  }
+
+  function clearGuideImages() {
+    const selectedWasGuideImage = app.state.image.selectedImage?.source_ref?.startsWith("guide-image:");
+    app.state.image.guideImages = [];
+    if (selectedWasGuideImage) app.state.image.selectedImage = null;
+    app.commands.renderImageTab();
   }
 
   function upsertImageLibraryEntry(image) {
@@ -69,21 +280,24 @@ export function installFeaturesImageIndex(app) {
 
   function renderImageGrid() {
     const grid = app.state.ui.$("#imageGrid");
+    const entries = imageLibraryEntries();
 
-    if (app.state.image.availableImages.length === 0) {
+    if (entries.length === 0) {
       grid.innerHTML = `<p class="muted-line" style="text-align:center;padding:20px 0">
         ${app.state.session.apiConnected ? "No images found" : "Connect to server"}
       </p>`;
       return;
     }
-    grid.innerHTML = app.state.image.availableImages.map((img) => {
+    grid.innerHTML = entries.map((img) => {
       const sizeKb = img.size_kb || 0;
       const sizeStr = sizeKb >= 1024 ? (sizeKb / 1024).toFixed(1) + " MB" : sizeKb.toFixed(0) + " KB";
       const selected = app.state.image.selectedImage;
-      const isSelected = !selected?.source_ref && selected?.filename === img.filename;
+      const isSelected = imageLibraryKey(selected) === imageLibraryKey(img);
       return `<div class="image-card${isSelected ? " is-selected" : ""}"
-           data-filename="${img.filename}" draggable="true">
-        <img class="image-card-thumb" src="${app.api.imagePreviewUrl(img.filename)}" alt="${img.filename}"
+           data-filename="${app.commands.escAttr(img.filename)}"
+           data-source-ref="${app.commands.escAttr(img.source_ref || "")}"
+           data-virtual="${img.virtual ? "true" : "false"}" draggable="true">
+        <img class="image-card-thumb" src="${app.api.imagePreviewUrl(img.filename, img.source_ref)}" alt="${app.commands.escAttr(img.filename)}"
              loading="lazy" onerror="this.style.display='none'">
         <div class="image-card-info">
           <strong>${app.commands.esc(img.filename)}</strong>
@@ -96,34 +310,15 @@ export function installFeaturesImageIndex(app) {
       card.addEventListener("click", () => {
         if (app.state.session.clearTempRunning) return;
         const filename = card.dataset.filename;
-        const newImage = app.state.image.availableImages.find((i) => i.filename === filename) || null;
-        const isNewImage = !!app.state.image.selectedImage?.source_ref
-          || newImage?.filename !== app.state.image.selectedImage?.filename;
-        if (isNewImage) {
-          app.state.image.frameState.scale = 100.0;
-          app.state.image.frameState.rotation = 0;
-          app.state.image.frameState.panX = 0;
-          app.state.image.frameState.panY = 0;
-          app.state.image.frameState.flipH = false;
-          app.state.image.frameState.flipV = false;
-        }
-        app.state.image.selectedImage = newImage;
-        if (newImage && isNewImage) {
-          app.commands.applyImageAspectDefault();              // Stage 11: default to image aspect, short side 120mm
-        } else if (app.state.image.frameState.arMode === "image" && newImage) {
-          app.commands.applyARFromLastTouched();
-        }
-        app.commands.renderImageTab();
-        app.commands.updateRail();
-        void app.commands.syncConfigToServer({ showErrorToast: true });
-        app.events.emit("image.selected", {
-          filename: newImage?.filename || null,
-          sourceRef: newImage?.source_ref || null,
-        });
+        const sourceRef = card.dataset.sourceRef || null;
+        const newImage = entries.find(
+          image => image.filename === filename && (image.source_ref || null) === sourceRef,
+        ) || null;
+        void app.commands.selectImageLibraryEntry(newImage, { sync: true });
       });
       card.addEventListener("dragstart", (e) => {
         e.dataTransfer.setData("application/json", JSON.stringify({
-          type: "image", filename: card.dataset.filename,
+          type: "image", filename: card.dataset.filename, source_ref: card.dataset.sourceRef || null,
         }));
         e.dataTransfer.effectAllowed = "copy";
       });
@@ -559,6 +754,9 @@ export function installFeaturesImageIndex(app) {
 
       // Position image: the crop model owns source-space crop semantics; the
       // editor only projects that model into CSS pixels.
+      // A mounted Guide Image can finish loading after early-exit cleanup has
+      // already cleared the selection. Ignore that stale layout callback.
+      if (!app.state.image.selectedImage) return;
       const rotation = app.state.image.frameState.rotation;
       const projection = app.state.image.frameDragState?.projection
         ? app.commands.projectDragCropToFrame()
@@ -762,8 +960,8 @@ export function installFeaturesImageIndex(app) {
         const mW = matRect.width;
         const mH = matRect.height;
 
-        const wMm = (app.state.image.frameState.widthMm + 2 * bwMm).toFixed(1);
-        const hMm = (app.state.image.frameState.heightMm + 2 * bwMm).toFixed(1);
+        const wMm = app.commands.formatPhysicalMm(app.state.image.frameState.widthMm + 2 * bwMm);
+        const hMm = app.commands.formatPhysicalMm(app.state.image.frameState.heightMm + 2 * bwMm);
         const off = 20;  // offset from mat edge
         const cap = 6;   // end cap half-height
         const ah = 6;    // arrowhead size
@@ -843,8 +1041,8 @@ export function installFeaturesImageIndex(app) {
     if (!svg) return;
     if (frameW <= 0 || frameH <= 0) { svg.innerHTML = ""; return; }
 
-    const wMm = app.state.image.frameState.widthMm.toFixed(1);
-    const hMm = app.state.image.frameState.heightMm.toFixed(1);
+    const wMm = app.commands.formatPhysicalMm(app.state.image.frameState.widthMm);
+    const hMm = app.commands.formatPhysicalMm(app.state.image.frameState.heightMm);
     const off = 18; // offset from frame edge
     const ah = 4;   // arrowhead size
 
@@ -978,32 +1176,96 @@ export function installFeaturesImageIndex(app) {
   }
 
   function updateInfoGrid() {
+    app.commands.renderBorderHeightWarning?.();
     if (!app.state.image.selectedImage) {
       app.state.ui.$("#infoOrigDims").textContent = "\u2014";
       app.state.ui.$("#infoPrintSize").textContent = "\u2014";
       app.state.ui.$("#infoSolvePx").textContent = "\u2014";
+      app.commands.renderSolveGridWarning(null);
       return;
     }
 
     const w = app.state.image.selectedImage.width;
     const h = app.state.image.selectedImage.height;
-    const pxSize = app.commands.getCurrentSolvePitch();
     const printW = app.state.image.frameState.widthMm;
     const printH = app.state.image.frameState.heightMm;
-    const solveW = Math.round(printW / pxSize);
-    const solveH = Math.round(printH / pxSize);
+    let solveGrid;
+    try {
+      solveGrid = app.commands.getCurrentResolvedSolveGrid();
+    } catch (error) {
+      app.state.ui.$("#infoOrigDims").textContent = `${w} \u00d7 ${h} px`;
+      app.state.ui.$("#infoPrintSize").textContent = "Unavailable";
+      app.state.ui.$("#infoSolvePx").textContent = "Unavailable";
+      app.commands.renderSolveGridWarning(null);
+      const warning = app.state.ui.$("#imageSolveGridWarning");
+      if (warning) {
+        warning.textContent = `\u26a0 ${error.message}`;
+        warning.classList.remove("is-hidden");
+      }
+      return;
+    }
+    const solveW = solveGrid.cells.width;
+    const solveH = solveGrid.cells.height;
     const totalPx = solveW * solveH;
 
     app.state.settings.config.max_dim_mm = Math.max(printW, printH);
 
     // Print size = image frame + border if enabled
     const bw = (app.state.settings.config.border && app.state.settings.config.border_width_mm > 0) ? app.state.settings.config.border_width_mm : 0;
-    const lithW = printW + 2 * bw;
-    const lithH = printH + 2 * bw;
+    const lithW = solveGrid.resolved.width_mm + 2 * bw;
+    const lithH = solveGrid.resolved.height_mm + 2 * bw;
 
     app.state.ui.$("#infoOrigDims").textContent = `${w} \u00d7 ${h} px`;
-    app.state.ui.$("#infoPrintSize").textContent = `${lithW.toFixed(1)} \u00d7 ${lithH.toFixed(1)} mm`;
-    app.state.ui.$("#infoSolvePx").textContent = `${solveW} \u00d7 ${solveH} = ${totalPx.toLocaleString()} px`;
+    const widthIncompatible = solveGrid.aligned.width === false;
+    const heightIncompatible = solveGrid.aligned.height === false;
+    renderAxisAwareSummary(app.state.ui.$("#infoPrintSize"), {
+      width: app.commands.formatPhysicalMm(lithW),
+      height: app.commands.formatPhysicalMm(lithH),
+      trailingText: " mm",
+      widthIncompatible,
+      heightIncompatible,
+    });
+    renderAxisAwareSummary(app.state.ui.$("#infoSolvePx"), {
+      width: solveW,
+      height: solveH,
+      trailingText: ` = ${totalPx.toLocaleString()} px`,
+      widthIncompatible,
+      heightIncompatible,
+    });
+    app.commands.renderSolveGridWarning(solveGrid);
+  }
+
+  async function selectImageLibraryEntry(newImage, { sync = true } = {}) {
+    if (newImage && !imageLibraryEntries().some(
+      image => imageLibraryKey(image) === imageLibraryKey(newImage),
+    )) {
+      throw new Error("Image Library entry is unavailable");
+    }
+    const isNewImage = imageLibraryKey(newImage) !== imageLibraryKey(app.state.image.selectedImage);
+    if (isNewImage) {
+      Object.assign(app.state.image.frameState, {
+        scale: 100.0,
+        rotation: 0,
+        panX: 0,
+        panY: 0,
+        flipH: false,
+        flipV: false,
+      });
+    }
+    app.state.image.selectedImage = newImage || null;
+    if (newImage && isNewImage) {
+      app.commands.applyImageAspectDefault();
+    } else if (app.state.image.frameState.arMode === "image" && newImage) {
+      app.commands.applyARFromLastTouched();
+    }
+    app.commands.renderImageTab();
+    app.commands.updateRail();
+    if (sync) await app.commands.syncConfigToServer({ showErrorToast: true });
+    app.events.emit("image.selected", {
+      filename: newImage?.filename || null,
+      sourceRef: newImage?.source_ref || null,
+    });
+    return newImage || null;
   }
 
   function adjustScaleForFrameChange(oldW, oldH, newW, newH) {
@@ -1028,8 +1290,8 @@ export function installFeaturesImageIndex(app) {
   function syncDimFields() {
     const owInput = app.state.ui.$("#outputWidthMm");
     const ohInput = app.state.ui.$("#outputHeightMm");
-    if (owInput) owInput.value = app.state.image.frameState.widthMm.toFixed(1);
-    if (ohInput) ohInput.value = app.state.image.frameState.heightMm.toFixed(1);
+    if (owInput) owInput.value = app.commands.formatPhysicalMm(app.state.image.frameState.widthMm);
+    if (ohInput) ohInput.value = app.commands.formatPhysicalMm(app.state.image.frameState.heightMm);
   }
 
   function syncScaleSlider() {
@@ -1301,7 +1563,11 @@ export function installFeaturesImageIndex(app) {
       try {
         const data = JSON.parse(e.dataTransfer.getData("application/json"));
         if (data.type === "image" && data.filename) {
-          const isNewImage = data.filename !== app.state.image.selectedImage?.filename;
+          const sourceRef = data.source_ref || null;
+          const nextImage = app.commands.imageLibraryEntries().find(
+            image => image.filename === data.filename && (image.source_ref || null) === sourceRef,
+          ) || null;
+          const isNewImage = imageLibraryKey(nextImage) !== imageLibraryKey(app.state.image.selectedImage);
           if (isNewImage) {
             app.state.image.frameState.scale = 100.0;
             app.state.image.frameState.rotation = 0;
@@ -1310,7 +1576,7 @@ export function installFeaturesImageIndex(app) {
             app.state.image.frameState.flipH = false;
             app.state.image.frameState.flipV = false;
           }
-          app.state.image.selectedImage = app.state.image.availableImages.find((i) => i.filename === data.filename) || null;
+          app.state.image.selectedImage = nextImage;
           if (app.state.image.selectedImage && isNewImage) app.commands.applyImageAspectDefault();  // Stage 11: default to image aspect
           app.commands.renderImageTab();
           app.commands.updateRail();
@@ -1348,6 +1614,7 @@ export function installFeaturesImageIndex(app) {
   }
 
   function syncCreationSidePanelSizing() {
+    if (typeof window === "undefined") return;
     const sourcePanel = app.state.palette.creationMode === "manual" ? app.state.ui.$("#panelManualBuilder") : app.state.ui.$("#panelAutoSuggest");
     const sidePanel = app.state.palette.creationMode === "manual" ? app.state.ui.$("#manualPalettePanel") : app.state.ui.$("#creationDeckPanel");
     if (!sourcePanel || !sidePanel || sidePanel.hidden) return;
@@ -1358,26 +1625,20 @@ export function installFeaturesImageIndex(app) {
     if (sourceHeight > 0) sidePanel.style.minHeight = `${sourceHeight}px`;
   }
 
-  function syncDeckGenerationSettingsUI(source = "settings") {
-    for (const field of app.state.ui.DECK_GENERATION_FIELD_MAP) {
-      const el = app.state.ui.$(`#${field.paletteId}`);
-      if (!el) continue;
-      if (source === "palette") {
-        if (field.prop === "checked") {
-          app.state.settings.config[field.configKey] = !!el.checked;
-        } else {
-          const parsed = parseFloat(el.value);
-          if (Number.isFinite(parsed)) app.state.settings.config[field.configKey] = parsed;
-        }
-      } else {
-        el[field.prop] = field.prop === "checked" ? !!app.state.settings.config[field.configKey] : app.state.settings.config[field.configKey];
-      }
-    }
-  }
-
   Object.assign(app.commands, {
+    roundHalfUpPositive,
+    resolveSolveGrid,
+    formatPhysicalMm,
+    getCurrentResolvedSolveGrid,
+    renderSolveGridWarning,
+    applyResolvedSolveGrid,
     refreshImageLibrary,
     upsertImageLibraryEntry,
+    mountGuideImage,
+    clearGuideImages,
+    imageLibraryEntries,
+    imageLibraryKey,
+    selectImageLibraryEntry,
     renderImageGrid,
     bindImageLibraryWheelScroll,
     clamp,
@@ -1426,5 +1687,4 @@ export function installFeaturesImageIndex(app) {
     initFrameInteraction,
     toggleCreationMode,
     syncCreationSidePanelSizing,
-    syncDeckGenerationSettingsUI,
   });}

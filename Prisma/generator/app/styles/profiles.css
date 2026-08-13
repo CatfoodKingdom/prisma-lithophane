@@ -13,21 +13,8 @@
   padding: 0;
   border-bottom: 0;
 }
-.settings-profile-section-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 2px;
-  background: var(--header-bg);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
 .settings-profile-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: var(--muted);
+  white-space: nowrap;
 }
 .settings-profile-section-body {
   display: flex;
@@ -485,8 +472,6 @@
     grid-row: 3;
   }
 }
-.stack-diagram { max-width: 340px; margin: 4px 0 2px; }
 .stg-warn { font-size: 10px; color: var(--warn-ink); margin-top: 2px; }
 .stg-field-warn { font-size: 11px; color: var(--warn-ink); margin-right: 3px; }
-.stack-diagram svg { width: 100%; height: auto; }
 .settings-printer-summary { padding: 6px 0; border-top: 1px solid var(--line); margin-top: 6px; }

@@ -47,7 +47,7 @@ test("Generator loads through one native-module entry point", () => {
   assert.equal(fs.existsSync(path.join(appDir, "app.js")), false);
 });
 
-test("feature modules communicate through injected context instead of importing peers", () => {
+test("feature modules may compose within a domain but do not import across feature domains", () => {
   const featureDir = path.join(appDir, "features");
   const files = fs.readdirSync(featureDir, { recursive: true })
     .filter((name) => name.endsWith(".js"))
@@ -55,10 +55,13 @@ test("feature modules communicate through injected context instead of importing 
 
   for (const file of files) {
     for (const dependency of importsFor(file)) {
+      if (!dependency.startsWith(featureDir)) continue;
+      const sourceDomain = path.relative(featureDir, file).split(path.sep)[0];
+      const dependencyDomain = path.relative(featureDir, dependency).split(path.sep)[0];
       assert.equal(
-        dependency.startsWith(featureDir),
-        false,
-        `${path.relative(appDir, file)} imports peer feature ${path.relative(appDir, dependency)}`,
+        dependencyDomain,
+        sourceDomain,
+        `${path.relative(appDir, file)} imports another feature domain ${path.relative(appDir, dependency)}`,
       );
     }
   }
@@ -145,7 +148,6 @@ test("light headers use the blue semantic token without changing dark mode or vi
     "export.css",
     "image.css",
     "palette.css",
-    "profiles.css",
     "solve.css",
   ]);
 });
@@ -180,7 +182,7 @@ test("solve history controls and cards keep compact stable confirmation geometry
   assert.match(events, /clearTimeout\(confirmTimer\)/);
 });
 
-test("printer configuration exposes derived width and whole-nozzle minimum length", () => {
+test("printer configuration owns nozzle capabilities without saved width profiles", () => {
   const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
   const printerController = fs.readFileSync(
     path.join(appDir, "features", "printers", "index.js"),
@@ -190,18 +192,95 @@ test("printer configuration exposes derived width and whole-nozzle minimum lengt
     path.join(appDir, "features", "settings", "profiles.js"),
     "utf8",
   );
+  const printerCss = fs.readFileSync(path.join(appDir, "styles", "printers-and-modules.css"), "utf8");
 
   assert.doesNotMatch(html, /<th>Min W<\/th>/);
-  assert.match(html, /Min Len \(× nozzle\)/);
+  assert.doesNotMatch(html, /pcNozzleLengthHelp|Each Nozzle Profile defines/);
   assert.match(
     printerController,
-    /class="nz-min-ll-mult"[\s\S]*?step="1" min="2" max="10"/,
+    /class="pc-number-input nz-min-ll-mult"[\s\S]*?step="1" min="\$\{MIN_LINE_LENGTH_MULTIPLIER\}" max="\$\{MAX_LINE_LENGTH_MULTIPLIER\}"/,
   );
-  assert.match(printerController, /class="nz-min-ll-derived"/);
-  assert.doesNotMatch(printerController, /class="nz-min-lw"/);
-  assert.match(settingsController, /activePrintability\?\.minimum_extrusion_width_mm/);
+  assert.doesNotMatch(printerController, /pcNozzleLengthHelp/);
+  assert.match(html, /class="pc-integer-stepper"[\s\S]*?id="pcAmsUnits"[\s\S]*?data-step-direction="1"/);
+  assert.match(printerController, /class="pc-integer-stepper"[\s\S]*?class="pc-number-input nz-min-ll-mult"/);
+  assert.match(html, /class="settings-number-step settings-number-step-up"[^>]*data-step-direction="1"[^>]*>▲<\/button>/);
+  assert.match(printerController, /class="settings-number-step settings-number-step-down"[^>]*data-step-direction="-1"[^>]*>▼<\/button>/);
+  assert.doesNotMatch(html, /pc-integer-stepper-actions/);
+  assert.doesNotMatch(printerController, /pc-integer-stepper-actions|[▴▾]/);
+  assert.match(html, /for="pcPrinterSelect">Printer Profile<\/label>/);
+  assert.match(html, /class="ghost-button small" id="pcNewPrinterBtn"/);
+  assert.match(html, /class="ghost-button small danger" id="pcDeletePrinterBtn"/);
+  assert.match(html, />Printable Area<\/span>/);
+  assert.match(html, />slots per unit<\/span>/);
+  assert.match(printerCss, /\.pc-card \.pc-number-input::\-webkit-inner-spin-button[\s\S]*?\-webkit-appearance:\s*none/);
+  assert.match(printerCss, /--pc-number-field-width:\s*56px/);
+  assert.match(printerCss, /--pc-count-field-width:\s*44px/);
+  assert.match(printerCss, /--pc-control-height:\s*24px/);
+  assert.match(printerCss, /max-width:\s*520px/);
+  assert.match(printerCss, /\.pc-printer-select\s*{[^}]*height:\s*26px[^}]*font-size:\s*13px/);
+  assert.match(printerCss, /\.pc-context-label\s*{[^}]*font-size:\s*13px/);
+  assert.match(printerCss, /\.pc-section:last-child\s*{[^}]*margin-bottom:\s*0/);
+  assert.match(printerCss, /\.pc-nozzle-list\s*{[^}]*padding-left:\s*8px/);
+  assert.match(printerCss, /\.pc-card\s*{[^}]*background:\s*var\(--bg\)/);
+  assert.match(printerCss, /\.pc-general-name \.control-input\s*{[^}]*width:\s*180px[^}]*max-width:\s*100%/);
+  assert.match(printerCss, /\.pc-card \.pc-number-input\s*{[^}]*font-size:\s*11px/);
+  assert.match(printerCss, /\.pc-general-field\s*{[^}]*grid-template-columns:\s*var\(--pc-general-label-width\) max-content/);
+  assert.match(printerCss, /\.pc-nozzle-group\s*{[^}]*border:\s*1px solid var\(--line-strong\)[^}]*background:\s*var\(--panel\)/);
+  assert.match(printerCss, /\.pc-constraint-field\s*{[^}]*grid-template-columns:\s*var\(--pc-nozzle-label-width\) max-content/);
+  assert.match(printerCss, /\.pc-nozzle-constraints\s*{[^}]*padding:\s*4px 8px 6px 20px/);
+  assert.match(printerCss, /\.pc-nozzle-group-header\s*{[^}]*min-height:\s*28px[^}]*background:\s*color-mix\(in srgb, var\(--selected\) 55%, var\(--panel\)\)/);
+  assert.match(printerCss, /\.pc-card \.pc-number-input\.pc-derived-bound:disabled\s*{[^}]*opacity:\s*1[^}]*background:\s*var\(--surface-raised\)/);
+  assert.match(printerCss, /\.pc-minimum-line-controls \.pc-integer-stepper\s*{[^}]*margin-left:\s*calc\(var\(--pc-number-field-width\) - var\(--pc-count-field-width\)\)/);
+  assert.match(printerController, /class="pc-number-input pc-derived-bound nz-min-ew"[^>]*disabled/);
+  assert.match(printerController, /class="pc-nozzle-title">\$\{umToMm\(nozzle\.diameter_um\)\} mm Nozzle<\/span>/);
+  assert.match(printerController, /class="pc-constraint-field">[\s\S]*?Nozzle Diameter[\s\S]*?class="pc-number-input nz-diameter"/);
+  assert.match(printerController, /class="ghost-button xxs danger nz-delete"[^>]*>Delete<\/button>/);
+  assert.match(printerController, /Are you sure you want to delete the \$\{umToMm\(nozzle\.diameter_um\)\} mm Nozzle Profile and its saved Extrusion Widths\?/);
+  assert.doesNotMatch(printerController, /pc-width-table|ew-min-ll-derived|extrusion_widths/);
+  assert.match(printerController, /Nozzle Diameters must be unique within one Printer Profile/);
+  assert.match(settingsController, /activePrintability\?\.extrusion_width_mm/);
   assert.match(settingsController, /activePrintability\?\.minimum_line_length_mm/);
   assert.equal(fs.existsSync(path.join(appDir, "printers.json")), false);
+});
+
+test("saved runs uses a quiet window surface around panel rows", () => {
+  const solveCss = fs.readFileSync(path.join(appDir, "styles", "solve.css"), "utf8");
+  assert.match(solveCss, /\.saved-runs-modal\s*{[^}]*background:\s*var\(--bg\)/);
+  assert.match(solveCss, /\.saved-run-row\s*{[^}]*background:\s*var\(--panel\)/);
+});
+
+test("Printer rail uses shared viewport-anchored selectors and compact Width actions", () => {
+  const html = fs.readFileSync(path.join(appDir, "index.html"), "utf8");
+  const shell = fs.readFileSync(
+    path.join(appDir, "features", "shell", "index.js"),
+    "utf8",
+  );
+  const anchoredMenu = fs.readFileSync(path.join(appDir, "core", "anchored-menu.js"), "utf8");
+  const printerCss = fs.readFileSync(path.join(appDir, "styles", "printers-and-modules.css"), "utf8");
+
+  for (const id of ["railPrinterMenu", "railNozzleMenu", "railExtrusionWidthMenu"]) {
+    assert.match(html, new RegExp(`id="${id}"[\\s\\S]*?role="menu"[\\s\\S]*?hidden`));
+  }
+  assert.match(shell, /createAnchoredMenuController/);
+  assert.match(shell, /id: "railPrinterButton"[\s\S]*?menuId: "railPrinterMenu"/);
+  assert.match(shell, /id: "railNozzleButton"[\s\S]*?menuId: "railNozzleMenu"/);
+  assert.match(shell, /value: `\$\{setupMmLabel\(nozzle\.diameter_um\)\} mm`/);
+  assert.doesNotMatch(shell, /mm nozzle/);
+  assert.match(shell, /class="rail-selector-option rail-selector-menu-action"[\s\S]*?role="menuitemradio"/);
+  assert.match(shell, /class="rail-selector-remove"[\s\S]*?xIconSvg\("icon-x rail-selector-remove-icon"\)/);
+  assert.match(shell, /button\.textContent = "\?"/);
+  assert.match(shell, /class="rail-selector-option rail-selector-add rail-selector-menu-action"[\s\S]*?data-menu-stay-open="true"><span>Add New<\/span><\/button>/);
+  assert.match(shell, /id="railWidthNewValue" type="text"[\s\S]*?aria-label="New Extrusion Width in millimeters"/);
+  assert.match(shell, /rawWidth = addInput\.value\.trim\(\)[\s\S]*?\\d\{1,3\}/);
+  assert.match(shell, /showToast\([\s\S]*?Enter an Extrusion Width from[\s\S]*?"error"/);
+  assert.doesNotMatch(shell, /rail-width-menu-title|rail-width-error|New width<\/label>|rail-selector-divider|rail-selector-remove-cancel|rail-selector-remove-prompt/);
+  assert.match(printerCss, /\.rail-selector-menu \[role="menuitem"\] > span,[\s\S]*?font-weight:\s*400/);
+  assert.match(printerCss, /aria-checked="true"\][\s\S]*?top:\s*50%[\s\S]*?translateY\(-50%\)/);
+  assert.match(printerCss, /\.rail-selector-remove\s*{[\s\S]*?position:\s*absolute[\s\S]*?width:\s*18px/);
+  assert.match(anchoredMenu, /pointerdown[\s\S]*?menu\?\.contains\(event\.target\)[\s\S]*?close\(\)/);
+  assert.match(anchoredMenu, /item\.dataset\.menuStayOpen !== "true"/);
+  assert.match(shell, /event\.key === "Escape"/);
+  assert.doesNotMatch(shell, /role="option"|aria-selected=/);
 });
 
 test("palette suggestions use solve-mode naming and compact deck-card geometry", () => {
@@ -221,7 +300,8 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
   const paletteCss = fs.readFileSync(path.join(appDir, "styles", "palette.css"), "utf8");
   const surfacesCss = fs.readFileSync(path.join(appDir, "styles", "surfaces.css"), "utf8");
 
-  assert.match(html, /<label for="paletteSuggestMode">Solve mode<\/label>[\s\S]*?<option value="standard">Color<\/option>[\s\S]*?<option value="luminance_detail">Luminance<\/option>/);
+  assert.match(html, /<label for="targetFilamentCount">Palette Colors<\/label>/);
+  assert.match(html, /<label for="paletteSuggestMode">Solve Mode<\/label>[\s\S]*?<option value="standard">Color<\/option>[\s\S]*?<option value="luminance_detail">Luminance<\/option>/);
   assert.doesNotMatch(html, /aria-labeledby=/);
   assert.doesNotMatch(html, /Source color|Luminance detail/);
   assert.match(suggestions, /modePrefix\s*=\s*paletteMode === "luminance_detail" \? "Luminance" : "Color"/);
@@ -248,22 +328,59 @@ test("palette suggestions use solve-mode naming and compact deck-card geometry",
 test("changed frontend modules carry their current bootstrap cache versions", () => {
   const bootstrap = fs.readFileSync(path.join(appDir, "bootstrap.js"), "utf8");
   for (const [relativePath, version] of Object.entries({
-    "features/shell/index.js": "2026-07-30-generator-basics-v3",
-    "features/printers/index.js": "2026-07-31-guide-image-tab-v1",
-    "features/image/index.js": "2026-07-31-guide-step10-v1",
-    "features/guides/definitions.js": "2026-08-01-guide-palette-copy-v1",
-    "features/guides/targets.js": "2026-08-01-guide-image-exit-gates-v1",
-    "features/guides/overlay.js": "2026-08-01-guide-image-polish-v1",
-    "features/guides/controller.js": "2026-08-01-guide-palette-auto-advance-v1",
-    "features/settings/profiles.js": "2026-07-31-guide-audit-v1",
-    "features/solve/batch.js": "2026-07-28-solve-pitch-remediation-v5",
-    "features/solve/recipe-viewer.js": "2026-07-30-generator-basics-v2",
+    "features/shell/index.js": "2026-08-11-dependent-change-review-v1",
+    "features/shell/theme.js": "2026-08-02-topbar-menu-switch-v1",
+    "features/printers/index.js": "2026-08-11-nozzle-identity-v1",
+    "core/application-context.js": "2026-08-11-print-setup-v1",
+    "features/image/index.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/palette/suggestions.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/palette/deck.js": "2026-08-02-exact-palette-suggestions-v1",
+    "features/settings/controller.js": "2026-08-11-print-setup-v2",
+    "features/settings/contract.js": "2026-08-11-print-setup-v1",
+    "features/guides/registry.js": "2026-08-12-guide-companion-v4",
+    "features/guides/targets.js": "2026-08-12-guide-companion-v4",
+    "features/guides/controller.js": "2026-08-12-guide-companion-v4",
+    "features/guides/actions/registry.js": "2026-08-11-dependent-change-review-v1",
+    "features/event-bindings.js": "2026-08-11-saved-runs-escape-v1",
+    "features/palette/library.js": "2026-08-04-saving-loading-fixes-v1",
+    "features/settings/profiles.js": "2026-08-11-settings-ia-v1",
+    "features/settings/modules.js": "2026-08-11-module-hierarchy-v1",
+    "features/settings/layout.js": "2026-08-11-preprocessing-flow-v2",
+    "features/solve/run.js": "2026-08-11-print-setup-v1",
+    "features/solve/batch.js": "2026-08-11-print-setup-v1",
+    "features/solve/recipe-viewer.js": "2026-08-11-print-setup-v1",
+    "features/guides/overlay.js": "2026-08-12-guide-companion-polish-v1",
+    "features/application.js": "2026-08-04-saving-loading-fixes-v1",
+    "api/index.js": "2026-08-04-saving-loading-fixes-v1",
   })) {
     assert.match(
       bootstrap,
       new RegExp(`${relativePath.replaceAll("/", "\\/").replace(".", "\\.")}\\?v=${version}`),
     );
   }
+  const apiIndex = fs.readFileSync(path.join(appDir, "api", "index.js"), "utf8");
+  for (const apiModule of [
+    "cache.js", "client.js", "guides.js", "images.js", "jobs.js",
+    "model-libraries.js", "modules.js", "runs.js",
+    "session.js", "settings.js",
+  ]) {
+    assert.match(
+      apiIndex,
+      new RegExp(`${apiModule.replace(".", "\\.")}\\?v=2026-08-04-saving-loading-fixes-v1`),
+    );
+  }
+  assert.match(apiIndex, /printers\.js\?v=2026-08-11-print-setup-v2/);
+});
+
+test("Escape closes Saved Runs without dismissing it beneath the rename dialog", () => {
+  const events = fs.readFileSync(
+    path.join(appDir, "features", "event-bindings.js"),
+    "utf8",
+  );
+  assert.match(
+    events,
+    /#renameSavedRunModal[\s\S]*?classList\.contains\("is-hidden"\)[\s\S]*?return;[\s\S]*?#savedRunsModal[\s\S]*?_setSavedRunsModalOpen\(false\)/,
+  );
 });
 
 test("extra-extra-small ghost actions share button geometry across element types", () => {
@@ -272,6 +389,15 @@ test("extra-extra-small ghost actions share button geometry across element types
   assert.match(
     shellCss,
     /\.ghost-button\.xxs\s*{[^}]*line-height:\s*normal;[^}]*}/,
+  );
+});
+
+test("export folder actions keep their labels on one line", () => {
+  const exportCss = fs.readFileSync(path.join(appDir, "styles", "export.css"), "utf8");
+
+  assert.match(
+    exportCss,
+    /\.export-outdir-row \.open-export-folder-btn\s*{[^}]*white-space:\s*nowrap;[^}]*}/,
   );
 });
 
@@ -339,4 +465,34 @@ test("abandoned suggestion-owned batch surface is absent", () => {
     "Use " + "Palette",
   ];
   for (const relic of abandoned) assert.doesNotMatch(combined, new RegExp(relic));
+});
+
+test("retired swap-tier suggestion controls and styles are absent", () => {
+  const files = [
+    "index.html",
+    "core/application-context.js",
+    "features/event-bindings.js",
+    "features/image/index.js",
+    "features/palette/suggestions.js",
+    "features/settings/controller.js",
+    "features/settings/profiles.js",
+    "features/guides/targets.js",
+    "styles/palette.css",
+  ];
+  const combined = files
+    .map(relative => fs.readFileSync(path.join(appDir, relative), "utf8"))
+    .join("\n");
+  for (const retired of [
+    "targetSwapCount",
+    "paletteSwapThreshold",
+    "paletteForceAllTiers",
+    "swap_improvement_threshold",
+    "force_all_tiers",
+    "creation-settings-shell",
+    "creation-settings-card",
+  ]) {
+    assert.doesNotMatch(combined, new RegExp(retired));
+  }
+  assert.match(combined, /id="targetFilamentCount"[\s\S]*?min="2" max="16"/);
+  assert.match(combined, /id="amsPreview"[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/);
 });

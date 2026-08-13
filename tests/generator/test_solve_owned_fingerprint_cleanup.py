@@ -8,9 +8,8 @@ The session-config dict is the canonical invalidation surface — not
     kernel-change to invalidate the cache (consensus §R6.C).
 
 (The cleanup_* raster params are retired — 2.2a reassign_mode/search_radius_mm,
-2.2b min_width/min_area. Wing-B feature scale is now nozzle-derived; nozzle-
-change cache invalidation rides on `__active_nozzle_printability__`, covered in
-`test_fingerprint.py`.)
+2.2b min_width/min_area. Wing-B feature scale is now Extrusion-Width-derived;
+resolved-print-setup cache invalidation is covered in `test_fingerprint.py`.)
 """
 from __future__ import annotations
 
@@ -41,7 +40,7 @@ def _base_config() -> dict:
         "base_filament": "panchroma-matte-cotton-white",
         "cap_filament": "__same__",
         "d_wb": 0.20,
-        "d_wc_min": 0.08,
+        "min_cap_layers": 1,
         "t_max": 2.5,
         "k_max": 3,
         "de_threshold": 0.05,
@@ -56,7 +55,7 @@ def _base_config() -> dict:
         "image_adjust": None,
         "max_dim_mm": 130.0,
         "frame": None,
-        "smooth_kernel": 15.0,
+        "boundary_cap_smoothing_radius_mm": 3.0,
         "source_resample_kernel": "lanczos",
         "border": False,
         "border_width_mm": 3.0,

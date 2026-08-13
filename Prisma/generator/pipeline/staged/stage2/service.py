@@ -7,7 +7,7 @@ import time
 
 import numpy as np
 
-from config.solve_settings import NEUTRAL_FIELD_PROTECTION_CUTOFFS
+from config.solve_settings import resolve_neutral_field_cutoff
 
 from ...staged_solver_helpers import (
     _precompute_cap_oklabs,
@@ -80,7 +80,6 @@ from .printability import (
     _apply_stage2_final_color_printability_gate,
 )
 from .refinement import (
-    _STAGE2_BOUNDARY_MUTATION_MIN_GAIN,
     _stage2_fine_override_seam_penalty_weight,
     _split_stage2_source_edge_subzones,
     _infer_implied_cap_heights,
@@ -169,10 +168,11 @@ def build_visible_plan(
     fine_override_enabled = bool(
         cfg.stage2_fine_override_enabled
     )
-    neutral_field_mode = str(cfg.neutral_field_protection_mode)
-    neutral_field_chroma_cutoff = NEUTRAL_FIELD_PROTECTION_CUTOFFS[
-        neutral_field_mode
-    ]
+    neutral_field_enabled = bool(cfg.neutral_field_protection_enabled)
+    neutral_field_chroma_cutoff = resolve_neutral_field_cutoff(
+        neutral_field_enabled,
+        max(0.0, min(1.0, float(cfg.neutral_field_protection_cutoff))),
+    )
     offset_y_px, offset_x_px = _stage1_lattice_offset_px(cfg)
     if zone_plan.coarse_to_fine_scale <= 1:
         offset_y_px = 0
@@ -298,6 +298,7 @@ def build_visible_plan(
             state.luts or (),
             cfg,
             palette,
+            layer_budget=state.resolved_layer_budget,
             white_fill_profile=(
                 state.profiles.wc_profile if swap_grouping.get("groups") else None
             ),
@@ -652,13 +653,8 @@ def build_visible_plan(
         )
         _set_counter(
             performance_profile,
-            "stage2_neutral_field_protection_mode",
-            neutral_field_mode,
-        )
-        _set_counter(
-            performance_profile,
             "stage2_neutral_field_protection_enabled",
-            neutral_field_chroma_cutoff is not None,
+            neutral_field_enabled,
         )
         _set_counter(
             performance_profile,
@@ -918,7 +914,10 @@ def build_visible_plan(
     boundary_mutation_candidate_pixels = 0
     boundary_mutation_accepted_pixels = 0
     boundary_mutation_accepted_components = 0
-    boundary_mutation_min_component_pixels = 0
+    # Generator-facing policy: every accepted boundary patch must have one
+    # pixel of donor contact. Lower-level refinement callers may still pass a
+    # different value directly.
+    boundary_mutation_min_component_pixels = 1
     boundary_mutation_rejected_small_pixels = 0
     boundary_mutation_rejected_small_components = 0
     boundary_mutation_rejected_weak_pixels = 0
@@ -1035,9 +1034,7 @@ def build_visible_plan(
     )
     if boundary_mutation_enabled:
         boundary_mutation_start = time.perf_counter()
-        min_gain = cfg.stage2_boundary_mutation_min_gain
-        if min_gain is None:
-            min_gain = _STAGE2_BOUNDARY_MUTATION_MIN_GAIN
+        min_gain = float(cfg.stage2_boundary_mutation_min_gain)
         min_component_mm = cfg.stage2_boundary_mutation_min_component_mm
         if min_component_mm is not None and float(min_component_mm) > 0.0:
             pitch_mm = max(float(cfg.solver_fine_pitch_mm), 1e-9)
