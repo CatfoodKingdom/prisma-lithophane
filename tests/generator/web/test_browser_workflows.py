@@ -721,6 +721,43 @@ def test_settings_persist_through_the_real_session_api(page: Page):
     assert persisted_pitch == 0.4
 
 
+def test_luminance_mode_toggle_syncs_without_submitting_derived_state(page: Page):
+    _close_recovery_modal(page)
+    page.locator("#settingsDrawerBtn").click()
+    page.locator("#settingsDrawer").wait_for(state="visible")
+
+    luminance = page.locator('#cfgLuminanceMode [data-value="luminance_detail"]')
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/session/config")
+        and response.request.method == "POST"
+        and response.request.post_data_json.get("luminance_mode") == "luminance_detail"
+    ) as response_info:
+        luminance.click()
+
+    response = response_info.value
+    assert response.status == 200
+    request_payload = response.request.post_data_json
+    assert "luminance_detail_authoring_printability" not in request_payload
+    persisted = page.evaluate(
+        "async () => (await (await fetch('/api/session')).json()).config"
+    )
+    assert persisted["luminance_mode"] == "luminance_detail"
+    assert persisted["luminance_detail_authoring_printability"] == "absolute_finalgate"
+
+    standard = page.locator('#cfgLuminanceMode [data-value="standard"]')
+    with page.expect_response(
+        lambda response: response.url.endswith("/api/session/config")
+        and response.request.method == "POST"
+        and response.request.post_data_json.get("luminance_mode") == "standard"
+    ) as response_info:
+        standard.click()
+    assert response_info.value.status == 200
+    persisted = page.evaluate(
+        "async () => (await (await fetch('/api/session')).json()).config"
+    )
+    assert persisted["luminance_detail_authoring_printability"] == "off"
+
+
 def test_settings_layout_preserves_live_control_state_and_management_surfaces(page: Page):
     page.locator("#settingsDrawerBtn").click()
     drawer = page.locator("#settingsDrawer")

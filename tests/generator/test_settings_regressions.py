@@ -937,6 +937,33 @@ def test_set_config_luminance_mode_updates_session_preset(monkeypatch):
     assert cfg["luminance_detail_authoring_printability"] == "off"
 
 
+def test_set_config_ignores_client_copy_of_luminance_derived_state():
+    import server
+
+    server.session["config"] = deepcopy(server._DEFAULT_CONFIG)
+    response = server.set_config(
+        server.ConfigPayload(
+            luminance_mode="luminance_detail",
+            luminance_detail_authoring_printability="absolute_finalgate",
+        )
+    )
+    cfg = response["config"]
+
+    assert cfg["luminance_mode"] == "luminance_detail"
+    assert cfg["luminance_detail_authoring_printability"] == "absolute_finalgate"
+
+    response = server.set_config(
+        server.ConfigPayload(
+            luminance_mode="standard",
+            luminance_detail_authoring_printability="absolute_finalgate",
+        )
+    )
+    cfg = response["config"]
+
+    assert cfg["luminance_mode"] == "standard"
+    assert cfg["luminance_detail_authoring_printability"] == "off"
+
+
 def test_start_solve_passes_modules_path(tmp_path, monkeypatch):
     import server
 
@@ -1699,6 +1726,22 @@ def test_settings_profile_normalization_quiet_drops_run_logging():
     normalized = server._normalize_settings_profile_settings({"run_logging": True, "layer_height": 0.08})
     assert "run_logging" not in normalized
     assert normalized["layer_height"] == 0.08
+
+
+def test_settings_profile_normalization_derives_printability_from_luminance_mode():
+    import server
+
+    normalized = server._normalize_settings_profile_settings(
+        {
+            "luminance_mode": "luminance_detail",
+            "luminance_detail_authoring_printability": "absolute_finalgate",
+        }
+    )
+
+    assert normalized["luminance_mode"] == "luminance_detail"
+    assert normalized["luminance_detail_authoring_printability"] == "off"
+    applied = server._apply_luminance_mode_preset(normalized)
+    assert applied["luminance_detail_authoring_printability"] == "absolute_finalgate"
 
 
 def test_settings_profile_normalization_quiet_drops_retired_boundary_mutation_switches():
