@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-08-13T19:22:21.792715+00:00",
+  "created_at": "2026-08-17T10:23:39.690972+00:00",
   "documentation_repository": "https://github.com/CatfoodKingdom/prisma-docs",
   "excluded_assets": [
     "Prisma/data/",
@@ -1040,9 +1040,9 @@
       "sha256": "0f3315c3a59de032a6d504d2e903fb8571be3b580e244e45661908005e3dc0fe"
     },
     {
-      "byte_size": 99028,
+      "byte_size": 99250,
       "path": "Prisma/generator/app/features/settings/profiles.js",
-      "sha256": "a21706e93bcda823fb2234580d0c23facb05b21cf23a5de6d92ffa74f3ea4dc0"
+      "sha256": "74a7dae9da13f768d279772d1ccea08a535c977e975fdbd3436d5d908d1eeb95"
     },
     {
       "byte_size": 66562,
@@ -1735,9 +1735,9 @@
       "sha256": "207a10ad692b6c9babf995424f818aa0d1eef6451300ca87ce76ea252aba5a48"
     },
     {
-      "byte_size": 461153,
+      "byte_size": 461524,
       "path": "Prisma/generator/server.py",
-      "sha256": "6f825f66b1d802f94f04877514f3efd6f3db4d502491c250f33b2755ba121235"
+      "sha256": "0bc9c8e21d7515abbf82397819c83b6ff2336ae62a9dea731af39affaf4a9c54"
     },
     {
       "byte_size": 10715,
@@ -2655,9 +2655,9 @@
       "sha256": "812f371874018d963df6acb115c9fc6214501cc9257682b9feb874d777a48265"
     },
     {
-      "byte_size": 135332,
+      "byte_size": 136477,
       "path": "tests/generator/test_feature_controller_contracts.js",
-      "sha256": "535e24b2f2187ba29cad7b41cb19342d7fa07a89d6858fa9523cb7ec8a91be44"
+      "sha256": "3704fb4181a0f11a40c05905e16b3dbdf88bf57ea27cac78eae205d352dbeacd"
     },
     {
       "byte_size": 6807,
@@ -3055,9 +3055,9 @@
       "sha256": "a01b8dcb7aab1a2a0a24d79fc2a2ad253dd8b4897faa2cf74d0a5c2cebab4365"
     },
     {
-      "byte_size": 83579,
+      "byte_size": 85088,
       "path": "tests/generator/test_settings_regressions.py",
-      "sha256": "3021c5a22a4686be7c36520f75bda7ba856fab47fae3c285b2ca8b86c8f8422b"
+      "sha256": "81654da6f2200603f0333ca24bcc52afd032d15d149e732738f119fb727f4d53"
     },
     {
       "byte_size": 9214,
@@ -3200,9 +3200,9 @@
       "sha256": "3f5d9dd8bff88e0790573686637e9b629ed259ab3e1413575bb0a37fa46f1d54"
     },
     {
-      "byte_size": 72025,
+      "byte_size": 73695,
       "path": "tests/generator/web/test_browser_workflows.py",
-      "sha256": "1dea0784773f4e094d123658bd834e01d37a6214ba57693c9545f005e2dfa24b"
+      "sha256": "1059857f8c00d94d8f64f81ba29098d79b626f7d91a5e6b4f8ddd20f25477b36"
     },
     {
       "byte_size": 6974,
@@ -3336,7 +3336,7 @@
     }
   ],
   "format": "prisma-github-source",
-  "release_version": "0.1.0-beta.14",
+  "release_version": "0.1.0-beta.15",
   "schema_version": 1,
   "selection": "explicit allowlist"
 }

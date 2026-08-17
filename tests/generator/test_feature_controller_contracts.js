@@ -877,6 +877,38 @@ test("luminance mode expands to authoritative backend flags", async () => {
   assert.equal(app.state.settings.config.luminance_detail_authoring_printability, "off");
 });
 
+test("luminance mode sync omits the backend-derived printability flag", async () => {
+  const payloads = [];
+  const { app } = await harness({ api: {
+    updateConfig: async (payload) => {
+      payloads.push(payload);
+      return {
+        config: {
+          ...payload,
+          luminance_detail_authoring_printability: "absolute_finalgate",
+        },
+      };
+    },
+  } });
+  app.state.session.apiConnected = true;
+  app.state.session.printerConfig = { ams_slots: 4, white_slots: 1 };
+  app.commands.syncConfigFromModuleState = () => {};
+  app.commands.readConfigFromUI = () => {};
+  app.commands.getActivePalette = () => ["red"];
+  app.commands.getBaseFilament = () => "white";
+
+  app.commands.applyLuminanceMode("luminance_detail");
+  await app.commands.syncConfigToServer({ throwOnError: true });
+
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].luminance_mode, "luminance_detail");
+  assert.equal("luminance_detail_authoring_printability" in payloads[0], false);
+  assert.equal(
+    app.state.settings.config.luminance_detail_authoring_printability,
+    "absolute_finalgate",
+  );
+});
+
 test("solve preflight math reports layer alignment constraints", async () => {
   const { app } = await harness();
   const aligned = app.commands.calculateStackLayerAlignment(0.08, 0.2, 0.08, 2.28);

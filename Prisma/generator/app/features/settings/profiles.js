@@ -2062,6 +2062,9 @@ export function installFeaturesSettingsProfiles(app) {
     delete payload.resolved_print_setup;
     delete payload.extrusion_width_mm;
     delete payload.nozzle_diameter;
+    // The backend derives this internal flag from luminance_mode. Sending the
+    // locally expanded value makes a valid mode toggle fail static validation.
+    delete payload.luminance_detail_authoring_printability;
     const evaluationTicket = app.commands.beginSettingsEvaluationRequest();
     const runSync = async () => {
       const response = await app.api.updateConfig(payload);

@@ -4073,6 +4073,9 @@ def _set_config_unlocked(payload: ConfigPayload) -> dict:
     """
     old = session["config"]
     incoming = _payload_model_fields(payload)
+    # This is derived from luminance_mode below, not writable client state.
+    # Quietly ignore it so full-config writes from older executables remain valid.
+    incoming.pop("luminance_detail_authoring_printability", None)
     try:
         validate_static_settings_patch(incoming)
     except StaticSettingsError as exc:
@@ -5708,6 +5711,8 @@ def _normalize_settings_profile_settings(settings: Optional[dict]) -> Dict[str, 
     incoming = dict(settings or {})
     incoming.pop("image_source_ref", None)
     incoming.pop("run_logging", None)  # retired feature: quiet-drop stale profile/UI residue
+    # Profiles own the mode; the active config derives this internal flag.
+    incoming.pop("luminance_detail_authoring_printability", None)
     for key in sorted(_QUIET_DROPPED_CONFIG_EXTRAS):
         if key in incoming:
             logger.info("Dropping retired config key from settings profile: %s", key)
